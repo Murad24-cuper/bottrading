@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime,timezone,timedelta
 from .models import TradeResult
 from .logger import get_logger
+from .time_utils import mt5_epoch_to_utc
 
 log=get_logger(__name__)
 
@@ -100,7 +101,7 @@ class Executor:
     def enforce_time_stop(self,settings=None):
         limit=(settings or self.settings).risk.max_hold_minutes; now=datetime.now(timezone.utc); closed=[]
         for p in (self.mt5.positions_get() or []):
-            if int(p.magic)==self.settings.magic_number and now-datetime.fromtimestamp(p.time,timezone.utc)>timedelta(minutes=limit): closed.append(self.close_position(p.ticket,'time'))
+            if int(p.magic)==self.settings.magic_number and now-mt5_epoch_to_utc(p.time,self.mt5)>timedelta(minutes=limit): closed.append(self.close_position(p.ticket,'time'))
         return closed
     def enforce_weekend_close(self,settings=None,now_utc=None):
         risk=(settings or self.settings).risk; now=now_utc or datetime.now(timezone.utc)
@@ -136,7 +137,7 @@ class Executor:
             ticket=int(position.ticket)
             identifier=int(getattr(position,'identifier',ticket))
             if ticket in db_open or identifier in db_open or self.db.get_trade(ticket) or self.db.get_trade(identifier): continue
-            opened=datetime.fromtimestamp(position.time,timezone.utc).isoformat()
+            opened=mt5_epoch_to_utc(position.time,self.mt5).isoformat()
             direction='buy' if position.type==self.mt5.POSITION_TYPE_BUY else 'sell'
             self.db.insert_trade(ticket=ticket,symbol=position.symbol,asset_group=self._asset_group(position.symbol),direction=direction,volume=position.volume,open_time=opened,open_price=position.price_open,sl=position.sl,tp=position.tp,profit=position.profit,commission=0,swap=position.swap,magic=self.settings.magic_number,status='open',strategy='',reason='recovered from broker')
             self._event(f'Recovered missing DB row for owned ticket={ticket}','WARNING')
@@ -161,7 +162,7 @@ class Executor:
             closing=[d for d in deals if getattr(d,'entry',None) in (getattr(self.mt5,'DEAL_ENTRY_OUT',1),getattr(self.mt5,'DEAL_ENTRY_OUT_BY',3),getattr(self.mt5,'DEAL_ENTRY_INOUT',2))]
             source=closing or deals
             if source:
-                last=source[-1]; close_price=float(last.price); close_time=datetime.fromtimestamp(last.time,timezone.utc).isoformat()
+                last=source[-1]; close_price=float(last.price); close_time=mt5_epoch_to_utc(last.time,self.mt5).isoformat()
                 profit=sum(float(getattr(d,'profit',0) or 0) for d in source)
                 commission=sum(float(getattr(d,'commission',0) or 0) for d in deals)
                 swap=sum(float(getattr(d,'swap',0) or 0) for d in deals)

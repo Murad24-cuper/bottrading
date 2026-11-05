@@ -12,7 +12,7 @@ from src.history import history_path
 
 def _settings(): return load_settings(require_credentials=False)
 
-def _read_history(settings,mode,strategy_names):
+def _read_history(settings,mode,strategy_names,requested_timeframes=None):
     base=Path(settings.config['history']['data_dir']); base=base if base.is_absolute() else settings.root/base
     specfile=base/'symbol_specs.json'; specs=json.loads(specfile.read_text(encoding='utf-8')) if specfile.exists() else {}
     if mode=='liquid':
@@ -29,6 +29,7 @@ def _read_history(settings,mode,strategy_names):
             symbols=[p.stem[:-3] for p in frames]
     symbols=list(dict.fromkeys(symbols)); history={}
     timeframes=set(tf for name,entry in settings.config['strategies'].items() if name in strategy_names and entry.get('enabled') for tf in entry.get('timeframes',[]))
+    if requested_timeframes is not None: timeframes &= set(requested_timeframes)
     for symbol in symbols:
         history[symbol]={}
         for tf in sorted(timeframes):
@@ -46,13 +47,38 @@ def _slice_history(history,start,end):
     return {s:f for s,f in result.items() if f}
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__); parser.add_argument('--strategies',default='all'); parser.add_argument('--symbols',choices=['liquid','universe'],default='liquid'); parser.add_argument('--equity',type=float,default=None); parser.add_argument('--walk-forward',action='store_true'); args=parser.parse_args()
+    parser=argparse.ArgumentParser(description=__doc__); parser.add_argument('--strategies',default='all'); parser.add_argument('--symbols',choices=['liquid','universe'],default='liquid'); parser.add_argument('--only-symbols',help='comma-separated logical or broker symbol names'); parser.add_argument('--timeframes',help='comma-separated history timeframes to load'); parser.add_argument('--lookback-months',type=int,help='limit each selected series to its latest N months'); parser.add_argument('--equity',type=float,default=None); parser.add_argument('--walk-forward',action='store_true'); args=parser.parse_args()
     settings=_settings(); enabled=load_strategies(settings); names=[s.name for s in enabled]
     if args.strategies!='all':
         if args.strategies not in REGISTRY: raise SystemExit(f'Unknown strategy {args.strategies!r}; choose all or one of {", ".join(REGISTRY)}')
         names=[args.strategies] if args.strategies in names else []
     if not names: raise SystemExit('No selected enabled strategies in config.yaml')
-    history,specs=_read_history(settings,args.symbols,names)
+    requested_timeframes=None
+    if args.timeframes:
+        requested_timeframes=[tf.strip().upper() for tf in args.timeframes.split(',') if tf.strip()]
+        invalid=set(requested_timeframes)-{'M1','M5','M15','H1'}
+        if invalid: raise SystemExit(f'Unsupported timeframe(s): {", ".join(sorted(invalid))}')
+    history,specs=_read_history(settings,args.symbols,names,requested_timeframes)
+    if args.only_symbols:
+        available=list(specs); resolved=[]
+        for logical in (value.strip() for value in args.only_symbols.split(',')):
+            if not logical: continue
+            aliases=settings.config['universe']['symbol_aliases'].get(logical,[logical])
+            patterns=[logical,*aliases]
+            actual=next((name for name in available if name.lower()==logical.lower()),None)
+            if actual is None:
+                actual=next((name for pattern in patterns for name in available if pattern.lower() in name.lower()),None)
+            if actual: resolved.append(actual)
+            else: print(f'Skipping missing selected symbol: {logical}')
+        selected=list(dict.fromkeys(resolved)); history={symbol:frames for symbol,frames in history.items() if symbol in selected}
+        print(f'Selected symbols: {", ".join(selected)}')
+    if args.lookback_months is not None:
+        if args.lookback_months<=0: raise SystemExit('--lookback-months must be positive')
+        latest=max(frame.index.max() for frames in history.values() for frame in frames.values() if not frame.empty)
+        cutoff=latest-pd.DateOffset(months=args.lookback_months)
+        history={symbol:{tf:frame.loc[frame.index>=cutoff] for tf,frame in frames.items() if not frame.loc[frame.index>=cutoff].empty} for symbol,frames in history.items()}
+        history={symbol:frames for symbol,frames in history.items() if frames}
+        print(f'Limited history to {args.lookback_months} months from {cutoff.isoformat()}')
     if not history: raise SystemExit('No cached Parquet history found. Run scripts/download_history.py first on an MT5-connected Windows machine.')
     strategies=[strategy for strategy in enabled if strategy.name in names]
     equity=args.equity if args.equity is not None else settings.config['backtest']['start_equity']

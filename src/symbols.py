@@ -1,4 +1,5 @@
 from datetime import datetime,timezone
+from .time_utils import mt5_epoch_to_utc
 class SymbolService:
  def __init__(self,mt5,settings): self.mt5=mt5; self.settings=settings; self.cache=[]; self.loaded=0
  def list_all_symbols(self,refresh_minutes=5):
@@ -24,22 +25,36 @@ class SymbolService:
  def resolve_alias(self,logical_name):
   pats=self.settings.config['universe']['symbol_aliases'].get(logical_name,[logical_name]); names=[s.name for s in self.list_all_symbols()]
   for pat in pats:
-   for n in names:
-    if pat.lower() in n.lower(): return n
+   matches=[n for n in names if pat.lower() in n.lower()]
+   if matches:
+    # Prefer an exact match to avoid resolving e.g. BTC to a similarly named CFD.
+    exact=next((n for n in matches if n.lower()==pat.lower()),None)
+    selected=exact or matches[0]
+    self.mt5.symbol_select(selected,True)
+    return selected
   return None
+ def select_liquid_symbols(self):
+  """Select configured liquid instruments in Market Watch before reading ticks."""
+  selected=[]
+  for alias in self.settings.config.get('history',{}).get('liquid_aliases',[]):
+   symbol=self.resolve_alias(alias)
+   if symbol and self.mt5.symbol_select(symbol,True): selected.append(symbol)
+  return list(dict.fromkeys(selected))
  def is_tradable(self,symbol):
   i=self.mt5.symbol_info(symbol)
   if not i or not self.mt5.symbol_select(symbol,True): return False,'symbol unavailable'
   if i.trade_mode!=getattr(self.mt5,'SYMBOL_TRADE_MODE_FULL',4): return False,'symbol is not enabled for full trading'
   t=self.mt5.symbol_info_tick(symbol)
   stamp=getattr(t,'time_msc',0)/1000 if t and getattr(t,'time_msc',0) else (getattr(t,'time',0) if t else 0)
-  age=datetime.now(timezone.utc).timestamp()-stamp
+  tick_utc=mt5_epoch_to_utc(stamp,self.mt5) if stamp else None
+  age=(datetime.now(timezone.utc)-tick_utc).total_seconds() if tick_utc else float('inf')
   if not t or age< -5 or age>60: return False,'stale tick / market closed'
-  lim=self.settings.risk.get('max_spread_points',{}).get(symbol)
+  lim=self.settings.risk.max_spread_points.get(symbol)
   spread=(t.ask-t.bid)/i.point
   if lim is not None and spread>lim: return False,'spread exceeds limit'
   return True,'tradable'
  def get_universe(self):
+  self.select_liquid_symbols()
   u=self.settings.config['universe']; out=[]
   for s in self.list_all_symbols():
    if s.name in u['exclude_symbols'] or self.get_asset_group(s.name) not in u['include_groups']: continue

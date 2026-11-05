@@ -2,11 +2,12 @@
 from __future__ import annotations
 from datetime import datetime,timezone,timedelta
 from .models import AccountState
+from .time_utils import server_utc_offset
 
 def get_account_state(mt5) -> AccountState:
     a=mt5.account_info()
     if a is None: raise RuntimeError(f'account_info failed: {mt5.last_error()}')
-    return AccountState(a.balance,a.equity,a.margin,a.margin_free,a.margin_level,a.currency,a.margin_leverage,a.trade_mode,a.margin_mode)
+    return AccountState(a.balance,a.equity,a.margin,a.margin_free,a.margin_level,a.currency,a.leverage,a.trade_mode,a.margin_mode)
 
 def get_candles(mt5,symbol,timeframe,count):
     import pandas as pd
@@ -17,7 +18,7 @@ def get_candles(mt5,symbol,timeframe,count):
     if arr is None: raise RuntimeError(f'copy_rates_from_pos failed: {mt5.last_error()}')
     df=pd.DataFrame(arr)
     if df.empty: return pd.DataFrame(columns=['open','high','low','close','tick_volume','spread'],index=pd.DatetimeIndex([],tz='UTC',name='time'))
-    df['time']=pd.to_datetime(df['time'],unit='s',utc=True)
+    df['time']=pd.to_datetime(df['time'],unit='s',utc=True)-server_utc_offset(mt5)
     return df.set_index('time')[['open','high','low','close','tick_volume','spread']]
 
 def get_closed_candles(mt5,symbol,timeframe,count):
@@ -27,10 +28,13 @@ def get_closed_candles(mt5,symbol,timeframe,count):
     tf=getattr(mt5,'TIMEFRAME_'+timeframe,None)
     if tf is None: raise ValueError(f'Unsupported timeframe: {timeframe}')
     rows=mt5.copy_rates_from_pos(symbol,tf,1,count)
-    if rows is None: raise RuntimeError(f'copy_rates_from_pos closed bars failed: {mt5.last_error()}')
+    if rows is None:
+        first_error=mt5.last_error()
+        rows=mt5.copy_rates_from_pos(symbol,tf,1,count)
+        if rows is None: raise RuntimeError(f'copy_rates_from_pos closed bars failed for {symbol} {timeframe}: first={first_error}; retry={mt5.last_error()}')
     df=pd.DataFrame(rows)
     if df.empty: return pd.DataFrame(columns=['open','high','low','close','tick_volume','spread'],index=pd.DatetimeIndex([],tz='UTC',name='time'))
-    df['time']=pd.to_datetime(df.time,unit='s',utc=True)
+    df['time']=pd.to_datetime(df.time,unit='s',utc=True)-server_utc_offset(mt5)
     return df.set_index('time')[['open','high','low','close','tick_volume','spread']]
 
 def get_candles_multi(mt5,symbol,timeframes,count): return {tf:get_candles(mt5,symbol,tf,count) for tf in timeframes}
@@ -39,6 +43,15 @@ def get_tick(mt5,symbol):
     if not mt5.symbol_select(symbol,True): raise RuntimeError(f'symbol_select {symbol} failed: {mt5.last_error()}')
     tick=mt5.symbol_info_tick(symbol)
     if tick is None: raise RuntimeError(f'symbol_info_tick failed: {mt5.last_error()}')
+    offset=server_utc_offset(mt5)
+    if offset and hasattr(tick,'_replace'):
+        changes={}
+        stamp=float(getattr(tick,'time_msc',0) or 0)/1000 if getattr(tick,'time_msc',0) else float(getattr(tick,'time',0) or 0)
+        if stamp:
+            utc_stamp=stamp-offset.total_seconds()
+            if hasattr(tick,'time'): changes['time']=int(utc_stamp)
+            if hasattr(tick,'time_msc'): changes['time_msc']=int(utc_stamp*1000)
+        if changes: tick=tick._replace(**changes)
     return tick
 
 def get_spread_points(mt5,symbol):

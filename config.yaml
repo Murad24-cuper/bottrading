@@ -62,7 +62,7 @@ strategies:
     enabled: true
     groups: [forex, metals, indices, energy, crypto]
     timeframes: [M1, M5]
-    params: {atr_period: 14, volatility_ratio: 1.25, target_atr: 0.4, stop_atr: 0.65, max_spread_target_ratio: 0.2}
+    params: {atr_period: 14, volatility_ratio: 1.25, target_atr: 0.4, stop_atr: 0.65, max_spread_target_ratio: 0.2, lookback_bars: 100}
 loop:
   interval_seconds: 5
 scanner:
@@ -72,8 +72,8 @@ scanner:
   min_score: 0.0
   timeframe_point_sizes: {}     # Optional symbol point sizes for candle spread pricing
 live:
-  mode: shadow                  # shadow = record decisions only; trade = submit orders
-  strategies: []                # Only listed strategies may submit live orders
+  mode: trade                   # shadow = record decisions only; trade = submit orders
+  strategies: [trend_pullback, mean_reversion, breakout, volatility_scalp]
   max_cycle_errors: 5           # Disable new entries after this many consecutive errors
   equity_snapshot_seconds: 30
   heartbeat_seconds: 10
@@ -89,6 +89,7 @@ backtest:
   in_sample_pct: 0.7
   walk_forward_optimize_months: 6
   walk_forward_test_months: 2
+  signal_lookback_bars: 120
   parameter_grid:
     trend_pullback: {adx_min: [18, 22], reward_risk: [1.5, 2.0]}
     mean_reversion: {rsi_low: [25, 30], rsi_high: [70, 75]}

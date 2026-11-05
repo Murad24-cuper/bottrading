@@ -6,20 +6,37 @@ import re
 import json
 import pandas as pd
 from .symbols import SymbolService
+from .time_utils import server_utc_offset
 
 TF_MINUTES={'M1':1,'M5':5,'M15':15,'H1':60}
 
 def _safe_name(symbol): return re.sub(r'[^A-Za-z0-9_.-]','_',symbol)
 def history_path(directory,symbol,timeframe): return Path(directory)/f'{_safe_name(symbol)}_{timeframe}.parquet'
 
-def _rates(mt5,symbol,timeframe,start,end):
+def _rates(mt5,symbol,timeframe,start,end,chunk_days=7):
+    """Read a range, falling back to bounded chunks when MT5 rejects a long request."""
     tf=getattr(mt5,'TIMEFRAME_'+timeframe)
-    rows=mt5.copy_rates_range(symbol,tf,start,end)
-    if rows is None: raise RuntimeError(f'copy_rates_range failed for {symbol} {timeframe}: {mt5.last_error()}')
-    frame=pd.DataFrame(rows)
-    if frame.empty: return pd.DataFrame(columns=['open','high','low','close','tick_volume','spread'],index=pd.DatetimeIndex([],tz='UTC',name='time'))
-    frame['time']=pd.to_datetime(frame['time'],unit='s',utc=True)
-    return frame.set_index('time')[['open','high','low','close','tick_volume','spread']].sort_index()
+    def fetch(a,b):
+        rows=mt5.copy_rates_range(symbol,tf,a,b)
+        return None if rows is None else pd.DataFrame(rows)
+    rows=fetch(start,end)
+    if rows is None:
+        print(f'{symbol} {timeframe}: full-range request failed ({mt5.last_error()}); retrying in {chunk_days}-day chunks')
+        frames=[]; cursor=start; step=timedelta(days=chunk_days)
+        while cursor<end:
+            chunk_end=min(cursor+step,end)
+            try: part=fetch(cursor,chunk_end)
+            except Exception as exc:
+                print(f'{symbol} {timeframe}: chunk {cursor.isoformat()}..{chunk_end.isoformat()} failed: {exc}')
+                part=None
+            if part is None:
+                print(f'{symbol} {timeframe}: chunk {cursor.isoformat()}..{chunk_end.isoformat()} unavailable ({mt5.last_error()})')
+            elif not part.empty: frames.append(part)
+            cursor=chunk_end
+        rows=pd.concat(frames,ignore_index=True) if frames else pd.DataFrame()
+    if rows.empty: return pd.DataFrame(columns=['open','high','low','close','tick_volume','spread'],index=pd.DatetimeIndex([],tz='UTC',name='time'))
+    rows['time']=pd.to_datetime(rows['time'],unit='s',utc=True)-server_utc_offset(mt5)
+    return rows.set_index('time')[['open','high','low','close','tick_volume','spread']].sort_index()
 
 def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings=None):
     """Fetch only ranges outside cached files and return a symbol/timeframe map."""
@@ -78,7 +95,9 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
             combined=combined[[stamp+timedelta(minutes=TF_MINUTES[tf])<=completed_before for stamp in combined.index]]
             combined.to_parquet(path)
             result[symbol][tf]=combined.loc[(combined.index>=start)&(combined.index<=end)]
-            print(f'{symbol} {tf}: received {len(result[symbol][tf])} bars ({start.isoformat()} to {end.isoformat()})')
+            actual=result[symbol][tf]
+            if actual.empty: print(f'{symbol} {tf}: received 0 bars; no actual range available in {start.isoformat()}..{end.isoformat()}')
+            else: print(f'{symbol} {tf}: received {len(actual)} bars; actual range {actual.index.min().isoformat()}..{actual.index.max().isoformat()}')
     if metadata:
         specs_path.parent.mkdir(parents=True,exist_ok=True)
         specs_path.write_text(json.dumps(metadata,indent=2,default=str),encoding='utf-8')

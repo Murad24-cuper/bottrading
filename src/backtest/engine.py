@@ -9,6 +9,7 @@ from ..risk import calc_volume,check_trade_allowed
 from ..market_data import price_distance_to_money
 from ..scanner import expected_value_score
 from ..strategies import load_strategies
+from .. import indicators as ind
 
 TF_DELTA={'M1':timedelta(minutes=1),'M5':timedelta(minutes=5),'M15':timedelta(minutes=15),'H1':timedelta(hours=1)}
 
@@ -30,11 +31,24 @@ class Backtester:
         return value
     def run(self,history:dict[str,dict[str,pd.DataFrame]]) -> BacktestResult:
         data={sym:{tf:frame.sort_index() for tf,frame in frames.items() if tf in TF_DELTA and frame is not None and not frame.empty} for sym,frames in history.items()}
+        scalpers=[strategy for strategy in self.strategies if strategy.name=='volatility_scalp']
+        if scalpers:
+            scalp=scalpers[0]; period=int(scalp.params.get('atr_period',14))
+            for symbol,frames in data.items():
+                tf='M1' if 'M1' in frames else 'M5' if 'M5' in frames else None
+                if tf is None: continue
+                frame=frames[tf].copy(); points=float(self.specs.get(symbol,{}).get('point_size',self.specs.get(symbol,{}).get('point',1e-5)) or 1e-5)
+                spread=frame['spread'] if 'spread' in frame else self.settings.config['backtest']['fallback_spread_points']
+                frame['__scalp_atr']=ind.atr(frame,period)
+                frame['__scalp_baseline']=frame['__scalp_atr'].shift(1).rolling(29,min_periods=29).mean()
+                frame['__scalp_spread_price']=spread*points
+                frames[tf]=frame
         base_tf={}; timeline=set()
         for symbol,frames in data.items():
             choices=[tf for tf in ('M1','M5','M15','H1') if tf in frames]
             if choices: base_tf[symbol]=choices[0]; timeline.update(frames[choices[0]].index.to_pydatetime())
         timeline=sorted(timeline)
+        signal_lookback=int(self.settings.config['backtest'].get('signal_lookback_bars',300))
         balance=self.start_equity; positions={}; pending={}; trades=[]; curve=[]; last_prices={}; last_signal_bar={}; daily_pnl={}; weekly_pnl={}; commission=float(self.settings.config['backtest']['commission_per_lot_per_side']); slippage=float(self.settings.config['backtest']['slippage_points'])
         account_currency='USD'
         def floating_total(): return sum(float(p.get('profit',0)) for p in positions.values())
@@ -108,21 +122,28 @@ class Backtester:
                 for strategy in self.strategies:
                     group=self.specs.get(symbol,{}).get('asset_group','other')
                     if group not in getattr(strategy,'allowed_groups',[group]): continue
-                    trigger=min(strategy.required_timeframes,key=lambda value:TF_DELTA[value]) if strategy.required_timeframes else tf
+                    available=[value for value in strategy.required_timeframes if value in data[symbol]]
+                    trigger=min(available,key=lambda value:TF_DELTA[value]) if available else (tf if not strategy.required_timeframes else None)
+                    if trigger is None: continue
                     if trigger not in data[symbol]: continue
-                    trigger_frame=data[symbol][trigger]; completed=trigger_frame.loc[[idx+TF_DELTA[trigger]<=bar_end for idx in trigger_frame.index]]
-                    if completed.empty: continue
-                    trigger_stamp=completed.index[-1]
+                    trigger_frame=data[symbol][trigger]; trigger_index=trigger_frame.index
+                    complete_count=trigger_index.searchsorted(bar_end-TF_DELTA[trigger],side='right')
+                    if complete_count<=0: continue
+                    trigger_stamp=trigger_index[complete_count-1]
                     key=(symbol,strategy.name)
                     if last_signal_bar.get(key)==trigger_stamp: continue
                     last_signal_bar[key]=trigger_stamp
                     if trigger!=tf and bar_end!=trigger_stamp+TF_DELTA[trigger]: continue
-                    supplied={name:frame.loc[[idx+TF_DELTA[name]<=bar_end for idx in frame.index]] for name,frame in data[symbol].items()}
-                    supplied={name:frame for name,frame in supplied.items() if not frame.empty}
+                    supplied={}
+                    for name,frame in data[symbol].items():
+                        complete_count=frame.index.searchsorted(bar_end-TF_DELTA[name],side='right')
+                        if complete_count>0:
+                            supplied[name]=frame.iloc[max(0,complete_count-signal_lookback):complete_count]
                     sig=strategy.generate_signal(symbol,supplied)
                     if sig is None or symbol in positions: continue
-                    next_idx=next((idx for idx in data[symbol][tf].index if idx>open_time),None)
-                    if next_idx is None: continue
+                    indices=data[symbol][tf].index; next_pos=indices.searchsorted(open_time,side='right')
+                    if next_pos>=len(indices): continue
+                    next_idx=indices[next_pos]
                     spec0=self.specs.get(symbol,{})
                     pending.setdefault((symbol,next_idx),[]).append({'signal':sig,'group':spec0.get('asset_group','other'),'strategy':strategy.name})
             # Refresh floating profit and append one portfolio equity point for every event time.

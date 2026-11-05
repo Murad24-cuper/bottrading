@@ -26,3 +26,21 @@ def test_history_download_and_incremental_cache(tmp_path):
     assert path.exists() and (tmp_path/'data/history/symbol_specs.json').exists()
     download_history(mt5,['EURUSD'],['M1'],start,end,settings)
     assert len(mt5.calls)==1
+
+def test_long_history_range_retries_in_chunks_and_keeps_available_bars(tmp_path):
+    class ChunkOnlyMT5(FakeMT5):
+        def copy_rates_range(self,symbol,tf,start,end):
+            self.calls.append((start,end))
+            if (end-start).days>7:
+                return None
+            stamp=int(start.timestamp())
+            return np.array([(stamp,1.,2.,.5,1.5,100,1)],dtype=[('time','i8'),('open','f8'),('high','f8'),('low','f8'),('close','f8'),('tick_volume','i8'),('spread','i8')])
+        def last_error(self): return (-2,'Invalid params')
+
+    mt5=ChunkOnlyMT5(); settings=SimpleNamespace(root=tmp_path,config={'history':{'data_dir':'data/history','ranges_months':{'M1':3}}})
+    start=datetime(2025,1,1,tzinfo=timezone.utc); end=datetime(2025,1,16,tzinfo=timezone.utc)
+    result=download_history(mt5,['EURUSD'],['M1'],start,end,settings)
+
+    assert len(mt5.calls)==4
+    assert len(result['EURUSD']['M1'])==3
+    assert result['EURUSD']['M1'].index.is_monotonic_increasing

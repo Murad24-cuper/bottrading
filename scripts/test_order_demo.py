@@ -31,7 +31,7 @@ def main():
         volume,size_reason=calc_volume(account_info.equity,settings.risk.risk_per_trade_pct,entry,sl,info._asdict())
         risk_money=price_distance_to_money(mt5,symbol,entry-sl,volume) if volume>0 else 0.0
         allowed_money=account_info.equity*settings.risk.risk_per_trade_pct/100
-        print(f'{"WOULD BUY" if not args.confirm else "DEMO TEST BUY"} {symbol}; volume={volume}; entry≈{entry}; SL={sl}; TP={tp}')
+        print(f'{"WOULD BUY" if not args.confirm else "DEMO TEST BUY"} {symbol}; volume={volume}; entry~={entry}; SL={sl}; TP={tp}')
         print(f'Risk at SL={risk_money:.2f} {account_info.currency} (budget={allowed_money:.2f}); sizing={size_reason}')
         if volume<=0: raise SystemExit(f'Trade refused: {size_reason}')
         cost=get_cost_estimate(mt5,symbol,volume)

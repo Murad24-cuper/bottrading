@@ -20,7 +20,7 @@ def main():
             terminal=mt5.terminal_info(); allowed=bool(terminal and terminal.trade_allowed)
             print(f'Algorithmic trading enabled: {allowed}')
             if not allowed: print('WARNING: Enable "Allow algorithmic trading" in the MT5 terminal before trading.')
-            service=SymbolService(mt5,settings); symbols=service.list_all_symbols()
+            service=SymbolService(mt5,settings); service.select_liquid_symbols(); symbols=service.list_all_symbols()
             grouped={}
             for item in symbols: grouped.setdefault(service.get_asset_group(item.name),[]).append(item.name)
             for group in ('forex','metals','indices','energy','crypto','stocks','other'):

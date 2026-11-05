@@ -9,7 +9,7 @@ from src.models import Signal,TradeResult
 class FakeMT5:
     ACCOUNT_TRADE_MODE_DEMO=0; ORDER_TYPE_BUY=0; ORDER_TYPE_SELL=1
     def __init__(self): self.balance=1000; self.positions=[]
-    def account_info(self): return SimpleNamespace(balance=self.balance,equity=self.balance,margin=0,margin_free=self.balance,margin_level=None,currency='USD',margin_leverage=100,trade_mode=0,margin_mode=2,login=123456)
+    def account_info(self): return SimpleNamespace(balance=self.balance,equity=self.balance,margin=0,margin_free=self.balance,margin_level=None,currency='USD',leverage=100,trade_mode=0,margin_mode=2,login=123456)
     def positions_get(self): return list(self.positions)
     def order_calc_margin(self,*args): return 0.0
     def last_error(self): return (0,'ok')

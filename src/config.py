@@ -94,6 +94,7 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     backtest=config['backtest']
     for key in ('start_equity','in_sample_pct','walk_forward_optimize_months','walk_forward_test_months'):
         if not isinstance(backtest.get(key),(int,float)) or backtest[key]<=0: raise ValueError(f'backtest.{key} must be > 0')
+    if type(backtest.get('signal_lookback_bars')) is not int or backtest['signal_lookback_bars']<100: raise ValueError('backtest.signal_lookback_bars must be an integer >= 100')
     if backtest['in_sample_pct']>=1: raise ValueError('backtest.in_sample_pct must be < 1')
     for key in ('commission_per_lot_per_side','slippage_points','fallback_spread_points'):
         if not isinstance(backtest.get(key),(int,float)) or backtest[key]<0: raise ValueError(f'backtest.{key} must be >= 0')

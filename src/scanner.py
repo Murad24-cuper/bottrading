@@ -45,10 +45,18 @@ class MarketScanner:
         self._cache={}; self._cursor=0; self._strategies=load_strategies(settings); self.last_universe_size=0
     def _bars(self,symbol,timeframe,count):
         key=(symbol,timeframe); cached=self._cache.get(key)
-        latest=market_data.get_closed_candles(self.mt5,symbol,timeframe,1)
+        try:
+            latest=market_data.get_closed_candles(self.mt5,symbol,timeframe,1)
+        except RuntimeError as exc:
+            self.db.log_event('WARNING','scanner',f'Skipping {symbol} {timeframe}: closed-bar read failed: {exc}')
+            return None
         if latest.empty: return cached
         if cached is None or cached.empty or latest.index[-1]>cached.index[-1]:
-            cached=market_data.get_closed_candles(self.mt5,symbol,timeframe,count)
+            try:
+                cached=market_data.get_closed_candles(self.mt5,symbol,timeframe,count)
+            except RuntimeError as exc:
+                self.db.log_event('WARNING','scanner',f'Skipping {symbol} {timeframe}: history refresh failed: {exc}')
+                return None
             info=self.mt5.symbol_info(symbol); point=float(self.settings.config['scanner'].get('timeframe_point_sizes',{}).get(symbol) or (info.point if info and info.point else 0.0))
             cached=cached.copy(); cached['spread_points']=cached['spread']; cached['point_size']=point; cached['spread_price']=cached['spread']*point
             self._cache[key]=cached

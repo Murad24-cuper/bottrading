@@ -22,3 +22,16 @@ def test_strategy_returns_none_or_valid_closed_bar_signal(name):
 def test_registry_loads_only_enabled_and_group_eligible_strategies():
     config={'strategies':{'breakout':{'enabled':True,'groups':['forex'],'params':{}},'mean_reversion':{'enabled':True,'groups':['metals'],'params':{}},'trend_pullback':{'enabled':False}}}
     assert [s.name for s in load_strategies(config,'forex')]==['breakout']
+
+def test_volatility_scalp_uses_precomputed_backtest_features(monkeypatch):
+    from src.strategies.volatility_scalp import VolatilityScalpStrategy
+    import src.strategies.volatility_scalp as module
+    candles=make_candles(100)
+    candles['__scalp_atr']=0.02; candles.loc[candles.index[-1],'__scalp_atr']=0.2
+    candles['__scalp_baseline']=0.02; candles['__scalp_spread_price']=0.001
+    candles.loc[candles.index[-1],'close']=candles.close.iloc[-2]+0.05
+    monkeypatch.setattr(module.ind,'atr',lambda *_args,**_kwargs: (_ for _ in ()).throw(AssertionError('ATR should come from cached columns')))
+
+    result=VolatilityScalpStrategy({'lookback_bars':100}).generate_signal('EURUSD',{'M1':candles,'M5':candles})
+
+    assert isinstance(result,Signal) and result.direction=='buy'
