@@ -5,6 +5,7 @@ logs/*
 data/history/
 reports/
 STOP
+data/bot.lock
 .venv/
 __pycache__/
 .pytest_cache/

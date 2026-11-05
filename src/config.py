@@ -53,10 +53,10 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     try: config=yaml.safe_load(path.read_text(encoding='utf-8'))
     except (OSError,yaml.YAMLError) as exc: raise ValueError(f'Cannot load config.yaml: {exc}') from exc
     if not isinstance(config,dict): raise ValueError('config.yaml must contain a YAML mapping')
-    required={'account','risk','universe','timeframes','magic_number','executor','strategies','loop','scanner','history','backtest','db_path'}
+    required={'account','risk','universe','timeframes','magic_number','executor','strategies','loop','scanner','history','backtest','live','db_path'}
     missing=required-config.keys()
     if missing: raise ValueError(f'config.yaml is missing keys: {", ".join(sorted(missing))}')
-    for section in ('account','risk','universe','loop','scanner','history','backtest'):
+    for section in ('account','risk','universe','loop','scanner','history','backtest','live'):
         if not isinstance(config[section],dict): raise ValueError(f'{section} must be a mapping')
     if config['account'].get('mode') not in {'demo','real'}: raise ValueError('account.mode must be demo or real')
     raw=config['risk']
@@ -100,4 +100,9 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     if not isinstance(config['strategies'],dict): raise ValueError('strategies must be a mapping')
     for name,entry in config['strategies'].items():
         if not isinstance(entry,dict) or type(entry.get('enabled')) is not bool or not isinstance(entry.get('groups'),list) or not isinstance(entry.get('timeframes'),list) or not isinstance(entry.get('params'),dict): raise ValueError(f'strategies.{name} must define enabled, groups, timeframes and params')
+    live=config['live']
+    if live.get('mode') not in {'shadow','trade'}: raise ValueError('live.mode must be shadow or trade')
+    if not isinstance(live.get('strategies'),list) or any(not isinstance(name,str) for name in live['strategies']): raise ValueError('live.strategies must be a list of strategy names')
+    for key in ('max_cycle_errors','equity_snapshot_seconds','heartbeat_seconds'):
+        if type(live.get(key)) is not int or live[key]<=0: raise ValueError(f'live.{key} must be a positive integer')
     return Settings(config,int(login) if login else None,credentials['MT5_PASSWORD'],credentials['MT5_SERVER'],os.getenv('MT5_PATH') or None,os.getenv('ALLOW_REAL','false').lower()=='true',path.parent,risk)

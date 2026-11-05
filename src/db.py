@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS trades(
  strategy TEXT, reason TEXT, magic INTEGER, status TEXT, close_reason TEXT);
 CREATE TABLE IF NOT EXISTS signals(
  id INTEGER PRIMARY KEY, time TEXT, symbol TEXT, strategy TEXT, direction TEXT,
- timeframe TEXT, confidence REAL, entry REAL, sl REAL, tp REAL, expected_cost REAL,
+ timeframe TEXT, confidence REAL, entry REAL, sl REAL, tp REAL, expected_cost REAL, score REAL DEFAULT 0,
  taken INTEGER, skip_reason TEXT);
 CREATE TABLE IF NOT EXISTS daily_stats(
  date TEXT PRIMARY KEY, start_balance REAL, end_balance REAL, pnl REAL, trades_count INTEGER,
@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS daily_stats(
 CREATE TABLE IF NOT EXISTS equity_snapshots(
  time TEXT, balance REAL, equity REAL, margin REAL, free_margin REAL, open_positions INTEGER);
 CREATE TABLE IF NOT EXISTS bot_events(time TEXT, level TEXT, source TEXT, message TEXT);
+CREATE TABLE IF NOT EXISTS bot_status(
+ id INTEGER PRIMARY KEY CHECK(id=1), time TEXT, cycle INTEGER, mode TEXT, status TEXT,
+ account_type TEXT, equity REAL, last_error TEXT);
+CREATE TABLE IF NOT EXISTS commands(
+ id INTEGER PRIMARY KEY, time TEXT, command TEXT, status TEXT, message TEXT, processed_time TEXT);
 '''
 
 class Database:
@@ -34,6 +39,8 @@ class Database:
         with self.connect() as connection:
             connection.execute('PRAGMA journal_mode=WAL')
             connection.executescript(SCHEMA)
+            columns={row['name'] for row in connection.execute('PRAGMA table_info(signals)')}
+            if 'score' not in columns: connection.execute('ALTER TABLE signals ADD COLUMN score REAL DEFAULT 0')
     @staticmethod
     def _insert(connection,table,values):
         columns=list(values)
@@ -46,6 +53,12 @@ class Database:
         with self.connect() as connection:
             result=connection.execute(f"UPDATE trades SET {','.join(k+'=?' for k in columns)} WHERE ticket=?",[values[k] for k in columns]+[ticket])
             if not result.rowcount: raise KeyError(f'No trade row for ticket {ticket}')
+    def update_open_trade(self,ticket,**values):
+        if not values: return
+        columns=list(values)
+        with self.connect() as connection:
+            result=connection.execute(f"UPDATE trades SET {','.join(k+'=?' for k in columns)} WHERE ticket=? AND status='open'",[values[k] for k in columns]+[ticket])
+            return result.rowcount
     def get_open_trades(self):
         with self.connect() as connection: return [dict(row) for row in connection.execute("SELECT * FROM trades WHERE status='open' ORDER BY open_time")]
     def get_trade(self,ticket):
@@ -57,11 +70,25 @@ class Database:
         if isinstance(day,datetime): day=day.astimezone(timezone.utc).date()
         day=day.isoformat() if hasattr(day,'isoformat') else str(day)
         with self.connect() as connection: return [dict(row) for row in connection.execute('SELECT * FROM trades WHERE substr(open_time,1,10)=? ORDER BY open_time',(day,))]
+    def get_closed_trades_for_day(self,day):
+        day=day.isoformat() if hasattr(day,'isoformat') else str(day)
+        with self.connect() as connection: return [dict(row) for row in connection.execute("SELECT * FROM trades WHERE status='closed' AND substr(close_time,1,10)=? ORDER BY close_time",(day,))]
+    def get_daily_stats(self,day):
+        day=day.isoformat() if hasattr(day,'isoformat') else str(day)
+        with self.connect() as connection:
+            row=connection.execute('SELECT * FROM daily_stats WHERE date=?',(day,)).fetchone()
+            return dict(row) if row else None
     def insert_signal(self,**values):
         values.setdefault('time',datetime.now(timezone.utc).isoformat())
+        values.setdefault('score',0.0)
         with self.connect() as connection:
             self._insert(connection,'signals',values)
             return connection.execute('SELECT last_insert_rowid()').fetchone()[0]
+    def update_signal(self,signal_id,**values):
+        if not values: return
+        columns=list(values)
+        with self.connect() as connection:
+            connection.execute(f"UPDATE signals SET {','.join(k+'=?' for k in columns)} WHERE id=?",[values[k] for k in columns]+[signal_id])
     def upsert_daily_stats(self,**values):
         columns=list(values)
         if 'date' not in values: raise ValueError('daily_stats.date is required')
@@ -73,6 +100,26 @@ class Database:
     def log_event(self,level,source,message):
         with self.connect() as connection:
             connection.execute('INSERT INTO bot_events(time,level,source,message) VALUES (?,?,?,?)',(datetime.now(timezone.utc).isoformat(),str(level),str(source),str(message)))
+    def upsert_bot_status(self,**values):
+        values.setdefault('time',datetime.now(timezone.utc).isoformat()); values['id']=1
+        columns=list(values)
+        with self.connect() as connection:
+            connection.execute(f"INSERT INTO bot_status ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)}) ON CONFLICT(id) DO UPDATE SET {','.join(k+'=excluded.'+k for k in columns if k!='id')}",[values[k] for k in columns])
+    def get_bot_status(self):
+        with self.connect() as connection:
+            row=connection.execute('SELECT * FROM bot_status WHERE id=1').fetchone()
+            return dict(row) if row else None
+    def insert_command(self,command):
+        with self.connect() as connection:
+            cursor=connection.execute('INSERT INTO commands(time,command,status,message) VALUES (?,?,?,?)',(datetime.now(timezone.utc).isoformat(),str(command),'pending',''))
+            return cursor.lastrowid
+    def get_pending_commands(self):
+        with self.connect() as connection:
+            return [dict(row) for row in connection.execute("SELECT * FROM commands WHERE status='pending' ORDER BY id")]
+    def update_command(self,command_id,status,message=''):
+        if status not in {'pending','running','done','failed'}: raise ValueError('Invalid command status')
+        with self.connect() as connection:
+            connection.execute('UPDATE commands SET status=?,message=?,processed_time=? WHERE id=?',(status,str(message),datetime.now(timezone.utc).isoformat() if status in {'done','failed'} else None,command_id))
     def get_pnl_since(self,dt):
         stamp=dt.isoformat() if hasattr(dt,'isoformat') else str(dt)
         with self.connect() as connection:

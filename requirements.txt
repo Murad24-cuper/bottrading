@@ -6,3 +6,5 @@ pyyaml
 pytest
 pyarrow
 matplotlib
+streamlit
+streamlit-autorefresh

@@ -1,0 +1,124 @@
+from datetime import datetime,timezone,timedelta
+from pathlib import Path
+from types import SimpleNamespace
+import pytest
+from src.bot import TradingBot,BotLock
+from src.db import Database
+from src.models import Signal,TradeResult
+
+class FakeMT5:
+    ACCOUNT_TRADE_MODE_DEMO=0; ORDER_TYPE_BUY=0; ORDER_TYPE_SELL=1
+    def __init__(self): self.balance=1000; self.positions=[]
+    def account_info(self): return SimpleNamespace(balance=self.balance,equity=self.balance,margin=0,margin_free=self.balance,margin_level=None,currency='USD',margin_leverage=100,trade_mode=0,margin_mode=2,login=123456)
+    def positions_get(self): return list(self.positions)
+    def order_calc_margin(self,*args): return 0.0
+    def last_error(self): return (0,'ok')
+
+class FakeClient:
+    def __init__(self,mt5): self.mt5=mt5; self.fail=False; self.closed=False
+    def ensure_connected(self):
+        if self.fail: raise RuntimeError('terminal unavailable')
+    def close(self): self.closed=True
+
+class FakeSymbols:
+    def get_asset_group(self,symbol): return 'forex'
+
+class FakeScanner:
+    def __init__(self,candidates): self.candidates=candidates; self._strategies=[SimpleNamespace(name='breakout')]; self.symbols=FakeSymbols(); self.last_universe_size=1; self.fail=False; self.calls=0
+    def scan_once(self):
+        self.calls+=1
+        if self.fail: raise RuntimeError('scanner fault')
+        return self.candidates
+
+class FakeExecutor:
+    def __init__(self): self.opened=[]; self.closed_all=0; self.synced=0
+    def sync_positions(self): self.synced+=1
+    def enforce_time_stop(self,*args): pass
+    def enforce_weekend_close(self,*args): pass
+    def open_trade(self,signal,volume):
+        self.opened.append((signal,volume)); return TradeResult(True,77,signal.entry_hint,volume,10009,'done')
+    def close_all(self,reason): self.closed_all+=1; return []
+
+def make_settings(root,mode='shadow',strategies=None,max_errors=5):
+    risk={'risk_per_trade_pct':.5,'daily_loss_limit_pct':3,'weekly_loss_limit_pct':8,'max_open_positions':10,'max_positions_per_group':4,'max_margin_usage_pct':40,'max_hold_minutes':120,'min_risk_reward':1,'max_cost_to_target_ratio':.3,'no_new_trades_friday_after_utc':'20:00','close_all_friday_utc':'21:30'}
+    return SimpleNamespace(root=root,magic_number=20260001,risk=SimpleNamespace(**risk),db_path=root/'bot.db',config={'live':{'mode':mode,'strategies':strategies or [],'max_cycle_errors':max_errors,'equity_snapshot_seconds':30,'heartbeat_seconds':10},'risk':risk,'loop':{'interval_seconds':5}})
+
+def make_bot(tmp_path,mode='shadow',strategies=None,candidate=True,max_errors=5,clock=None):
+    settings=make_settings(tmp_path,mode,strategies,max_errors); db=Database(settings.db_path); mt5=FakeMT5(); client=FakeClient(mt5); executor=FakeExecutor()
+    signal=Signal('EURUSD','buy','M1',100,99,102,.8,'breakout','test signal')
+    spec={'trade_tick_value':1,'trade_tick_size':1,'volume_min':.01,'volume_step':.01,'volume_max':5}
+    row=db.insert_signal(time='2026-11-02T12:00:00+00:00',symbol='EURUSD',strategy='breakout',direction='buy',timeframe='M1',confidence=.8,entry=100,sl=99,tp=102,expected_cost=.1,score=5,taken=0,skip_reason='')
+    item=SimpleNamespace(symbol='EURUSD',asset_group='forex',strategy='breakout',signal=signal,cost={'cost':.1},symbol_spec=spec,score=5,signal_row_id=row)
+    scanner=FakeScanner([item] if candidate else [])
+    bot=TradingBot(settings,client,db,scanner,executor,clock=clock)
+    return bot,db,mt5,client,scanner,executor,item
+
+def test_shadow_cycle_logs_skip_and_never_opens(tmp_path):
+    bot,db,_,_,_,executor,item=make_bot(tmp_path)
+    result=bot.cycle()
+    with db.connect() as conn: signal=conn.execute('SELECT taken,skip_reason FROM signals WHERE id=?',(item.signal_row_id,)).fetchone()
+    assert result.continue_running and executor.opened==[]
+    assert signal['taken']==0 and signal['skip_reason']=='shadow mode'
+
+def test_trade_mode_opens_only_live_allowlisted_strategy(tmp_path):
+    bot,db,_,_,_,executor,item=make_bot(tmp_path,'trade',['breakout'])
+    bot.cycle()
+    assert len(executor.opened)==1
+    with db.connect() as conn: assert conn.execute('SELECT taken FROM signals WHERE id=?',(item.signal_row_id,)).fetchone()[0]==1
+    bot2,db2,_,_,_,executor2,item2=make_bot(tmp_path/'disallowed','trade',['mean_reversion'])
+    bot2.cycle()
+    assert executor2.opened==[]
+    with db2.connect() as conn: assert conn.execute('SELECT skip_reason FROM signals WHERE id=?',(item2.signal_row_id,)).fetchone()[0]=='strategy not allowed live'
+
+def test_stop_blocks_entries_and_halt_exits_cleanly(tmp_path):
+    bot,db,_,_,scanner,executor,item=make_bot(tmp_path,'trade',['breakout'])
+    (tmp_path/'STOP').write_text('PAUSE\n',encoding='utf-8')
+    bot.cycle(); assert executor.opened==[]
+    with db.connect() as conn: assert conn.execute('SELECT skip_reason FROM signals WHERE id=?',(item.signal_row_id,)).fetchone()[0]=='kill switch active'
+    (tmp_path/'STOP').write_text('HALT\n',encoding='utf-8')
+    before=scanner.calls; result=bot.cycle()
+    assert not result.continue_running and scanner.calls==before
+
+def test_consecutive_errors_disable_new_entries(tmp_path):
+    bot,db,_,_,scanner,executor,item=make_bot(tmp_path,'trade',['breakout'],max_errors=2)
+    scanner.fail=True
+    bot.cycle(); bot.cycle(); assert bot.trading_disabled
+    scanner.fail=False; bot.cycle()
+    assert executor.opened==[]
+    assert 'error limit' in db.get_bot_status()['last_error'] or db.get_bot_status()['status']=='managing_only'
+
+def test_daily_stats_roll_over_at_utc_midnight(tmp_path):
+    clock_value=[datetime(2026,11,2,23,59,tzinfo=timezone.utc)]
+    bot,db,mt5,_,_,_,_=make_bot(tmp_path,candidate=False,clock=lambda:clock_value[0])
+    bot.cycle()
+    clock_value[0]=datetime(2026,11,3,0,1,tzinfo=timezone.utc); mt5.balance=1010; bot.cycle()
+    first=db.get_daily_stats('2026-11-02'); second=db.get_daily_stats('2026-11-03')
+    assert first['start_balance']==1000 and second['start_balance']==1010
+
+def test_command_close_all_is_processed_and_marked_done(tmp_path):
+    bot,db,_,_,_,executor,_=make_bot(tmp_path,candidate=False)
+    command_id=db.insert_command('close_all'); bot.cycle()
+    with db.connect() as conn: row=conn.execute('SELECT status,message FROM commands WHERE id=?',(command_id,)).fetchone()
+    assert executor.closed_all==1 and row['status']=='done' and row['message']=='completed'
+
+def test_pause_and_resume_commands_manage_stop_file(tmp_path):
+    bot,db,_,_,_,executor,item=make_bot(tmp_path,'trade',['breakout'])
+    pause=db.insert_command('pause'); bot.cycle()
+    assert (tmp_path/'STOP').exists() and executor.opened==[]
+    with db.connect() as conn: assert conn.execute('SELECT status FROM commands WHERE id=?',(pause,)).fetchone()[0]=='done'
+    resume=db.insert_command('resume'); bot.cycle()
+    assert not (tmp_path/'STOP').exists() and len(executor.opened)==1
+    with db.connect() as conn: assert conn.execute('SELECT status FROM commands WHERE id=?',(resume,)).fetchone()[0]=='done'
+
+def test_run_forever_releases_lock_and_shuts_down_client(tmp_path):
+    bot,_,_,client,_,_,_=make_bot(tmp_path,candidate=False)
+    bot.run_forever(max_cycles=1)
+    assert client.closed and not (tmp_path/'data'/'bot.lock').exists()
+
+def test_bot_lock_refuses_second_instance(tmp_path):
+    path=tmp_path/'data'/'bot.lock'; first=BotLock(path); second=BotLock(path)
+    first.acquire()
+    try:
+        with pytest.raises(RuntimeError): second.acquire()
+    finally: first.release()
+    assert not path.exists()

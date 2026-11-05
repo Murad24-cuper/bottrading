@@ -58,3 +58,22 @@ python scripts/run_backtest.py --strategies all --symbols liquid --equity 10
 ```
 
 The scanner ranks signals and prints the risk-manager decision; it never submits orders. The backtester enters at the next bar open, applies spread, slippage and configured per-side commission, assumes the stop is hit first when both stop and target fall inside one bar, and reuses the live position sizing and risk gates. Reports are saved under `reports/<UTC timestamp>/` with summary, trade, equity and grouped metric files. Historical and simulated results do not guarantee future performance.
+
+## Part 3: live loop and dashboard
+
+Install the latest dependencies with `python -m pip install -r requirements.txt`. Start the bot and dashboard in separate terminals:
+
+```powershell
+.\start_bot.bat
+.\start_dashboard.bat
+```
+
+The dashboard binds to `127.0.0.1:8501` and reads bot state only from SQLite; it does not open an MT5 connection. `DASHBOARD_PASSWORD` is optional. Set it in `.env` or the Windows environment used to launch the dashboard to require a password. Keep the service on localhost or behind a separately secured tunnel.
+
+The default `live.mode: shadow` records candidates and risk decisions without sending orders. To enable demo trading, set `live.mode: trade` and list only the strategies you want in `live.strategies`; an empty list authorizes no strategy to place orders. For a real account, the existing MT5 guard also requires `account.mode: real` and `ALLOW_REAL=true` in `.env`. Review the risk controls and validate with demo/backtests before switching modes.
+
+Create `STOP` in the project root to pause new entries while the bot continues managing owned positions. Put the standalone word `HALT` in `STOP` to exit the bot cleanly without closing positions. Remove `STOP` to resume. Dashboard pause/resume controls queue commands for the bot; **Close all positions** requires a confirmation checkbox and is also handled by the bot, which only closes positions with its configured magic number.
+
+The bot uses `data/bot.lock` to refuse a second instance. If it was force-terminated, confirm that it is no longer running before removing a leftover lock file. After `live.max_cycle_errors` consecutive cycle errors, new entries are disabled while position management continues. Ctrl+C stops the loop cleanly and shuts down MT5.
+
+For a VPS, use Windows Task Scheduler to start `start_bot.bat` at system startup, with **Start in** set to this project directory and the same Windows account/environment that can access MT5 and the credentials. Create a separate startup task for `start_dashboard.bat` only if the local dashboard is needed. Keep the dashboard bound to localhost; do not expose its port directly to the internet.

@@ -71,6 +71,12 @@ scanner:
   candle_count: 250
   min_score: 0.0
   timeframe_point_sizes: {}     # Optional symbol point sizes for candle spread pricing
+live:
+  mode: shadow                  # shadow = record decisions only; trade = submit orders
+  strategies: []                # Only listed strategies may submit live orders
+  max_cycle_errors: 5           # Disable new entries after this many consecutive errors
+  equity_snapshot_seconds: 30
+  heartbeat_seconds: 10
 history:
   data_dir: data/history
   ranges_months: {M1: 3, M5: 12, M15: 36, H1: 36}

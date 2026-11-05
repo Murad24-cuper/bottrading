@@ -141,6 +141,17 @@ class Executor:
             self.db.insert_trade(ticket=ticket,symbol=position.symbol,asset_group=self._asset_group(position.symbol),direction=direction,volume=position.volume,open_time=opened,open_price=position.price_open,sl=position.sl,tp=position.tp,profit=position.profit,commission=0,swap=position.swap,magic=self.settings.magic_number,status='open',strategy='',reason='recovered from broker')
             self._event(f'Recovered missing DB row for owned ticket={ticket}','WARNING')
             db_open.add(ticket)
+        current_positions=[p for p in (self.mt5.positions_get() or []) if int(p.magic)==self.settings.magic_number]
+        for position in current_positions:
+            identifiers={int(position.ticket),int(getattr(position,'identifier',position.ticket) or position.ticket)}
+            row=next((item for item in self.db.get_open_trades() if int(item['ticket']) in identifiers),None)
+            if row:
+                updates={'profit':float(position.profit),'sl':position.sl,'tp':position.tp,'swap':float(position.swap)}
+                try:
+                    margin=self.mt5.order_calc_margin(position.type,position.symbol,position.volume,position.price_current)
+                    if margin is not None: updates['margin_used']=float(margin)
+                except Exception: pass
+                self.db.update_open_trade(row['ticket'],**updates)
         for row in self.db.get_open_trades():
             ticket=int(row['ticket'])
             forced=ticket in reasons

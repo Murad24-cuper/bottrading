@@ -42,7 +42,7 @@ class MarketScanner:
     def __init__(self,mt5,settings,db,symbol_service=None):
         self.mt5,self.settings,self.db=mt5,settings,db
         self.symbols=symbol_service or SymbolService(mt5,settings)
-        self._cache={}; self._cursor=0; self._strategies=load_strategies(settings)
+        self._cache={}; self._cursor=0; self._strategies=load_strategies(settings); self.last_universe_size=0
     def _bars(self,symbol,timeframe,count):
         key=(symbol,timeframe); cached=self._cache.get(key)
         latest=market_data.get_closed_candles(self.mt5,symbol,timeframe,1)
@@ -54,7 +54,7 @@ class MarketScanner:
             self._cache[key]=cached
         return cached
     def scan_once(self):
-        started=perf_counter(); universe=self.symbols.get_universe(); budget=float(self.settings.config['scanner']['max_seconds_per_cycle'])
+        started=perf_counter(); universe=self.symbols.get_universe(); self.last_universe_size=len(universe); budget=float(self.settings.config['scanner']['max_seconds_per_cycle'])
         if not universe: return []
         start=self._cursor%len(universe); results=[]; visited=0
         while visited<len(universe):
@@ -88,7 +88,7 @@ class MarketScanner:
                 score=expected_value_score(signal.confidence,reward_money,risk_money,cost['cost'])
                 reason='expected value is non-positive' if score<=0 else ('below scanner.min_score' if score<float(self.settings.config['scanner']['min_score']) else '')
                 candidate=Candidate(symbol,group,strategy.name,signal,signal.confidence,volume,risk_money,reward_money,cost,score,features,spec,reason)
-                candidate.signal_row_id=self._write_signal(signal,cost['cost'],reason)
+                candidate.signal_row_id=self._write_signal(signal,cost['cost'],reason,score)
                 results.append(candidate)
         self._cursor=(start+visited)%len(universe)
         if visited<len(universe):
@@ -105,8 +105,11 @@ class MarketScanner:
             item.skip_reason='scanner candidate limit reached'
             if item.signal_row_id is not None: self._set_skip_reason(item.signal_row_id,item.skip_reason)
         return selected
-    def _write_signal(self,signal,cost,skip_reason):
-        return self.db.insert_signal(time=datetime.now(timezone.utc).isoformat(),symbol=signal.symbol,strategy=signal.strategy_name,direction=signal.direction,timeframe=signal.timeframe,confidence=signal.confidence,entry=signal.entry_hint,sl=signal.sl_price,tp=signal.tp_price,expected_cost=cost,taken=0,skip_reason=skip_reason or '')
+    def scan(self):
+        """Part 3 live-loop interface; performs one bounded, read-only scan."""
+        return self.scan_once()
+    def _write_signal(self,signal,cost,skip_reason,score=0.0):
+        return self.db.insert_signal(time=datetime.now(timezone.utc).isoformat(),symbol=signal.symbol,strategy=signal.strategy_name,direction=signal.direction,timeframe=signal.timeframe,confidence=signal.confidence,entry=signal.entry_hint,sl=signal.sl_price,tp=signal.tp_price,expected_cost=cost,score=score,taken=0,skip_reason=skip_reason or '')
     def _set_skip_reason(self,row_id,reason):
         with self.db.connect() as connection:
             connection.execute('UPDATE signals SET skip_reason=? WHERE id=?',(reason,row_id))
