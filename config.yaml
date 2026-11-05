@@ -1,0 +1,30 @@
+account:
+  mode: demo
+risk:
+  risk_per_trade_pct: 0.5
+  daily_loss_limit_pct: 3.0
+  weekly_loss_limit_pct: 8.0
+  max_open_positions: 10
+  max_positions_per_group: 4
+  max_margin_usage_pct: 40
+  max_hold_minutes: 120
+  min_risk_reward: 1.0
+  max_cost_to_target_ratio: 0.3
+  max_spread_points: {}
+  no_new_trades_friday_after_utc: "20:00"
+  close_all_friday_utc: "21:30"
+universe:
+  include_groups: [forex, metals, indices, energy, crypto, stocks]
+  exclude_symbols: []
+  symbol_aliases:
+    GOLD: [GOLD, XAUUSD]
+    EURUSD: [EURUSD]
+    US30: [US30]
+    NAS100: [US100, NAS100, USTEC]
+    OIL: [OIL, WTI, USOIL]
+timeframes: [M1, M5, M15, H1]
+magic_number: 20260001
+strategies: {}
+loop:
+  interval_seconds: 5
+db_path: data/bot.db
