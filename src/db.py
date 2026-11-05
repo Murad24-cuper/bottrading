@@ -59,7 +59,9 @@ class Database:
         with self.connect() as connection: return [dict(row) for row in connection.execute('SELECT * FROM trades WHERE substr(open_time,1,10)=? ORDER BY open_time',(day,))]
     def insert_signal(self,**values):
         values.setdefault('time',datetime.now(timezone.utc).isoformat())
-        with self.connect() as connection: self._insert(connection,'signals',values)
+        with self.connect() as connection:
+            self._insert(connection,'signals',values)
+            return connection.execute('SELECT last_insert_rowid()').fetchone()[0]
     def upsert_daily_stats(self,**values):
         columns=list(values)
         if 'date' not in values: raise ValueError('daily_stats.date is required')

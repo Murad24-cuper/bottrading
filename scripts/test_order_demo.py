@@ -36,7 +36,6 @@ def main():
         if volume<=0: raise SystemExit(f'Trade refused: {size_reason}')
         cost=get_cost_estimate(mt5,symbol,volume)
         target_value=price_distance_to_money(mt5,symbol,tp-entry,volume)
-        cost['target_value']=target_value
         print(f'Estimated round-trip cost={cost["cost"]:.2f} {account_info.currency}; commission known={cost["commission_known"]}; cost/target={cost["cost"]/target_value:.3f}')
         if not args.confirm: print('Dry run only; no order was sent.'); return 0
         signal=Signal(symbol,'buy','M5',entry,sl,tp,0.5,'demo-test','manual demo order test')
@@ -47,7 +46,7 @@ def main():
         today_pnl=db.get_pnl_since(day_start); week_pnl=db.get_pnl_since(week_start)
         required_margin=mt5.order_calc_margin(mt5.ORDER_TYPE_BUY,symbol,volume,entry)
         if required_margin is None: raise SystemExit(f'Trade refused: order_calc_margin failed: {mt5.last_error()}')
-        allowed,why=check_trade_allowed(signal,state,positions,today_pnl,week_pnl,settings,cost,symbols.get_asset_group(symbol),now,required_margin)
+        allowed,why=check_trade_allowed(signal,state,positions,today_pnl,week_pnl,settings,cost,symbols.get_asset_group(symbol),now,required_margin,volume,info._asdict())
         if not allowed: raise SystemExit(f'Trade refused by risk manager: {why}')
         db.insert_signal(time=now.isoformat(),symbol=symbol,strategy=signal.strategy_name,direction=signal.direction,timeframe=signal.timeframe,confidence=signal.confidence,entry=entry,sl=sl,tp=tp,expected_cost=cost['cost'],taken=1,skip_reason='')
         opened=executor.open_trade(signal,volume); print(f'Open result: {opened}')

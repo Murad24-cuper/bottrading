@@ -23,16 +23,69 @@ universe:
   exclude_symbols: []
   symbol_aliases:
     GOLD: [GOLD, XAUUSD]
+    SILVER: [SILVER, XAGUSD]
     EURUSD: [EURUSD]
+    GBPUSD: [GBPUSD]
+    USDJPY: [USDJPY]
+    AUDUSD: [AUDUSD]
+    USDCAD: [USDCAD]
+    EURJPY: [EURJPY]
+    GBPJPY: [GBPJPY]
     US30: [US30]
     NAS100: [US100, NAS100, USTEC]
+    GER40: [GER40, DAX]
     OIL: [OIL, WTI, USOIL]
+    BTCUSD: [BTCUSD, BTC]
+    ETHUSD: [ETHUSD, ETH]
 
 timeframes: [M1, M5, M15, H1]
 magic_number: 20260001
 executor:
   deviation_points: 20           # Maximum permitted execution deviation
-strategies: {}                  # Part 2 strategy settings
+strategies:
+  trend_pullback:
+    enabled: true
+    groups: [forex, metals, indices]
+    timeframes: [H1, M15, M5]
+    params: {trend_ema_fast: 20, trend_ema_slow: 50, adx_min: 18, pullback_atr: 0.45, stop_atr: 1.5, reward_risk: 1.8}
+  mean_reversion:
+    enabled: true
+    groups: [forex, metals, indices, energy, crypto, stocks]
+    timeframes: [M15]
+    params: {bb_period: 20, bb_std: 2.0, rsi_period: 14, rsi_low: 30, rsi_high: 70, stop_atr: 1.2}
+  breakout:
+    enabled: true
+    groups: [forex, metals, indices, energy, crypto, stocks]
+    timeframes: [M15]
+    params: {range_bars: 20, atr_expansion: 1.1, volume_ratio: 1.2, reward_range: 1.5}
+  volatility_scalp:
+    enabled: true
+    groups: [forex, metals, indices, energy, crypto]
+    timeframes: [M1, M5]
+    params: {atr_period: 14, volatility_ratio: 1.25, target_atr: 0.4, stop_atr: 0.65, max_spread_target_ratio: 0.2}
 loop:
   interval_seconds: 5
+scanner:
+  max_seconds_per_cycle: 15
+  max_candidates: 10
+  candle_count: 250
+  min_score: 0.0
+  timeframe_point_sizes: {}     # Optional symbol point sizes for candle spread pricing
+history:
+  data_dir: data/history
+  ranges_months: {M1: 3, M5: 12, M15: 36, H1: 36}
+  liquid_aliases: [GOLD, SILVER, EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, EURJPY, GBPJPY, US30, NAS100, GER40, OIL, BTCUSD, ETHUSD]
+backtest:
+  start_equity: 1000
+  commission_per_lot_per_side: 0.0
+  slippage_points: 1.0
+  fallback_spread_points: 15.0
+  in_sample_pct: 0.7
+  walk_forward_optimize_months: 6
+  walk_forward_test_months: 2
+  parameter_grid:
+    trend_pullback: {adx_min: [18, 22], reward_risk: [1.5, 2.0]}
+    mean_reversion: {rsi_low: [25, 30], rsi_high: [70, 75]}
+    breakout: {range_bars: [15, 20], volume_ratio: [1.1, 1.3]}
+    volatility_scalp: {target_atr: [0.3, 0.4], max_spread_target_ratio: [0.15, 0.2]}
 db_path: data/bot.db

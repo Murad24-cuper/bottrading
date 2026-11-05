@@ -20,6 +20,19 @@ def get_candles(mt5,symbol,timeframe,count):
     df['time']=pd.to_datetime(df['time'],unit='s',utc=True)
     return df.set_index('time')[['open','high','low','close','tick_volume','spread']]
 
+def get_closed_candles(mt5,symbol,timeframe,count):
+    """Read completed bars only (MT5 shift 1 excludes the forming bar)."""
+    import pandas as pd
+    if not mt5.symbol_select(symbol,True): raise RuntimeError(f'symbol_select {symbol} failed: {mt5.last_error()}')
+    tf=getattr(mt5,'TIMEFRAME_'+timeframe,None)
+    if tf is None: raise ValueError(f'Unsupported timeframe: {timeframe}')
+    rows=mt5.copy_rates_from_pos(symbol,tf,1,count)
+    if rows is None: raise RuntimeError(f'copy_rates_from_pos closed bars failed: {mt5.last_error()}')
+    df=pd.DataFrame(rows)
+    if df.empty: return pd.DataFrame(columns=['open','high','low','close','tick_volume','spread'],index=pd.DatetimeIndex([],tz='UTC',name='time'))
+    df['time']=pd.to_datetime(df.time,unit='s',utc=True)
+    return df.set_index('time')[['open','high','low','close','tick_volume','spread']]
+
 def get_candles_multi(mt5,symbol,timeframes,count): return {tf:get_candles(mt5,symbol,tf,count) for tf in timeframes}
 
 def get_tick(mt5,symbol):

@@ -45,3 +45,9 @@ class SymbolService:
    if s.name in u['exclude_symbols'] or self.get_asset_group(s.name) not in u['include_groups']: continue
    if self.is_tradable(s.name)[0]: out.append(s.name)
   return out
+
+def get_universe(settings,mt5=None):
+ """Return tradable configured symbols; may use an explicit connected MT5 API."""
+ if mt5 is not None: return SymbolService(mt5,settings).get_universe()
+ from .mt5_client import MT5Client
+ with MT5Client(settings) as client: return SymbolService(client.mt5,settings).get_universe()

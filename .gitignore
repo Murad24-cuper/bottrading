@@ -2,6 +2,8 @@
 logs/*
 !logs/.gitkeep
 *.db
+data/history/
+reports/
 STOP
 .venv/
 __pycache__/

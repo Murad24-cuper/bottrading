@@ -35,3 +35,26 @@ Create an empty file named `STOP` in this project folder to block new orders. Th
 - `executor.deviation_points`: maximum price deviation sent with an order.
 
 `universe.symbol_aliases` contains search patterns, not fixed XM names. The terminal symbol list is always discovered at runtime. XM symbols and symbol suffixes vary by server/account; margin mode is read from `account_info()` and supports hedging and netting safeguards.
+
+## Part 2: analysis, data and backtests
+
+Pure pandas/numpy indicators live in `src/indicators.py`; `src/features.py` builds causal latest-bar values and a coarse regime. The four configured strategies are `trend_pullback`, `mean_reversion`, `breakout` and `volatility_scalp`. Strategy parameters and allowed asset groups are in `config.yaml`.
+
+Download candles from the logged-in local MT5 terminal (read-only):
+
+```powershell
+python scripts/download_history.py --symbols liquid
+python scripts/download_history.py --symbols universe --from 2024-01-01 --to 2026-11-05
+```
+
+MT5 history availability is constrained by **Max bars in chart**. In MT5, open **Tools > Options > Charts** and set **Max bars in chart** to **Unlimited** before downloading long ranges. Cached candles are written as Parquet under `data/history/`; `symbol_specs.json` captures the broker tick and volume specifications used by the simulator.
+
+Run the read-only live scanner or a cached-data backtest:
+
+```powershell
+python scripts/run_scan_once.py
+python scripts/run_backtest.py --strategies all --symbols liquid --equity 1000 --walk-forward
+python scripts/run_backtest.py --strategies all --symbols liquid --equity 10
+```
+
+The scanner ranks signals and prints the risk-manager decision; it never submits orders. The backtester enters at the next bar open, applies spread, slippage and configured per-side commission, assumes the stop is hit first when both stop and target fall inside one bar, and reuses the live position sizing and risk gates. Reports are saved under `reports/<UTC timestamp>/` with summary, trade, equity and grouped metric files. Historical and simulated results do not guarantee future performance.
