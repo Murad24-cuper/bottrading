@@ -1,5 +1,4 @@
 from datetime import datetime,timezone
-import fnmatch
 class SymbolService:
  def __init__(self,mt5,settings): self.mt5=mt5; self.settings=settings; self.cache=[]; self.loaded=0
  def list_all_symbols(self,refresh_minutes=5):
@@ -14,10 +13,12 @@ class SymbolService:
   for key,group in [('forex','forex'),('metal','metals'),('index','indices'),('energy','energy'),('crypto','crypto'),('stock','stocks'),('share','stocks')]:
    if key in path: return group
   n=symbol.lower()
-  if any(x in n for x in ('xau','xag','gold','silver')): return 'metals'
+  if any(x in n for x in ('xau','xag','xpd','xpt','gold','silver','palladium','platinum')): return 'metals'
   if any(x in n for x in ('btc','eth','crypto')): return 'crypto'
   if any(x in n for x in ('oil','wti','brent','gas')): return 'energy'
-  if any(x in n for x in ('us30','us100','nas','spx','dax','uk100','cash')): return 'indices'
+  if any(x in n for x in ('us30','us100','us500','nas','spx','dax','ger40','uk100','jp225','fra40','eu50','aus200','cash')): return 'indices'
+  base=n.rstrip('#m.')
+  if 1<=len(base)<=5 and base.isalpha(): return 'stocks'
   if len(n)>=6 and n[:6].isalpha(): return 'forex'
   return 'other'
  def resolve_alias(self,logical_name):
@@ -29,9 +30,11 @@ class SymbolService:
  def is_tradable(self,symbol):
   i=self.mt5.symbol_info(symbol)
   if not i or not self.mt5.symbol_select(symbol,True): return False,'symbol unavailable'
-  if i.trade_mode==getattr(self.mt5,'SYMBOL_TRADE_MODE_DISABLED',0): return False,'trading disabled'
+  if i.trade_mode!=getattr(self.mt5,'SYMBOL_TRADE_MODE_FULL',4): return False,'symbol is not enabled for full trading'
   t=self.mt5.symbol_info_tick(symbol)
-  if not t or datetime.now(timezone.utc).timestamp()-t.time>60: return False,'stale tick / market closed'
+  stamp=getattr(t,'time_msc',0)/1000 if t and getattr(t,'time_msc',0) else (getattr(t,'time',0) if t else 0)
+  age=datetime.now(timezone.utc).timestamp()-stamp
+  if not t or age< -5 or age>60: return False,'stale tick / market closed'
   lim=self.settings.risk.get('max_spread_points',{}).get(symbol)
   spread=(t.ask-t.bid)/i.point
   if lim is not None and spread>lim: return False,'spread exceeds limit'

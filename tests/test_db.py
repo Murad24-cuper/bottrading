@@ -1,10 +1,26 @@
+from datetime import date
 from src.db import Database
 
-def test_trade_and_stats(tmp_path):
-    db=Database(tmp_path/'test.db')
-    db.insert_trade(ticket=1,symbol='EURUSD',status='open',open_time='2026-11-05T00:00:00Z')
+def test_create_insert_update_and_query_trades(tmp_path):
+    db=Database(tmp_path/'trades.db')
+    db.insert_trade(ticket=101,symbol='EURUSD',asset_group='forex',direction='buy',volume=0.01,open_time='2026-11-05T10:00:00+00:00',open_price=1.1,sl=1.09,tp=1.12,profit=0,commission=0,swap=0,magic=20260001,status='open')
     assert len(db.get_open_trades())==1
-    db.update_trade_close(1,close_time='2026-11-05T00:01:00Z',profit=1,commission=0,swap=0,close_reason='tp')
-    assert not db.get_open_trades()
-    db.upsert_daily_stats(date='2026-11-05',pnl=1)
-    assert db.get_pnl_since('2026-11-05')==1
+    assert db.get_trades_for_day(date(2026,11,5))[0]['ticket']==101
+    db.update_trade_close(101,close_time='2026-11-05T10:05:00+00:00',close_price=1.12,profit=2.0,commission=-0.1,swap=0.0,close_reason='tp')
+    assert db.get_open_trades()==[]
+    assert db.get_trades_for_day('2026-11-05')[0]['status']=='closed'
+    assert db.get_pnl_since('2026-11-05T00:00:00+00:00')==1.9
+
+def test_signal_stats_snapshot_event_and_wal(tmp_path):
+    db=Database(tmp_path/'dashboard.db')
+    db.insert_signal(symbol='XAUUSD',strategy='test',direction='buy',timeframe='M5',confidence=.8,entry=2000,sl=1990,tp=2020,expected_cost=.1,taken=0,skip_reason='test')
+    db.upsert_daily_stats(date='2026-11-05',start_balance=100,end_balance=101,pnl=1,trades_count=1,wins=1,losses=0,max_drawdown=0,invested_margin_peak=2)
+    db.upsert_daily_stats(date='2026-11-05',start_balance=100,end_balance=102,pnl=2,trades_count=2,wins=2,losses=0,max_drawdown=0,invested_margin_peak=2)
+    db.insert_equity_snapshot(balance=102,equity=102,margin=2,free_margin=100,open_positions=1)
+    db.log_event('WARNING','test','warning event')
+    with db.connect() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM signals').fetchone()[0]==1
+        assert conn.execute('SELECT pnl FROM daily_stats WHERE date=?',('2026-11-05',)).fetchone()[0]==2
+        assert conn.execute('SELECT COUNT(*) FROM equity_snapshots').fetchone()[0]==1
+        assert conn.execute('SELECT level FROM bot_events').fetchone()[0]=='WARNING'
+        assert conn.execute('PRAGMA journal_mode').fetchone()[0].lower()=='wal'

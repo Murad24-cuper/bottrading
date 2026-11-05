@@ -12,5 +12,9 @@ def get_logger(name):
     file = RotatingFileHandler(path,maxBytes=5*1024*1024,backupCount=5,encoding='utf-8'); file.setFormatter(fmt); logger.addHandler(file)
     return logger
 
-def log_warning_event(logger, db, source, message):
-    logger.warning(message); db.log_event('WARNING',source,message)
+def log_warning_event(logger, db, source, message, level='WARNING'):
+    """Write a warning or error to both the normal logger and bot_events."""
+    value=logging._nameToLevel.get(str(level).upper(),logging.WARNING)
+    if value < logging.WARNING: value=logging.WARNING
+    logger.log(value,message)
+    db.log_event(logging.getLevelName(value),source,message)
