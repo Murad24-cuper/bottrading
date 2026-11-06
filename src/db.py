@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS bot_status(
 CREATE TABLE IF NOT EXISTS commands(
  id INTEGER PRIMARY KEY, time TEXT, created_at TEXT, expires_at TEXT, command TEXT, status TEXT, message TEXT, processed_time TEXT);
 CREATE TABLE IF NOT EXISTS schema_migrations(name TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS adaptive_gates(
+ scope TEXT NOT NULL, name TEXT NOT NULL, disabled_until TEXT NOT NULL, expectancy REAL NOT NULL,
+ sample_size INTEGER NOT NULL, reason TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(scope,name));
 '''
 
 class Database:
@@ -142,6 +145,42 @@ class Database:
         with self.connect() as connection: return [dict(row) for row in connection.execute('SELECT * FROM partial_closes WHERE ticket=? ORDER BY time,id',(int(ticket),))]
     def get_partial_deal_tickets(self,ticket):
         with self.connect() as connection: return {int(row[0]) for row in connection.execute('SELECT deal_ticket FROM partial_closes WHERE ticket=? AND deal_ticket IS NOT NULL',(int(ticket),))}
+    def get_active_adaptive_gates(self,now=None):
+        now=now or datetime.now(timezone.utc)
+        now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+        with self.connect() as connection:
+            return [dict(row) for row in connection.execute('SELECT * FROM adaptive_gates WHERE disabled_until>? ORDER BY scope,name',(now.isoformat(),))]
+    def refresh_adaptive_gates(self,window=20,disable_hours=24,magic=None,now=None):
+        """Disable strategies/groups with negative expectancy over recent closed trades."""
+        now=now or datetime.now(timezone.utc)
+        now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+        disabled=[]
+        with self.connect() as connection:
+            where="status='closed'"; params=[]
+            if magic is not None: where+=' AND magic=?'; params.append(int(magic))
+            closed=[dict(row) for row in connection.execute(f'SELECT ticket,strategy,asset_group,close_time,COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0) AS net FROM trades WHERE {where} ORDER BY close_time DESC,id DESC',params)]
+            partial={int(row['ticket']):float(row['pnl'] or 0) for row in connection.execute('SELECT ticket,SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)) pnl FROM partial_closes GROUP BY ticket')}
+            groups={}
+            for row in closed:
+                value=float(row['net'])+partial.get(int(row['ticket']),0)
+                for scope,name in (('strategy',row['strategy']),('group',row['asset_group'])):
+                    if name: groups.setdefault((scope,str(name)),[]).append((row['close_time'],value))
+            expiry=(now+timedelta(hours=float(disable_hours))).isoformat()
+            for (scope,name),values in groups.items():
+                values=values[:int(window)]
+                if len(values)<int(window): continue
+                expectancy=sum(value for _,value in values)/len(values)
+                if expectancy>=0: continue
+                existing=connection.execute('SELECT disabled_until FROM adaptive_gates WHERE scope=? AND name=?',(scope,name)).fetchone()
+                if existing:
+                    old=datetime.fromisoformat(existing['disabled_until'].replace('Z','+00:00'))
+                    if old.tzinfo is None: old=old.replace(tzinfo=timezone.utc)
+                    if old>now: continue
+                message=f'Adaptive gate disabled {scope}={name} for {disable_hours:g}h; {len(values)} recent trades expectancy={expectancy:.4f}'
+                connection.execute('INSERT INTO adaptive_gates(scope,name,disabled_until,expectancy,sample_size,reason,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(scope,name) DO UPDATE SET disabled_until=excluded.disabled_until,expectancy=excluded.expectancy,sample_size=excluded.sample_size,reason=excluded.reason,updated_at=excluded.updated_at',(scope,name,expiry,expectancy,len(values),message,now.isoformat()))
+                connection.execute('INSERT INTO bot_events(time,level,source,message) VALUES (?,?,?,?)',(now.isoformat(),'WARNING','risk',message))
+                disabled.append({'scope':scope,'name':name,'disabled_until':expiry,'expectancy':expectancy,'sample_size':len(values),'reason':message})
+        return disabled
     def get_partial_pnl_since(self,dt):
         stamp=dt.isoformat() if hasattr(dt,'isoformat') else str(dt)
         with self.connect() as connection:

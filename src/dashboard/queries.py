@@ -57,6 +57,9 @@ def get_latest_signals(path=None,limit=50):
 def get_recent_events(path=None,limit=30):
     return _rows(path,'SELECT time,level,source,message FROM bot_events ORDER BY time DESC LIMIT ?',(int(limit),))
 
+def get_adaptive_gates(path=None):
+    return _rows(path,'SELECT scope,name,disabled_until,expectancy,sample_size,reason FROM adaptive_gates WHERE disabled_until>? ORDER BY scope,name',(datetime.now(timezone.utc).isoformat(),))
+
 def get_equity_curve(start_utc,end_utc,path=None):
     return _rows(path,'SELECT time,balance,equity,margin,free_margin,open_positions FROM equity_snapshots WHERE time>=? AND time<? ORDER BY time',(start_utc,end_utc))
 

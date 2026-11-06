@@ -68,6 +68,9 @@ class MarketScanner:
         return cached
     def scan_once(self):
         started=perf_counter(); cfg=self.settings.config['scanner']
+        active_gates=self.db.get_active_adaptive_gates() if hasattr(self.db,'get_active_adaptive_gates') else []
+        disabled_strategies={row['name'] for row in active_gates if row['scope']=='strategy'}
+        disabled_groups={row['name'] for row in active_gates if row['scope']=='group'}
         candidates=self.symbols.get_candidates() if hasattr(self.symbols,'get_candidates') else self.symbols.get_universe()
         owned=[p for p in (self.mt5.positions_get() or []) if int(p.magic)==self.settings.magic_number] if hasattr(self.mt5,'positions_get') else []
         open_symbols={str(p.symbol) for p in owned}
@@ -141,6 +144,9 @@ class MarketScanner:
                     rejection[session_reason]+=1
                     continue
             group=self.symbols.get_asset_group(symbol); strategies=[s for s in self._strategies if group in s.allowed_groups]
+            if group in disabled_groups:
+                rejection[f'adaptive gate: group {group}']+=1; continue
+            strategies=[s for s in strategies if s.name not in disabled_strategies]
             needed=sorted({tf for strategy in strategies for tf in strategy.required_timeframes} | ({'M1','M5','M15'} if cfg.get('require_mtf_agreement',True) else set()))
             if not needed: continue
             candles={tf:self._bars(symbol,tf,int(cfg['candle_count'])) for tf in needed}

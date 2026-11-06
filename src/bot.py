@@ -131,7 +131,10 @@ class TradingBot:
     def _candidate(self,candidate,now,allow_entries):
         live_mode=self.live['mode']=='trade'
         allowed_strategy=candidate.strategy in self.live['strategies']
-        if (self.settings.root/'STOP').exists(): reason='kill switch active'
+        active_gates=self.db.get_active_adaptive_gates(now) if hasattr(self.db,'get_active_adaptive_gates') else []
+        gate=next((entry for entry in active_gates if (entry['scope']=='strategy' and entry['name']==candidate.strategy) or (entry['scope']=='group' and entry['name']==candidate.asset_group)),None)
+        if gate: reason=f'adaptive gate active: {gate["scope"]}={gate["name"]} until {gate["disabled_until"]}'
+        elif (self.settings.root/'STOP').exists(): reason='kill switch active'
         elif self.consecutive_errors>=int(self.live['max_cycle_errors']) or self.trading_disabled: reason='consecutive cycle error limit reached'
         elif not live_mode: reason='shadow mode'
         elif not allowed_strategy: reason='strategy not allowed live'
@@ -196,6 +199,9 @@ class TradingBot:
         self._cycle_reservations=[]
         self._components(); account=self._account_type(); state=get_account_state(self.client.mt5); self._startup(state)
         self.executor.sync_positions(); getattr(self.executor,'enforce_adverse_move_exit',lambda *_:None)(self.settings); self.executor.enforce_time_stop(self.settings); self.executor.enforce_session_close(self.settings,now)
+        risk_cfg=self.settings.config['risk']
+        if hasattr(self.db,'refresh_adaptive_gates'):
+            self.db.refresh_adaptive_gates(risk_cfg.get('gating_window',20),risk_cfg.get('gating_disable_hours',24),self.settings.magic_number,now)
         self._process_commands()
         if self._stop_after_cycle:
             self._set_status('stopped',state.equity)
