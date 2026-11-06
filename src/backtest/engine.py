@@ -14,7 +14,7 @@ from .. import indicators as ind
 from ..trade_rules import (adverse_exit_score, continuation_metrics, may_extend,
                            mtf_direction_agrees, scale_out_volume, should_exit_early,
                            stop_protects_profit, stop_target_from_atr, spread_within_median,
-                           stagnation_due)
+                           spread_within_expected_move, stagnation_due)
 
 TF_DELTA={'M1':timedelta(minutes=1),'M5':timedelta(minutes=5),'M15':timedelta(minutes=15),'H1':timedelta(hours=1)}
 
@@ -267,7 +267,7 @@ class Backtester:
                             atr_fallback=float(ind.atr(m1_closed).iloc[-1]) if m1_closed is not None and len(m1_closed) else 0.0
                             point=self._point(symbol,self.specs.get(symbol,{}))
                             horizon=max(1.0,float(self.settings.config.get('risk',{}).get('move_horizon_minutes',10)))
-                            if atr_fallback<=0 or current_spread*point/(atr_fallback*math.sqrt(horizon))>float(scanner_cfg.get('max_spread_volatility_ratio',1.0)): continue
+                            if not spread_within_expected_move(current_spread*point,atr_fallback,horizon,float(scanner_cfg.get('max_spread_volatility_ratio',1.0))): continue
                     indices=data[symbol][tf].index; next_pos=indices.searchsorted(open_time,side='right')
                     if next_pos>=len(indices): continue
                     next_idx=indices[next_pos]

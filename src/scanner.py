@@ -12,7 +12,7 @@ from .features import build_features
 from .risk import calc_volume
 from .strategies import load_strategies
 from .symbols import SymbolService
-from .trade_rules import confidence_allowed, mtf_direction_agrees, stop_target_from_atr, spread_within_median
+from .trade_rules import confidence_allowed, mtf_direction_agrees, stop_target_from_atr, spread_within_median, spread_within_expected_move
 from .patterns.chart import detect_chart_patterns
 from .patterns.candles import detect_candlestick_patterns
 from .patterns.fibonacci import fibonacci_retracement
@@ -146,7 +146,7 @@ class MarketScanner:
                     rejection['spread above 24h median limit']+=1; continue
             cached=self._volatility_cache.get(symbol); max_ratio=float(cfg['max_spread_volatility_ratio'])
             horizon=max(1.0,float(self.settings.config['risk']['move_horizon_minutes']))
-            if not force and cached and (datetime.now(timezone.utc)-cached['time']).total_seconds()<=int(cfg['movement_timeframe_minutes'])*60 and cached['atr']>0 and spread_price/(cached['atr']*math.sqrt(horizon))>max_ratio:
+            if not force and cached and (datetime.now(timezone.utc)-cached['time']).total_seconds()<=int(cfg['movement_timeframe_minutes'])*60 and not spread_within_expected_move(spread_price,cached['atr'],horizon,max_ratio):
                 rejection['spread too high relative to recent volatility']+=1; continue
             snapshots[symbol]={'point':point,'spread_price':spread_price}
             stage1.append(symbol)
@@ -165,9 +165,8 @@ class MarketScanner:
                 move_rejections['movement indicators unavailable']+=1; continue
             horizon=max(1.0,float(self.settings.config['risk']['move_horizon_minutes']))
             expected_move=atr*math.sqrt(horizon)
-            spread_ratio=spread_price/expected_move if spread_price and expected_move>0 else 0.0
             self._volatility_cache[symbol]={'atr':atr,'time':datetime.now(timezone.utc)}
-            if symbol not in open_symbols and spread_ratio>max_ratio:
+            if symbol not in open_symbols and not spread_within_expected_move(spread_price,atr,horizon,max_ratio):
                 move_rejections['spread too high relative to recent volatility']+=1; continue
             relative_range=recent_range/max(spread_price,snapshots.get(symbol,{}).get('point',0.0)*.01,1e-12)
             score=expected_move/max(spread_price,snapshots.get(symbol,{}).get('point',0.0),1e-12)

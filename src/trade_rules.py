@@ -40,6 +40,13 @@ def spread_within_median(current: float, median: float, ratio: float) -> bool:
     """Reject absent/invalid baseline spreads and abnormally wide current spreads."""
     return all(math.isfinite(float(x)) for x in (current, median, ratio)) and median > 0 and current <= median * ratio
 
+def spread_within_expected_move(spread_price: float, atr_price: float, horizon_bars: float, max_ratio: float) -> bool:
+    """Compare spread and square-root-time ATR in the same price units."""
+    values=(float(spread_price),float(atr_price),float(horizon_bars),float(max_ratio))
+    if not all(math.isfinite(value) for value in values) or values[0]<0 or values[1]<=0 or values[2]<=0 or values[3]<=0:
+        return False
+    return values[0] <= values[1]*math.sqrt(values[2])*values[3]
+
 
 def confidence_allowed(confidence: float, minimum: float) -> bool:
     """Check a normalized strategy confidence against its configured floor."""

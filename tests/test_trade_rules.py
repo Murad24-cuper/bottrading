@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from src.trade_rules import adverse_exit_score, confidence_allowed, mtf_direction_agrees, scale_out_volume, should_exit_early, stop_only_tightens, stagnation_due, stop_protects_profit, continuation_metrics, stop_target_from_atr, spread_within_median, may_extend
+from src.trade_rules import adverse_exit_score, confidence_allowed, mtf_direction_agrees, scale_out_volume, should_exit_early, stop_only_tightens, stagnation_due, stop_protects_profit, continuation_metrics, stop_target_from_atr, spread_within_median, spread_within_expected_move, may_extend
 
 
 def _frame(direction='buy', bars=80):
@@ -15,6 +15,11 @@ def test_mtf_agreement_requires_all_three_directions():
     assert mtf_direction_agrees(candles, 'buy')
     candles['M5'] = _frame('sell')
     assert not mtf_direction_agrees(candles, 'buy')
+
+def test_spread_filter_compares_same_price_units_over_horizon():
+    assert spread_within_expected_move(.001, .0002, 25, 1.0)
+    assert not spread_within_expected_move(.0011, .0002, 25, 1.0)
+    assert not spread_within_expected_move(.1, 0, 25, 1.0)
 
 def test_mtf_two_of_three_agreement_accepts_one_disagreement():
     candles={tf:_frame() for tf in ('M1','M5','M15')}; candles['M5']=_frame('sell')
