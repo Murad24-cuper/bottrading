@@ -10,6 +10,7 @@ class FakeDB:
     def log_event(self,*args): self.events.append(args)
     def get_open_trades(self): return self.open
     def insert_trade(self,**kwargs): self.inserted.append(kwargs)
+    def update_open_trade(self,*args,**kwargs): return 1
 
 class FakeMT5:
     POSITION_TYPE_BUY=0; ORDER_TYPE_BUY=0; ORDER_TYPE_SELL=1

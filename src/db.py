@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS bot_status(
  scan_seconds REAL, scan_rejections TEXT, strategy_diagnostics TEXT);
 CREATE TABLE IF NOT EXISTS commands(
  id INTEGER PRIMARY KEY, time TEXT, created_at TEXT, expires_at TEXT, command TEXT, status TEXT, message TEXT, processed_time TEXT);
+CREATE TABLE IF NOT EXISTS schema_migrations(name TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
 '''
 
 class Database:
@@ -70,6 +71,11 @@ class Database:
                 except ValueError:
                     expiry=(datetime.now(timezone.utc)+timedelta(seconds=60)).isoformat()
                 connection.execute('UPDATE commands SET created_at=COALESCE(created_at,?),expires_at=COALESCE(expires_at,?) WHERE id=?',(created,expiry,row['id']))
+            migration='profitable_sl_close_reason_to_trail'
+            applied=connection.execute('SELECT 1 FROM schema_migrations WHERE name=?',(migration,)).fetchone()
+            if not applied:
+                connection.execute("UPDATE trades SET close_reason='trail' WHERE status='closed' AND close_reason='sl' AND profit>0")
+                connection.execute('INSERT INTO schema_migrations(name,applied_at) VALUES (?,?)',(migration,datetime.now(timezone.utc).isoformat()))
     @staticmethod
     def _insert(connection,table,values):
         columns=list(values)

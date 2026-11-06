@@ -28,3 +28,22 @@ def test_sync_separates_partial_and_final_realized_pnl(tmp_path):
     assert row['commission']==pytest.approx(-.15) and row['swap']==pytest.approx(.02)
     assert len(partial)==1 and partial[0]['deal_ticket']==2 and partial[0]['profit']==1
     assert db.get_pnl_since('2026-11-05T00:00:00+00:00')==pytest.approx(2.83)
+
+
+@pytest.mark.parametrize(('stop','deal_profit','expected'),[
+    (1.099,0.0,'trail'),   # stop moved from the original 1.0900 level
+    (1.09,0.25,'trail'),   # profitable stop execution even if row history is old
+    (1.09,-0.5,'sl'),      # original stop with a loss remains an SL
+])
+def test_sync_classifies_profitable_or_moved_sl_as_trailing_stop(tmp_path,stop,deal_profit,expected):
+    db=Database(tmp_path/'trail.db')
+    db.insert_trade(ticket=18,symbol='EURUSD',asset_group='forex',direction='buy',volume=.1,initial_volume=.1,open_time='2026-11-05T10:00:00+00:00',open_price=1.1,sl=stop,tp=1.12,profit=0,commission=0,swap=0,magic=7,status='open',initial_risk=.01)
+    deal=SimpleNamespace(ticket=4,position_id=18,entry=1,time=1793872860,volume=.1,price=stop,profit=deal_profit,commission=0,swap=0,reason=4,comment='')
+    class MT5:
+        DEAL_ENTRY_OUT=1; DEAL_ENTRY_OUT_BY=3; DEAL_ENTRY_INOUT=2; DEAL_REASON_TP=5; DEAL_REASON_SL=4
+        def positions_get(self): return []
+        def history_deals_get(self,*args,**kwargs): return [deal]
+        def last_error(self): return (0,'ok')
+    executor=Executor(MT5(),SimpleNamespace(magic_number=7),db)
+    assert executor.sync_positions()==[18]
+    assert db.get_trade(18)['close_reason']==expected

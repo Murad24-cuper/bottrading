@@ -42,7 +42,7 @@ def get_open_positions(path=None):
     return _rows(path,"SELECT ticket,symbol,direction,volume,open_time,open_price,sl,tp,profit,commission,swap,strategy,magic FROM trades WHERE status='open' ORDER BY open_time")
 
 def get_closed_trades(start_utc,end_utc,path=None):
-    rows=_rows(path,"SELECT close_time,symbol,direction,volume,open_price,close_price,profit,commission,swap,close_reason,strategy FROM trades WHERE status='closed' AND close_time>=? AND close_time<? ORDER BY close_time DESC",(start_utc,end_utc))
+    rows=_rows(path,"SELECT close_time,symbol,direction,volume,open_price,close_price,sl,tp,profit,commission,swap,close_reason,strategy FROM trades WHERE status='closed' AND close_time>=? AND close_time<? ORDER BY close_time DESC",(start_utc,end_utc))
     for row in rows: row['net_profit']=float(row.get('profit') or 0)+float(row.get('commission') or 0)+float(row.get('swap') or 0)
     return rows
 

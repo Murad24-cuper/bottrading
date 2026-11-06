@@ -3,7 +3,7 @@ from src.dashboard import queries
 
 def test_dashboard_queries_return_database_only_views_and_queue_commands(tmp_path):
     path=tmp_path/'dashboard.db'; db=Database(path)
-    db.insert_trade(ticket=1,symbol='EURUSD',asset_group='forex',direction='buy',volume=.1,open_time='2026-11-05T10:00:00+00:00',close_time='2026-11-05T10:10:00+00:00',open_price=1.1,close_price=1.11,profit=2,commission=-.2,swap=0,magic=20260001,status='closed',close_reason='tp',strategy='breakout')
+    db.insert_trade(ticket=1,symbol='EURUSD',asset_group='forex',direction='buy',volume=.1,open_time='2026-11-05T10:00:00+00:00',close_time='2026-11-05T10:10:00+00:00',open_price=1.1,close_price=1.11,sl=1.09,tp=1.12,profit=2,commission=-.2,swap=0,magic=20260001,status='closed',close_reason='tp',strategy='breakout')
     db.insert_trade(ticket=2,symbol='XAUUSD',asset_group='metals',direction='sell',volume=.01,open_time='2026-11-05T10:05:00+00:00',open_price=2000,profit=-.5,commission=0,swap=0,magic=20260001,status='open',strategy='trend_pullback')
     db.insert_partial_close(ticket=2,symbol='XAUUSD',volume=.01,price=1999,profit=.3,commission=-.02,swap=0,reason='partial_tp',time='2026-11-05T10:08:00+00:00')
     db.insert_signal(time='2026-11-05T10:00:00+00:00',symbol='EURUSD',strategy='breakout',direction='buy',timeframe='M5',confidence=.8,entry=1.1,sl=1.09,tp=1.12,expected_cost=.1,score=1.5,taken=1,skip_reason='')
@@ -17,6 +17,7 @@ def test_dashboard_queries_return_database_only_views_and_queue_commands(tmp_pat
     assert summary['wins']==1 and summary['taken']==2.08
     assert queries.get_open_positions(path)[0]['symbol']=='XAUUSD'
     assert queries.get_closed_trades(start,end,path)[0]['net_profit']==1.8
+    assert queries.get_closed_trades(start,end,path)[0]['sl']==1.09
     assert queries.get_latest_signals(path)[0]['score']==1.5
     assert queries.get_recent_events(path)[0]['level']=='WARNING'
     assert queries.get_equity_curve(start,end,path)[0]['equity']==101.5

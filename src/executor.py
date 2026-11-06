@@ -142,6 +142,9 @@ class Executor:
             self._event(f'Refused SL/TP modification: ticket={ticket} stop is not on the protective side of the market','WARNING'); return False
         req={'action':m.TRADE_ACTION_SLTP,'position':ticket,'symbol':p.symbol,'sl':sl,'tp':tp,'magic':self.settings.magic_number}
         result=m.order_send(req); ok=bool(result and result.retcode==m.TRADE_RETCODE_DONE)
+        if ok:
+            try: self.db.update_open_trade(int(p.ticket),sl=float(sl),tp=float(tp))
+            except Exception as exc: self._event(f'Could not persist updated SL/TP for ticket={p.ticket}: {exc}','WARNING')
         self._event(f'Modify SL/TP ticket={ticket} success={ok}'+('' if ok else f' error={getattr(result,"comment",m.last_error())}'), 'INFO' if ok else 'WARNING')
         return ok
     def enforce_time_stop(self,settings=None):
@@ -230,14 +233,25 @@ class Executor:
         if reason not in {'tp','partial_tp','trail','momentum_lost','stagnant','sl','time','session_close','manual','kill'}:
             reason=self._close_reason([deal],forced='partial_tp')
         self.db.insert_partial_close(deal_ticket=deal_ticket or None,ticket=int(row['ticket']),symbol=row['symbol'],time=mt5_epoch_to_utc(deal.time,self.mt5).isoformat(),volume=float(getattr(deal,'volume',0) or 0),price=float(getattr(deal,'price',0) or 0),profit=float(getattr(deal,'profit',0) or 0),commission=float(getattr(deal,'commission',0) or 0),swap=float(getattr(deal,'swap',0) or 0),reason=reason)
-    def _close_reason(self,deals,forced=None):
+    def _close_reason(self,deals,forced=None,row=None):
         if forced in {'partial_tp','trail','momentum_lost','stagnant','time','session_close','manual','kill'}: return forced
         m=self.mt5
         for deal in reversed(deals):
             reason=getattr(deal,'reason',None)
             if reason==getattr(m,'DEAL_REASON_TP',5): return 'tp'
-            if reason==getattr(m,'DEAL_REASON_SL',4): return 'sl'
+            if reason==getattr(m,'DEAL_REASON_SL',4):
+                if float(getattr(deal,'profit',0) or 0)>0 or self._sl_was_moved(row): return 'trail'
+                return 'sl'
         return forced or 'manual'
+    @staticmethod
+    def _sl_was_moved(row):
+        if not row: return False
+        try:
+            entry=float(row.get('open_price') or 0); risk=float(row.get('initial_risk') or 0); current=float(row.get('sl') or 0)
+            if entry<=0 or risk<=0 or current<=0: return False
+            original=entry-risk if row.get('direction')=='buy' else entry+risk
+            return abs(current-original)>max(1e-9,abs(original)*1e-9)
+        except (TypeError,ValueError,AttributeError): return False
     def sync_positions(self,close_reasons=None,close_data=None):
         """Reconcile DB open rows against broker positions and closing deal history."""
         live=set()
@@ -304,7 +318,7 @@ class Executor:
                 fallback=fallbacks.get(ticket,{})
                 close_price=float(fallback.get('close_price',row.get('open_price') or 0)); close_time=datetime.now(timezone.utc).isoformat()
                 profit=float(fallback.get('profit',0)); commission=0.0; swap=float(fallback.get('swap',0))
-            close_reason=self._close_reason(final_closing,reasons.get(ticket))
+            close_reason=self._close_reason(final_closing,reasons.get(ticket),row)
             self.db.update_trade_close(ticket,close_time=close_time,close_price=close_price,profit=profit,commission=commission,swap=swap,close_reason=close_reason)
             self._event(f'Synced closed ticket={ticket} reason={close_reason} profit={profit}')
             reconciled.append(ticket)

@@ -51,3 +51,17 @@ def test_duplicate_pending_commands_are_refused(tmp_path):
     db.insert_command('pause')
     with pytest.raises(ValueError,match='already pending or running'):
         db.insert_command('pause')
+
+def test_profitable_sl_close_migration_is_one_time_and_preserves_losing_sl(tmp_path):
+    path=tmp_path/'close-reasons.db'; db=Database(path)
+    db.insert_trade(ticket=21,status='closed',close_reason='sl',profit=2.5)
+    db.insert_trade(ticket=22,status='closed',close_reason='sl',profit=-1.0)
+    with db.connect() as conn:
+        conn.execute("DELETE FROM schema_migrations WHERE name='profitable_sl_close_reason_to_trail'")
+    Database(path)
+    with db.connect() as conn:
+        reasons=dict(conn.execute('SELECT ticket,close_reason FROM trades'))
+        assert reasons=={21:'trail',22:'sl'}
+        conn.execute("UPDATE trades SET close_reason='sl' WHERE ticket=21")
+    Database(path)
+    assert Database(path).get_trade(21)['close_reason']=='sl'
