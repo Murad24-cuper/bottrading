@@ -246,7 +246,7 @@ def main():
             cards[2].metric('Orta qazanc',format_money(overall['average_win'])); cards[3].metric('Orta zərər',format_money(overall['average_loss']))
             cards[4].metric('Gözlənilən nəticə',format_money(overall['expectancy'],signed=True)); cards[5].metric('Cəmi nəticə',format_money(overall['total_pnl'],signed=True))
             drawdown=f"{overall['max_drawdown_pct']:.2f}%" if overall['max_drawdown_pct'] is not None else 'Məlumat yoxdur'
-            st.caption(f"Maksimum azalma: {drawdown} · qeydə alınan komissiya xərcləri: {format_money(overall['estimated_costs'])}")
+            st.caption(f"Maksimum azalma: {drawdown} · təxmini əməliyyat xərcləri: {format_money(overall['estimated_costs'])}")
             for title,key in [('Strategiyaya görə','by_strategy'),('Aktiv qrupuna görə','by_asset_group'),('Bağlanma səbəbinə görə','by_close_reason')]:
                 rows=report[key]
                 if rows:
