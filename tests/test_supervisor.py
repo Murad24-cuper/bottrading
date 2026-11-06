@@ -35,6 +35,11 @@ def test_detached_supervisor_prefers_pythonw_and_falls_back(tmp_path):
     pythonw=tmp_path/'pythonw.exe'; pythonw.write_text('')
     assert detached_python_executable(python)==str(pythonw)
 
+def test_supervisor_health_check_interval():
+    from scripts.run_forever import health_check_due
+    assert not health_check_due(10,69.9)
+    assert health_check_due(10,70)
+
 
 def test_supervisor_stops_after_restart_limit_and_logs_critical():
     calls=[]; events=[]; now=[0]

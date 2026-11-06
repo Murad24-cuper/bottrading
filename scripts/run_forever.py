@@ -21,6 +21,10 @@ from src.scheduler import due_scheduler_jobs,run_daily_backup,should_restart_for
 
 log = get_logger('bot.supervisor')
 
+def health_check_due(last_check: float, now: float, interval: float=60.0) -> bool:
+    """Return whether the supervisor's periodic child-health check is due."""
+    return float(now)-float(last_check)>=float(interval)
+
 
 def _pid_alive(pid: int) -> bool:
     try:
@@ -85,7 +89,6 @@ def main() -> int:
     child_script = settings.root / 'scripts' / 'run_bot.py'
     bot_lock = data_dir / 'bot.lock'
     child = None
-    last_health_check=0.0; last_disk_warning=0.0
 
     def emit(level: str, message: str) -> None:
         getattr(log, level.lower(), log.info)(message)
@@ -96,6 +99,7 @@ def main() -> int:
 
     def run_child() -> int:
         nonlocal child
+        last_health_check=0.0; last_disk_warning=0.0
         if not clear_stale_pid_lock(bot_lock,_pid_alive):
             try: existing=bot_lock.read_text(encoding='utf-8').split()[0]
             except (OSError,IndexError): existing='unknown'
@@ -120,7 +124,7 @@ def main() -> int:
             try: return int(child.wait(timeout=1))
             except subprocess.TimeoutExpired: pass
             tick=time.monotonic()
-            if tick-last_health_check>=60:
+            if health_check_due(last_health_check,tick):
                 last_health_check=tick
                 free=shutil.disk_usage(settings.data_dir).free
                 health=settings.config.get('health',{})
