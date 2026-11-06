@@ -34,13 +34,13 @@ class FakeExecutor:
     def __init__(self): self.opened=[]; self.closed_all=0; self.synced=0
     def sync_positions(self): self.synced+=1
     def enforce_time_stop(self,*args): pass
-    def enforce_weekend_close(self,*args): pass
+    def enforce_session_close(self,*args): pass
     def open_trade(self,signal,volume):
         self.opened.append((signal,volume)); return TradeResult(True,77,signal.entry_hint,volume,10009,'done')
     def close_all(self,reason): self.closed_all+=1; return []
 
 def make_settings(root,mode='shadow',strategies=None,max_errors=5):
-    risk={'risk_per_trade_pct':.5,'daily_loss_limit_pct':3,'weekly_loss_limit_pct':8,'max_open_positions':10,'max_positions_per_group':4,'max_positions_per_currency':2,'max_positions_per_underlying_group':2,'symbol_cooldown_minutes':30,'max_trades_per_symbol_per_day':5,'max_margin_usage_pct':40,'max_hold_minutes':120,'min_risk_reward':1,'max_cost_to_target_ratio':.3,'no_new_trades_friday_after_utc':'20:00','close_all_friday_utc':'21:30'}
+    risk={'risk_per_trade_pct':.5,'daily_loss_limit_pct':3,'weekly_loss_limit_pct':8,'max_open_positions':10,'max_positions_per_group':4,'max_positions_per_currency':2,'max_positions_per_underlying_group':2,'symbol_cooldown_minutes':30,'max_trades_per_symbol_per_day':5,'max_margin_usage_pct':40,'max_hold_minutes':720,'first_target_r':.7,'scale_out_pct':50,'trail_atr_mult':1.5,'stagnation_minutes':45,'stagnation_min_r':.3,'momentum_lookback_bars':5,'breakeven_cost_multiplier':1,'no_entry_before_close_minutes':60,'max_session_gap_hours':6,'min_risk_reward':1,'max_cost_to_target_ratio':.3}
     return SimpleNamespace(root=root,magic_number=20260001,risk=SimpleNamespace(**risk),db_path=root/'bot.db',config={'live':{'mode':mode,'strategies':strategies or [],'max_cycle_errors':max_errors,'equity_snapshot_seconds':30,'heartbeat_seconds':10},'risk':risk,'loop':{'interval_seconds':5}})
 
 def make_bot(tmp_path,mode='shadow',strategies=None,candidate=True,max_errors=5,clock=None):
@@ -59,6 +59,8 @@ def test_shadow_cycle_logs_skip_and_never_opens(tmp_path):
     with db.connect() as conn: signal=conn.execute('SELECT taken,skip_reason FROM signals WHERE id=?',(item.signal_row_id,)).fetchone()
     assert result.continue_running and executor.opened==[]
     assert signal['taken']==0 and signal['skip_reason']=='shadow mode'
+    with db.connect() as conn:
+        assert conn.execute("SELECT 1 FROM bot_events WHERE message LIKE 'Open bot positions by asset group:%'").fetchone()
 
 def test_trade_mode_opens_only_live_allowlisted_strategy(tmp_path):
     bot,db,_,_,_,executor,item=make_bot(tmp_path,'trade',['breakout'])
@@ -124,6 +126,23 @@ def test_pause_and_resume_commands_manage_stop_file(tmp_path):
     resume=db.insert_command('resume'); bot.cycle()
     assert not (tmp_path/'STOP').exists() and len(executor.opened)==1
     with db.connect() as conn: assert conn.execute('SELECT status FROM commands WHERE id=?',(resume,)).fetchone()[0]=='done'
+
+def test_stop_command_exits_after_management_before_scanning(tmp_path):
+    bot,db,_,_,scanner,executor,_=make_bot(tmp_path,'trade',['breakout'])
+    command=db.insert_command('stop')
+    result=bot.cycle()
+    assert result.continue_running is False
+    assert scanner.calls==0 and executor.closed_all==0
+    assert db.get_bot_status()['status']=='stopped'
+    with db.connect() as conn: assert conn.execute('SELECT status FROM commands WHERE id=?',(command,)).fetchone()[0]=='done'
+
+def test_close_all_stop_closes_then_exits(tmp_path):
+    bot,db,_,_,scanner,executor,_=make_bot(tmp_path,'trade',['breakout'])
+    command=db.insert_command('close_all_stop')
+    result=bot.cycle()
+    assert result.continue_running is False
+    assert executor.closed_all==1 and scanner.calls==0
+    with db.connect() as conn: assert conn.execute('SELECT status FROM commands WHERE id=?',(command,)).fetchone()[0]=='done'
 
 def test_run_forever_releases_lock_and_shuts_down_client(tmp_path):
     bot,_,_,client,_,_,_=make_bot(tmp_path,candidate=False)

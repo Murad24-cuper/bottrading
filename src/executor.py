@@ -72,7 +72,7 @@ class Executor:
         return TradeResult(True,ticket,result.price,volume,result.retcode,str(result.comment))
     def close_position(self,ticket,reason):
         m=self.mt5
-        if reason not in {'tp','partial_tp','trail','momentum_lost','stagnant','sl','time','session_close','manual','kill','weekend','error'}: return self._failure(f'Refused close: unsupported reason {reason!r}',ticket=ticket)
+        if reason not in {'tp','partial_tp','trail','momentum_lost','stagnant','sl','time','session_close','manual','kill'}: return self._failure(f'Refused close: unsupported reason {reason!r}',ticket=ticket)
         p=next((x for x in (m.positions_get() or []) if (int(x.ticket)==int(ticket) or int(getattr(x,'identifier',-1) or -1)==int(ticket)) and int(x.magic)==self.settings.magic_number),None)
         if p is None: return self._failure(f'Refused close: owned position {ticket} not found',ticket=ticket)
         tick=m.symbol_info_tick(p.symbol)
@@ -170,10 +170,23 @@ class Executor:
                     if math.isfinite(trail) and tighter and valid: self.modify_sl_tp(p.ticket,trail,float(p.tp or 0))
             if age>=config.stagnation_minutes and peak<float(config.stagnation_min_r): actions.append(self.close_position(p.ticket,'stagnant'))
         return actions
-    def enforce_weekend_close(self,settings=None,now_utc=None):
+    def enforce_session_close(self,settings=None,now_utc=None):
+        """Close only symbols approaching a broker-observed long session gap."""
         risk=(settings or self.settings).risk; now=now_utc or datetime.now(timezone.utc)
-        if now.weekday()==4 and now.strftime('%H:%M')>=risk.close_all_friday_utc: return self.close_all('weekend')
-        return []
+        service=self.symbol_service
+        if service is None:
+            from .symbols import SymbolService
+            service=SymbolService(self.mt5,self.settings)
+            self.symbol_service=service
+        actions=[]
+        for position in (self.mt5.positions_get() or []):
+            if int(position.magic)!=self.settings.magic_number: continue
+            upcoming=service.next_session_close(position.symbol,now,risk.max_session_gap_hours)
+            if not upcoming: continue
+            minutes=(upcoming[0]-now).total_seconds()/60
+            if 0<=minutes<=risk.no_entry_before_close_minutes:
+                actions.append(self.close_position(position.ticket,'session_close'))
+        return actions
     def _history(self,ticket):
         try: return list(self.mt5.history_deals_get(position=int(ticket)) or [])
         except Exception:
@@ -182,7 +195,7 @@ class Executor:
                 return [deal for deal in deals if int(getattr(deal,'position_id',-1))==int(ticket)]
             except Exception: return []
     def _close_reason(self,deals,forced=None):
-        if forced in {'time','manual','kill','weekend','error'}: return forced
+        if forced in {'partial_tp','trail','momentum_lost','stagnant','time','session_close','manual','kill'}: return forced
         m=self.mt5
         for deal in reversed(deals):
             reason=getattr(deal,'reason',None)

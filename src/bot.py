@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime,timezone,timedelta
 from pathlib import Path
 import logging,os,signal,time,re,json
+from collections import Counter
 from .config import Settings
 from .db import Database
 from .executor import Executor
@@ -49,6 +50,7 @@ class TradingBot:
         self.cycle_number=0; self.consecutive_errors=0; self.trading_disabled=False; self.last_error=''; self._critical_reported=False
         self._market_closed_logged=False; self._last_snapshot=0.0; self._started=False; self._last_account_type='unknown'; self._daily_peak_equity=0.0
         self.stop_event=False; self._connection_down=False; self.lock=BotLock(settings.root/'data'/'bot.lock')
+        self._stop_after_cycle=False
     @property
     def live(self): return self.settings.config['live']
     def _now(self):
@@ -56,7 +58,7 @@ class TradingBot:
         return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
     def _set_status(self,status='running',equity=None):
         stats=getattr(self.scanner,'last_scan_stats',{}) if self.scanner else {}
-        self.db.upsert_bot_status(time=self._now().isoformat(),cycle=self.cycle_number,mode=self.live['mode'],status=status,account_type=self._last_account_type,equity=equity,last_error=self.last_error,scan_total=stats.get('total_symbols',0),scan_scanned=stats.get('symbols_scanned',0),scan_complete=int(bool(stats.get('scan_complete',False))),scan_stage1_passed=stats.get('stage1_passed',0),scan_top_n=stats.get('top_movers',0),scan_signals=stats.get('signals',0),scan_seconds=stats.get('scan_seconds',0),scan_rejections=json.dumps(stats.get('stage1_rejections',{}),sort_keys=True),strategy_diagnostics=json.dumps(stats.get('strategy_diagnostics',{}),sort_keys=True))
+        self.db.upsert_bot_status(time=self._now().isoformat(),cycle=self.cycle_number,mode=self.live['mode'],status=status,account_type=self._last_account_type,equity=equity,last_error=self.last_error,mt5_connected=int(not self._connection_down),scan_total=stats.get('total_symbols',0),scan_scanned=stats.get('symbols_scanned',0),scan_complete=int(bool(stats.get('scan_complete',False))),scan_stage1_passed=stats.get('stage1_passed',0),scan_top_n=stats.get('top_movers',0),scan_signals=stats.get('signals',0),scan_seconds=stats.get('scan_seconds',0),scan_rejections=json.dumps(stats.get('stage1_rejections',{}),sort_keys=True),strategy_diagnostics=json.dumps(stats.get('strategy_diagnostics',{}),sort_keys=True))
     def _event(self,level,message):
         log.log(getattr(logging,level.upper(),logging.INFO),message)
         self.db.log_event(level.upper(),'bot',message)
@@ -93,6 +95,13 @@ class TradingBot:
             try:
                 if action=='close_all':
                     results=self.executor.close_all('manual')
+                    failed=[r.message for r in results if not r.success]
+                    if failed: raise RuntimeError('; '.join(failed))
+                elif action=='stop':
+                    self._stop_after_cycle=True
+                elif action=='close_all_stop':
+                    self._stop_after_cycle=True
+                    results=self.executor.close_all('kill')
                     failed=[r.message for r in results if not r.success]
                     if failed: raise RuntimeError('; '.join(failed))
                 elif action=='pause':
@@ -148,7 +157,11 @@ class TradingBot:
         cooldown_active=cooldown>0 and self.db.symbol_closed_since(candidate.symbol,now-timedelta(minutes=cooldown),self.settings.magic_number)
         day_start=now.replace(hour=0,minute=0,second=0,microsecond=0)
         symbol_trades_today=self.db.count_symbol_trades_since(candidate.symbol,day_start,self.settings.magic_number)
-        allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,self.settings,candidate.cost,candidate.asset_group,now,margin,volume,spec,cooldown_active,symbol_trades_today)
+        session_closing=False
+        if service and hasattr(service,'next_session_close'):
+            upcoming=service.next_session_close(candidate.symbol,now,0.0)
+            session_closing=bool(upcoming and 0<=(upcoming[0]-now).total_seconds()/60<=self.settings.risk.no_entry_before_close_minutes)
+        allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,self.settings,candidate.cost,candidate.asset_group,now,margin,volume,spec,cooldown_active,symbol_trades_today,session_closing)
         if not allowed:
             self._signal_update(candidate,False,why); return False
         result=self.executor.open_trade(signal,volume)
@@ -170,8 +183,11 @@ class TradingBot:
         self.db.upsert_daily_stats(date=day,start_balance=float(start),end_balance=float(state.balance),pnl=closed_pnl+floating,trades_count=len(closed),wins=sum(net(x)>0 for x in closed),losses=sum(net(x)<0 for x in closed),max_drawdown=max(float(previous.get('max_drawdown') or 0) if previous else 0,self._daily_peak_equity-float(state.equity)),invested_margin_peak=peak_margin)
     def _connected_cycle(self,now):
         self._components(); account=self._account_type(); state=get_account_state(self.client.mt5); self._startup(state)
-        self.executor.sync_positions(); self.executor.enforce_time_stop(self.settings); self.executor.enforce_weekend_close(self.settings,now)
+        self.executor.sync_positions(); self.executor.enforce_time_stop(self.settings); self.executor.enforce_session_close(self.settings,now)
         self._process_commands()
+        if self._stop_after_cycle:
+            self._set_status('stopped',state.equity)
+            return CycleResult(False,0)
         scan=getattr(self.scanner,'scan',None) or getattr(self.scanner,'scan_once')
         candidates=scan()
         scan_stats=getattr(self.scanner,'last_scan_stats',{})
@@ -187,6 +203,8 @@ class TradingBot:
             if self._halt_requested(): return CycleResult(False,0,market_closed)
             self._candidate(candidate,now,allow_entries)
         state=get_account_state(self.client.mt5); positions=self._owned_positions()
+        open_by_group=Counter((self.scanner.symbols.get_asset_group(p.symbol) if self.scanner and getattr(self.scanner,'symbols',None) else 'other') for p in positions)
+        self._event('INFO',f'Open bot positions by asset group: {dict(open_by_group)}')
         self._daily_stats(state,positions,now)
         if self.monotonic()-self._last_snapshot>=int(self.live['equity_snapshot_seconds']):
             self.db.insert_equity_snapshot(time=now.isoformat(),balance=state.balance,equity=state.equity,margin=state.margin,free_margin=state.free_margin,open_positions=len(positions))

@@ -51,3 +51,39 @@ def test_dated_futures_are_excluded_from_universe_by_default():
 def test_dated_futures_can_be_included_when_explicitly_configured():
     service = make_service(['US500-DEC26'], exclude_dated=False)
     assert service.get_universe() == ['US500-DEC26']
+
+def test_session_close_is_inferred_in_utc_from_repeated_hourly_gaps():
+    import pandas as pd
+    from datetime import timedelta
+    from src.sessions import next_session_close
+    stamps=[]
+    start=datetime(2026,10,19,tzinfo=timezone.utc)
+    for day in range(15):
+        current=start+timedelta(days=day)
+        if current.weekday()>=5: continue
+        last_hour=20 if current.weekday()==4 else 23
+        stamps.extend(current.replace(hour=hour) for hour in range(last_hour+1))
+    frame=pd.DataFrame({'close':range(len(stamps))},index=pd.DatetimeIndex(stamps))
+    now=datetime(2026,10,30,20,30,tzinfo=timezone.utc)
+    upcoming=next_session_close(frame,now,6)
+    assert upcoming is not None
+    assert upcoming[0]==datetime(2026,10,30,21,0,tzinfo=timezone.utc)
+    assert upcoming[1]>6
+
+def test_session_close_is_inferred_in_utc_from_repeated_hourly_gaps():
+    import pandas as pd
+    from datetime import timedelta
+    from src.sessions import next_session_close
+    stamps=[]
+    start=datetime(2026,10,19,tzinfo=timezone.utc)
+    for day in range(15):
+        current=start+timedelta(days=day)
+        if current.weekday()>=5: continue
+        last_hour=20 if current.weekday()==4 else 23
+        stamps.extend(current.replace(hour=hour) for hour in range(last_hour+1))
+    frame=pd.DataFrame({'close':range(len(stamps))},index=pd.DatetimeIndex(stamps))
+    now=datetime(2026,10,30,20,30,tzinfo=timezone.utc)
+    upcoming=next_session_close(frame,now,6)
+    assert upcoming is not None
+    assert upcoming[0]==datetime(2026,10,30,21,0,tzinfo=timezone.utc)
+    assert upcoming[1]>6

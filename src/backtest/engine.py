@@ -48,6 +48,15 @@ class Backtester:
             choices=[tf for tf in ('M1','M5','M15','H1') if tf in frames]
             if choices: base_tf[symbol]=choices[0]; timeline.update(frames[choices[0]].index.to_pydatetime())
         timeline=sorted(timeline)
+        session_closes={}
+        max_session_gap=float(self.settings.config['risk']['max_session_gap_hours'])
+        for symbol,tf in base_tf.items():
+            index=data[symbol][tf].index
+            closures=[]
+            for prior,following in zip(index[:-1],index[1:]):
+                close_at=prior.to_pydatetime()+TF_DELTA[tf]
+                if (following.to_pydatetime()-close_at).total_seconds()/3600>max_session_gap: closures.append(close_at)
+            session_closes[symbol]=closures
         signal_lookback=int(self.settings.config['backtest'].get('signal_lookback_bars',300))
         balance=self.start_equity; positions={}; pending={}; trades=[]; curve=[]; last_prices={}; last_signal_bar={}; daily_pnl={}; weekly_pnl={}; symbol_trade_counts={}; symbol_last_close={}; commission=float(self.settings.config['backtest']['commission_per_lot_per_side']); slippage=float(self.settings.config['backtest']['slippage_points'])
         account_currency='USD'
@@ -80,6 +89,8 @@ class Backtester:
                 # Fill signals formed on the preceding closed bar at this bar's open.
                 for queued in pending.pop((symbol,open_time),[]):
                     if symbol in positions: continue
+                    next_close=next((stamp for stamp in session_closes.get(symbol,[]) if stamp>=open_time),None)
+                    if next_close and 0<=(next_close-open_time).total_seconds()/60<=float(self.settings.config['risk']['no_entry_before_close_minutes']): continue
                     signal=queued['signal']; entry_base=float(row.open); entry=entry_base+spread_price if signal.direction=='buy' else entry_base
                     entry+=slippage*point if signal.direction=='buy' else -slippage*point
                     adjusted=replace(signal,entry_hint=entry)
@@ -156,7 +167,9 @@ class Backtester:
                                     if math.isfinite(trail) and ((is_buy and pos['sl']<trail<close) or (not is_buy and (pos['sl']==0 or close<trail<pos['sl']))): pos['sl']=trail
                         if pos is not None:
                             age=(bar_end-pos['open_time']).total_seconds()/60
-                            if age>=float(risk['stagnation_minutes']) and pos['peak_favorable_r']<float(risk['stagnation_min_r']): reason='stagnant'
+                            next_close=next((stamp for stamp in session_closes.get(symbol,[]) if stamp>=open_time),None)
+                            if next_close and 0<=(next_close-open_time).total_seconds()/60<=float(risk['no_entry_before_close_minutes']): reason='session_close'
+                            elif age>=float(risk['stagnation_minutes']) and pos['peak_favorable_r']<float(risk['stagnation_min_r']): reason='stagnant'
                             elif age>=self.settings.risk.max_hold_minutes: reason='time'
                             else: reason=''
                             if reason:

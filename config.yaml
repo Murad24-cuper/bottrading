@@ -2,7 +2,7 @@
 account:
   mode: demo                    # demo | real
 
-# Position sizing and hard trading limits. All Friday times are UTC.
+# Position sizing and hard trading limits. Session rules are inferred from broker data in UTC.
 risk:
   risk_per_trade_pct: 0.5        # Equity risk at the stop per entry
   daily_loss_limit_pct: 3.0      # Stop new trades after this daily equity loss
@@ -25,8 +25,8 @@ risk:
   min_risk_reward: 1.0           # Minimum TP distance / SL distance
   max_cost_to_target_ratio: 0.3  # Maximum estimated round-trip cost / TP value
   max_spread_points: {}          # Optional per-symbol spread caps
-  no_new_trades_friday_after_utc: "20:00"
-  close_all_friday_utc: "21:30"
+  no_entry_before_close_minutes: 60 # Skip a symbol shortly before its next broker session close
+  max_session_gap_hours: 6       # Close owned positions before longer broker session breaks
 
 # Broker names vary by XM server and account type. These are search patterns.
 universe:

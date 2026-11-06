@@ -24,7 +24,21 @@ def underlying_group(symbol,asset_group):
  if key.startswith(('JP','JPN','AUS','HK','SG')): return 'asia_pacific_indices'
  return 'other_indices'
 class SymbolService:
- def __init__(self,mt5,settings): self.mt5=mt5; self.settings=settings; self.cache=[]; self.loaded=0
+ def __init__(self,mt5,settings): self.mt5=mt5; self.settings=settings; self.cache=[]; self.loaded=0; self._session_cache={}
+ def next_session_close(self,symbol,now_utc=None,min_gap_hours=0.0):
+  """Infer the next close from recurring gaps in the broker's H1 history."""
+  import time
+  from datetime import timedelta
+  from .market_data import get_closed_candles
+  from .sessions import next_session_close
+  now=now_utc or datetime.now(timezone.utc); cached=self._session_cache.get(symbol)
+  if cached is None or time.monotonic()-cached[0]>900:
+   try: frame=get_closed_candles(self.mt5,symbol,'H1',24*35)
+   except (RuntimeError,ValueError): frame=None
+   cached=(time.monotonic(),frame); self._session_cache[symbol]=cached
+  frame=cached[1]
+  if frame is None or len(frame)<48: return None
+  return next_session_close(frame,now,float(min_gap_hours))
  def list_all_symbols(self,refresh_minutes=5):
   import time
   if not self.cache or time.time()-self.loaded>refresh_minutes*60:
@@ -72,6 +86,10 @@ class SymbolService:
   tick_utc=mt5_epoch_to_utc(stamp,self.mt5) if stamp else None
   age=(datetime.now(timezone.utc)-tick_utc).total_seconds() if tick_utc else float('inf')
   if not t or age< -5 or age>60: return False,'stale tick / market closed'
+  upcoming=self.next_session_close(symbol)
+  if upcoming:
+   minutes=(upcoming[0]-datetime.now(timezone.utc)).total_seconds()/60
+   if 0<=minutes<=self.settings.risk.no_entry_before_close_minutes: return False,'symbol session closes soon'
   lim=self.settings.risk.max_spread_points.get(symbol)
   spread=(t.ask-t.bid)/i.point
   if lim is not None and spread>lim: return False,'spread exceeds limit'

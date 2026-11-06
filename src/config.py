@@ -31,8 +31,8 @@ class RiskSettings:
     min_risk_reward: float
     max_cost_to_target_ratio: float
     max_spread_points: dict[str, float]
-    no_new_trades_friday_after_utc: str
-    close_all_friday_utc: str
+    no_entry_before_close_minutes: int
+    max_session_gap_hours: float
 
 @dataclass(frozen=True)
 class Settings:
@@ -76,15 +76,16 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
         value=raw.get(key)
         if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<=low or (high is not None and value>high):
             raise ValueError(f'risk.{key} must be > {low}' + (f' and <= {high}' if high else ''))
-    for key in ('max_open_positions','max_positions_per_group','max_positions_per_currency','max_positions_per_underlying_group','max_trades_per_symbol_per_day','max_hold_minutes','momentum_lookback_bars','stagnation_minutes'):
+    for key in ('max_open_positions','max_positions_per_group','max_positions_per_currency','max_positions_per_underlying_group','max_trades_per_symbol_per_day','max_hold_minutes','momentum_lookback_bars','stagnation_minutes','no_entry_before_close_minutes'):
         if type(raw.get(key)) is not int or raw[key]<=0: raise ValueError(f'risk.{key} must be a positive integer')
+    if isinstance(raw.get('max_session_gap_hours'),bool) or not isinstance(raw.get('max_session_gap_hours'),(int,float)) or raw['max_session_gap_hours']<=0: raise ValueError('risk.max_session_gap_hours must be positive')
     for key in ('first_target_r','trail_atr_mult','stagnation_min_r','breakeven_cost_multiplier'):
         if isinstance(raw.get(key),bool) or not isinstance(raw.get(key),(int,float)) or not math.isfinite(raw[key]) or raw[key]<=0: raise ValueError(f'risk.{key} must be positive')
     if type(raw.get('scale_out_pct')) is not int or not 1<=raw['scale_out_pct']<=99: raise ValueError('risk.scale_out_pct must be an integer from 1 to 99')
     if type(raw['symbol_cooldown_minutes']) is not int or raw['symbol_cooldown_minutes']<0: raise ValueError('risk.symbol_cooldown_minutes must be a non-negative integer')
     spreads=raw.get('max_spread_points')
     if not isinstance(spreads,dict) or any(not isinstance(v,(int,float)) or v<0 for v in spreads.values()): raise ValueError('risk.max_spread_points must map symbols to non-negative numbers')
-    risk=RiskSettings(float(raw['risk_per_trade_pct']),float(raw['daily_loss_limit_pct']),float(raw['weekly_loss_limit_pct']),raw['max_open_positions'],raw['max_positions_per_group'],raw['max_positions_per_currency'],raw['max_positions_per_underlying_group'],raw['symbol_cooldown_minutes'],raw['max_trades_per_symbol_per_day'],float(raw['max_margin_usage_pct']),raw['max_hold_minutes'],float(raw['first_target_r']),int(raw['scale_out_pct']),float(raw['trail_atr_mult']),raw['stagnation_minutes'],float(raw['stagnation_min_r']),raw['momentum_lookback_bars'],float(raw['breakeven_cost_multiplier']),float(raw['min_risk_reward']),float(raw['max_cost_to_target_ratio']),spreads,_clock(raw.get('no_new_trades_friday_after_utc'),'no_new_trades_friday_after_utc'),_clock(raw.get('close_all_friday_utc'),'close_all_friday_utc'))
+    risk=RiskSettings(float(raw['risk_per_trade_pct']),float(raw['daily_loss_limit_pct']),float(raw['weekly_loss_limit_pct']),raw['max_open_positions'],raw['max_positions_per_group'],raw['max_positions_per_currency'],raw['max_positions_per_underlying_group'],raw['symbol_cooldown_minutes'],raw['max_trades_per_symbol_per_day'],float(raw['max_margin_usage_pct']),raw['max_hold_minutes'],float(raw['first_target_r']),int(raw['scale_out_pct']),float(raw['trail_atr_mult']),raw['stagnation_minutes'],float(raw['stagnation_min_r']),raw['momentum_lookback_bars'],float(raw['breakeven_cost_multiplier']),float(raw['min_risk_reward']),float(raw['max_cost_to_target_ratio']),spreads,raw['no_entry_before_close_minutes'],float(raw['max_session_gap_hours']))
     credentials={key:os.getenv(key,'').strip() for key in ('MT5_LOGIN','MT5_PASSWORD','MT5_SERVER')}
     if require_credentials:
         for key,value in credentials.items():

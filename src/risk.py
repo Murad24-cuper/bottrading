@@ -55,13 +55,13 @@ def _currency_exposure(positions,extra=None):
         base,quote=pair; totals[base]=totals.get(base,0)+sign; totals[quote]=totals.get(quote,0)-sign
     return totals
 
-def check_trade_allowed(signal, account, open_positions, pnl_today, pnl_week, settings, cost_estimate, symbol_group, now_utc: datetime, required_margin, volume: float | None = None, symbol_spec: dict | None = None, symbol_cooldown: bool = False, symbol_trades_today: int = 0):
+def check_trade_allowed(signal, account, open_positions, pnl_today, pnl_week, settings, cost_estimate, symbol_group, now_utc: datetime, required_margin, volume: float | None = None, symbol_spec: dict | None = None, symbol_cooldown: bool = False, symbol_trades_today: int = 0, session_closing: bool = False):
     """Apply all configured risk gates in the fixed order defined by the brief."""
     config=settings.config if hasattr(settings,'config') else settings
     risk=config['risk']; root=Path(getattr(settings,'root',Path.cwd()))
     if (root/'STOP').exists(): return False,'kill switch active'
     now_utc=now_utc.replace(tzinfo=timezone.utc) if now_utc.tzinfo is None else now_utc.astimezone(timezone.utc)
-    if now_utc.weekday()==4 and now_utc.strftime('%H:%M')>=risk['no_new_trades_friday_after_utc']: return False,'Friday trading cutoff'
+    if session_closing: return False,'symbol session closes soon'
     floating=sum(float(_value(p,'profit',0) or 0) for p in open_positions)
     balance=float(_value(account,'balance',_value(account,'equity',0)))
     if float(pnl_today)+floating<=-balance*risk['daily_loss_limit_pct']/100: return False,'daily loss limit reached'
