@@ -253,7 +253,7 @@ class Backtester:
                         m1_history=supplied['M1']; atr_value=float(ind.atr(m1_history).iloc[-1])
                         if not math.isfinite(atr_value) or atr_value<=0: continue
                         spread_price=self._spread_points(row)*self._point(symbol,self.specs.get(symbol,{}))
-                        sig.sl_price,sig.tp_price=stop_target_from_atr(float(sig.entry_hint),sig.direction,atr_value,spread_price,float(risk_cfg['sl_move_mult']),float(risk_cfg['tp_move_mult']))
+                        sig.sl_price,sig.tp_price=stop_target_from_atr(float(sig.entry_hint),sig.direction,atr_value,spread_price,float(risk_cfg['sl_move_mult']),float(risk_cfg['tp_move_mult']),float(risk_cfg['move_horizon_minutes']))
                     if 'max_spread_vs_median' in scanner_cfg:
                         if m1 is None: continue
                         median_bars=int(float(scanner_cfg.get('spread_median_lookback_hours',24))*60)

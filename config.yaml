@@ -22,6 +22,7 @@ risk:
   scale_out_pct: 50                # Percent to close at first target
   trail_atr_mult: 1.0             # ATR(M1) distance for trailing stop
   stagnation_minutes: 6          # Close if price has not progressed enough by this age
+  move_horizon_minutes: 10       # Horizon used to estimate ATR-based target movement
   stagnation_min_r: 0.2           # Minimum favorable R progress by stagnation_minutes
   momentum_lookback_bars: 5       # Closed bars used to detect momentum reversal
   breakeven_cost_multiplier: 1.0  # Include this multiple of estimated round-trip costs
@@ -30,8 +31,8 @@ risk:
   max_spread_points: {}          # Optional per-symbol spread caps
   no_entry_before_close_minutes: 60 # Skip a symbol shortly before its next broker session close
   max_session_gap_hours: 6       # Close owned positions before longer broker session breaks
-  sl_move_mult: 0.8               # ATR(M1)*sqrt(10) stop distance multiplier
-  tp_move_mult: 1.2               # ATR(M1)*sqrt(10) target distance multiplier
+  sl_move_mult: 0.8               # ATR(M1)*sqrt(move_horizon_minutes) stop multiplier
+  tp_move_mult: 1.2               # ATR(M1)*sqrt(move_horizon_minutes) target multiplier
   gating_window: 20               # Closed trades used for expectancy gating
   gating_disable_hours: 24        # Disable negative strategies/groups
   early_exit_enabled: true
@@ -132,6 +133,9 @@ notify:
 dashboard:
   real_balance_default: 100      # Starting value for the small-account simulation
   real_risk_pct_default: 1.0     # Planned risk percent used in that simulation
+paths:
+  data_dir: data                 # Relative to project root unless overridden in .env
+  logs_dir: logs                 # Relative to project root unless overridden in .env
 db:
   signals_retention_days: 7      # Keep recent signals for detailed dashboard views
   events_retention_days: 30      # Keep operational events for 30 days

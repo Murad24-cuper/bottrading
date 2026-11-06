@@ -14,7 +14,7 @@ This is a single-owner XM trading bot. Python connects to the locally running Me
    ```
 
 3. Copy `.env.example` to `.env` and set `MT5_LOGIN`, `MT5_PASSWORD` and `MT5_SERVER`. `MT5_PATH` is optional when MT5 is installed in a standard location. Keep `.env` private; it is ignored by Git. Real accounts are refused unless the account mode is `real` in `config.yaml` and `ALLOW_REAL=true` is set in `.env`.
-4. Run `pytest`, then `python scripts/check_connection.py`. Review the account type, margin mode, symbols and spreads.
+4. Run `pytest`, then `python scripts/check_connection.py`. Review the account type, margin mode, symbols and spreads. For a read-only local status summary later, run `python scripts/health_check.py`.
 5. Run `python scripts/test_order_demo.py` for a read-only dry run. The `--confirm` option places a DEMO test order, waits five seconds and closes it; never use it on a real account.
 
 ## Emergency stop and ownership
@@ -25,13 +25,14 @@ Create an empty file named `STOP` in this project folder to block new entries wh
 
 - `risk_per_trade_pct`: maximum equity budget at the stop for one trade. Volume rounds down to the broker step; if minimum volume exceeds the budget, the trade is refused.
 - `daily_loss_limit_pct` and `weekly_loss_limit_pct`: stop new entries at the configured loss, including floating P/L from open positions.
+- `max_trades_per_day`: maximum number of new bot entries during one UTC day. Entries accepted earlier in the same scan cycle count immediately.
 - `max_open_positions`: total position limit. `max_positions_per_group`: correlation limit for each asset group. `max_positions_per_currency` limits net FX/metals exposure per currency. `max_positions_per_underlying_group` limits correlated index exposure.
 - `max_margin_usage_pct`: maximum projected used margin as a share of equity. Leverage is only a margin constraint; it never sets position size.
 - `first_target_r` and `scale_out_pct`: close part of a position at the first favorable R target. If the broker's minimum volume prevents a split, close the full position there.
 
-## 10-minute trade rules
+## Short-horizon trade rules
 
-The bot normally holds a trade for at most 20 minutes; the target sizing still uses the expected 10-minute move. Signals are filtered so M1, M5 and M15 agree, confidence is at least 0.6, and current spread is no more than 1.5 times the symbol's 24-hour median. SL/TP distances use `ATR(M1) * sqrt(10)`: `risk.sl_move_mult` (0.8) sets the stop and `risk.tp_move_mult` (1.2) sets the target. The target must retain at least 1.3 times the stop risk after estimated costs, and spread plus commission may use at most 25% of target value.
+The bot normally holds a trade for at most `risk.max_hold_minutes` (20 minutes). Its ATR move estimate uses `risk.move_horizon_minutes` (10 minutes), independently of the hold limit. Signals are filtered so M1, M5 and M15 agree, confidence is at least 0.6, and current spread is no more than 1.5 times the symbol's 24-hour median. SL/TP distances use `ATR(M1) * sqrt(risk.move_horizon_minutes)`: `risk.sl_move_mult` (0.8) sets the stop and `risk.tp_move_mult` (1.2) sets the target. The target must retain at least 1.3 times the stop risk after estimated costs, and spread plus commission may use at most 25% of target value.
 
 - `risk.risk_per_trade_pct` (0.25): maximum equity risk at the stop.
 - `risk.max_hold_minutes` (20): normal hard holding limit. Positions may extend only under the protected-profit conditions below.
@@ -92,11 +93,15 @@ Install the latest dependencies with `python -m pip install -r requirements.txt`
 
 The dashboard binds to `127.0.0.1:8501` and reads bot state only from SQLite; it does not open an MT5 connection. `DASHBOARD_PASSWORD` is optional. Set it in `.env` or the Windows environment used to launch the dashboard to require a password. Keep the service on localhost or behind a separately secured tunnel.
 
+The dashboard has **Əsas**, **Hesabat**, **Hazırlıq** and **Ətraflı** tabs. Reports show today, the last seven days and all recorded trades split by strategy, asset group and close reason. The readiness checklist uses the last seven days. Its small-account simulation uses the broker specifications cached under `history.data_dir`; without those cached specifications it reports signals whose size could not be checked. Cost reporting uses recorded commissions; spread costs are not stored per completed trade.
+
 `live.mode: shadow` records decisions without sending orders. `live.mode: trade` submits DEMO trades that pass every risk gate. The checked-in configuration selects `trade` and lists all four strategies; change it to `shadow` when you want observation only. Real trading also requires `account.mode: real` and `ALLOW_REAL=true` in `.env`; `ALLOW_REAL=false` refuses it. Keep `.env` private and never commit it.
 
 Open the dashboard at **http://127.0.0.1:8501**. Start launches a detached supervisor, which starts the `.venv` bot and restarts unexpected exits after 10, 30, then 60 seconds. It stops after five restarts in a rolling hour and records a CRITICAL event. Stop bot exits after the current management step and leaves open positions protected by broker SL/TP; the supervisor sees the stop marker and does not restart it. Close all & stop needs the confirmation checkbox and also stops the supervisor. Commands expire after `live.command_ttl_seconds` (60 seconds by default), and duplicate pending commands are rejected. The dashboard shows bot, supervisor, heartbeat and MT5 state plus today's restart count.
 
 The bot uses `data/bot.lock` to refuse a second instance. The supervisor PID is recorded separately in `data/supervisor.pid`. If a process was force-terminated, confirm it is no longer running before removing stale lock files. Repeated cycle errors at `live.max_cycle_errors` exit the child so the supervisor can restart it. Detached stdout/stderr are written to `logs/bot_stdout.log`; uncaught main/thread exceptions and faulthandler tracebacks go to `logs/crash.log`, while regular bot logs remain in `logs/bot.log`.
+
+`health.stale_ticks_seconds` controls stale-price reconnect checks for owned open symbols. Three failed checks block new entries and send a critical notice; entries resume after the terminal and tick stream recover. `terminal_info().connected` and `trade_allowed` are checked each cycle. The weekly equity drawdown stop closes bot positions and sets the supervisor stop marker. Telegram settings are optional: `notify.big_loss_usd`, `notify.daily_summary_utc` and `notify.rate_limit_minutes` control notifications. Data pruning, online SQLite backups and idle weekly VACUUM are set by the `db` section. `paths.data_dir` and `paths.logs_dir` choose relative project folders; optional `.env` overrides are `BOT_DATA_DIR` and `BOT_LOG_DIR`.
 
 ### Telegram bildirişləri
 
@@ -105,3 +110,13 @@ Bildirişləri qoşmaq üçün Telegram-da **@BotFather** hesabına `/newbot` g�
 Close reasons in the trades table are `tp`, `partial_tp`, `trail`, `momentum_lost`, `stagnant`, `sl`, `time`, `session_close`, `manual`, and `kill`. Each scale-out is separately recorded in `partial_closes` and shown in the dashboard.
 
 For a VPS, use Windows Task Scheduler to start `start_bot.bat` at system startup, with **Start in** set to this project directory and the same Windows account/environment that can access MT5 and the credentials. Create a separate startup task for `start_dashboard.bat` only if the local dashboard is needed. Keep the dashboard bound to localhost; do not expose its port directly to the internet.
+
+### Serverə köçürmə
+
+1. Serverə kodu Git ilə köçürün; `.env` faylını Git-dən kənar təhlükəsiz üsulla ayrıca yerləşdirin. Heç vaxt `.env`-i repoya əlavə etməyin.
+2. DEMO üçün Windows server/VPS istifadə edin, çünki rəsmi MT5 Python paketi yerli Windows terminalı ilə işləyir. MT5 terminalını quraşdırın, DEMO hesabına daxil olun və alqoritmik ticarətə icazə verin.
+3. Python 3.11+, `pip install -r requirements.txt`, sonra `.env.example` əsasında `.env` yaradın. `ALLOW_REAL=false` saxlayın.
+4. Serverdə layihə qovluğunda `start_bot.bat` başladın. Panel lazımdırsa ayrıca `start_dashboard.bat` başladın. `python scripts/health_check.py` ilə son heartbeat və vəziyyəti yoxlayın.
+5. Panelə SSH tuneli ilə təhlükəsiz qoşulun: öz kompüterinizdə `ssh -L 8501:127.0.0.1:8501 WINDOWS_USER@SERVER` işlədin, sonra brauzerdə `http://127.0.0.1:8501` açın. Dashboard portunu internetə açmayın.
+
+`python scripts/health_check.py` serverdəki son qeyd olunmuş MT5 vəziyyətini SQLite-dan oxuyur; MT5-ə yeni bağlantı açmır.

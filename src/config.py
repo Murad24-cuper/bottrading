@@ -50,6 +50,14 @@ class Settings:
     def db_path(self) -> Path:
         path=Path(self.config['db_path'])
         return path if path.is_absolute() else self.root/path
+    @property
+    def data_dir(self) -> Path:
+        from .paths import project_paths
+        return project_paths(self.root)[0]
+    @property
+    def logs_dir(self) -> Path:
+        from .paths import project_paths
+        return project_paths(self.root)[1]
 
 def _clock(value: object, key: str) -> str:
     import re
@@ -76,7 +84,7 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
         value=raw.get(key)
         if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<=low or (high is not None and value>high):
             raise ValueError(f'risk.{key} must be > {low}' + (f' and <= {high}' if high else ''))
-    for key in ('max_open_positions','max_positions_per_group','max_positions_per_currency','max_positions_per_underlying_group','max_trades_per_symbol_per_day','max_trades_per_day','max_hold_minutes','max_hold_extended_minutes','extend_step_minutes','gating_window','gating_disable_hours','momentum_lookback_bars','stagnation_minutes','no_entry_before_close_minutes','early_exit_score_threshold','early_exit_ema_fast','early_exit_ema_slow','early_exit_swing_lookback','early_exit_rsi_period','early_exit_roc_period','early_exit_volume_lookback'):
+    for key in ('max_open_positions','max_positions_per_group','max_positions_per_currency','max_positions_per_underlying_group','max_trades_per_symbol_per_day','max_trades_per_day','max_hold_minutes','max_hold_extended_minutes','extend_step_minutes','gating_window','gating_disable_hours','momentum_lookback_bars','stagnation_minutes','move_horizon_minutes','no_entry_before_close_minutes','early_exit_score_threshold','early_exit_ema_fast','early_exit_ema_slow','early_exit_swing_lookback','early_exit_rsi_period','early_exit_roc_period','early_exit_volume_lookback'):
         if type(raw.get(key)) is not int or raw[key]<=0: raise ValueError(f'risk.{key} must be a positive integer')
     if isinstance(raw.get('max_session_gap_hours'),bool) or not isinstance(raw.get('max_session_gap_hours'),(int,float)) or raw['max_session_gap_hours']<=0: raise ValueError('risk.max_session_gap_hours must be positive')
     for key in ('first_target_r','trail_atr_mult','stagnation_min_r','breakeven_cost_multiplier','sl_move_mult','tp_move_mult','early_exit_volume_spike_ratio'):

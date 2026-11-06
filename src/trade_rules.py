@@ -24,10 +24,11 @@ def mtf_direction_agrees(candles: dict[str, pd.DataFrame], direction: str, timef
     return True
 
 
-def stop_target_from_atr(entry: float, direction: str, atr: float, spread: float, sl_mult: float, tp_mult: float) -> tuple[float, float]:
+def stop_target_from_atr(entry: float, direction: str, atr: float, spread: float, sl_mult: float, tp_mult: float, horizon_minutes: float) -> tuple[float, float]:
     """Build symmetric directional stop and target distances for a short horizon."""
-    stop_distance = float(atr) * math.sqrt(10) * float(sl_mult)
-    target_distance = float(atr) * math.sqrt(10) * float(tp_mult)
+    horizon=max(1.0,float(horizon_minutes))
+    stop_distance = float(atr) * math.sqrt(horizon) * float(sl_mult)
+    target_distance = float(atr) * math.sqrt(horizon) * float(tp_mult)
     # Include the current spread in the target's required distance.
     target_distance += max(0.0, float(spread))
     if not math.isfinite(stop_distance) or not math.isfinite(target_distance) or stop_distance <= 0:

@@ -125,7 +125,8 @@ class MarketScanner:
             if symbol not in open_symbols and spread_ratio>max_ratio:
                 move_rejections['spread too high relative to recent volatility']+=1; continue
             relative_range=recent_range/max(spread_price,snapshots.get(symbol,{}).get('point',0.0)*.01,1e-12)
-            expected_move=atr*math.sqrt(10)
+            horizon=float(self.settings.config['risk']['move_horizon_minutes'])
+            expected_move=atr*math.sqrt(horizon)
             score=expected_move/max(spread_price,snapshots.get(symbol,{}).get('point',0.0),1e-12)
             movement.append((score,symbol))
         self._cursor=(start+visited)%max(1,len(universe))
@@ -169,12 +170,14 @@ class MarketScanner:
                 if cfg.get('require_mtf_agreement',True) and not mtf_direction_agrees(candles,signal.direction,fast=int(cfg.get('mtf_ema_fast',5)),slow=int(cfg.get('mtf_ema_slow',13))):
                     reason='M1/M5/M15 direction disagreement'; self._write_signal(signal,0,reason); strategy_diagnostics[strategy.name]['mtf_disagreement']+=1; continue
                 if 'M1' not in candles:
-                    self._write_signal(signal,0,'M1 history missing for 10-minute target'); continue
+                    horizon=int(self.settings.config['risk']['move_horizon_minutes'])
+                    self._write_signal(signal,0,f'M1 history missing for {horizon}-minute target'); continue
                 m1_atr=float(ind.atr(candles['M1']).iloc[-1])
                 if not math.isfinite(m1_atr) or m1_atr<=0:
                     self._write_signal(signal,0,'M1 ATR unavailable'); continue
                 tick=self.mt5.symbol_info_tick(symbol); spread=max(0.0,float(tick.ask)-float(tick.bid)) if tick else 0.0
-                signal.sl_price,signal.tp_price=stop_target_from_atr(float(signal.entry_hint),signal.direction,m1_atr,spread,float(self.settings.config['risk']['sl_move_mult']),float(self.settings.config['risk']['tp_move_mult']))
+                risk_cfg=self.settings.config['risk']
+                signal.sl_price,signal.tp_price=stop_target_from_atr(float(signal.entry_hint),signal.direction,m1_atr,spread,float(risk_cfg['sl_move_mult']),float(risk_cfg['tp_move_mult']),float(risk_cfg['move_horizon_minutes']))
                 if signal.sl_price is None or signal.tp_price is None or signal.entry_hint is None:
                     self._write_signal(signal,0,'signal missing entry, SL, or TP'); continue
                 if signal.direction=='buy' and not signal.sl_price<signal.entry_hint<signal.tp_price:

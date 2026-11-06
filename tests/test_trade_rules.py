@@ -17,10 +17,13 @@ def test_mtf_agreement_requires_all_three_directions():
     assert not mtf_direction_agrees(candles, 'buy')
 
 
-def test_stop_target_from_atr_scales_expected_ten_minute_move():
-    sl, tp = stop_target_from_atr(100, 'buy', 2, .5, .8, 1.2)
-    assert sl == 100 - 2 * np.sqrt(10) * .8
-    assert tp == 100 + 2 * np.sqrt(10) * 1.2 + .5
+def test_stop_target_from_atr_uses_configured_horizon():
+    from pathlib import Path
+    import yaml
+    horizon=yaml.safe_load((Path(__file__).resolve().parents[1]/'config.yaml').read_text(encoding='utf-8'))['risk']['move_horizon_minutes']
+    sl, tp = stop_target_from_atr(100, 'buy', 2, .5, .8, 1.2, horizon)
+    assert sl == 100 - 2 * np.sqrt(horizon) * .8
+    assert tp == 100 + 2 * np.sqrt(horizon) * 1.2 + .5
 
 
 def test_spread_must_be_within_median_multiple():
