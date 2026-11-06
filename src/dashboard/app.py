@@ -22,6 +22,21 @@ def _lock_pid():
 
 def _pid_running(pid):
     if not pid: return False
+    if os.name=='nt':
+        import ctypes
+        from ctypes import wintypes
+        kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+        kernel.OpenProcess.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD]
+        kernel.OpenProcess.restype=wintypes.HANDLE
+        kernel.GetExitCodeProcess.argtypes=[wintypes.HANDLE,ctypes.POINTER(wintypes.DWORD)]
+        kernel.GetExitCodeProcess.restype=wintypes.BOOL
+        kernel.CloseHandle.argtypes=[wintypes.HANDLE]
+        handle=kernel.OpenProcess(0x1000,False,int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle: return ctypes.get_last_error()==5  # Access denied still means the PID exists.
+        try:
+            exit_code=wintypes.DWORD()
+            return bool(kernel.GetExitCodeProcess(handle,ctypes.byref(exit_code)) and exit_code.value==259)  # STILL_ACTIVE
+        finally: kernel.CloseHandle(handle)
     try: os.kill(int(pid),0); return True
     except (OSError,ValueError,ProcessLookupError): return False
 
