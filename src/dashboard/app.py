@@ -162,7 +162,7 @@ def main():
     st.caption(f'Nəzarətçi: {"işləyir" if supervisor_running else "dayanıb"} · Bu gün yenidən başladılma: {restart_count}')
     st.markdown('<style>.status-bar{color:white;padding:.75rem 1rem;border-radius:.55rem;font-weight:650;margin:.4rem 0 1rem}.metric-card{padding:1.1rem 1rem;border:1px solid rgba(128,128,128,.25);border-radius:.7rem;min-height:105px}.metric-label{font-size:.95rem;opacity:.8}.metric-value{font-size:1.7rem;font-weight:700;margin-top:.3rem}.metric-detail{font-size:.8rem;opacity:.75;margin-top:.2rem}div[data-testid="stButton"] button{min-height:3rem;font-weight:650}</style>',unsafe_allow_html=True)
 
-    tab_main, tab_report, tab_analysis, tab_prepare, tab_detail = st.tabs(['Əsas', 'Hesabat', 'Analiz', 'Hazırlıq', 'Ətraflı'])
+    tab_main, tab_report, tab_analysis, tab_prepare, tab_detail, tab_brain = st.tabs(['Əsas', 'Hesabat', 'Analiz', 'Hazırlıq', 'Ətraflı', 'Beyin'])
     with tab_main:
         controls=st.columns([1.4,1.15,1.4])
         if st.session_state.get('action_message'):
@@ -377,5 +377,40 @@ def main():
                 daily_frame=pd.DataFrame(daily_stats); daily_frame['Tarix']=pd.to_datetime(daily_frame.date)
                 st.bar_chart(daily_frame.set_index('Tarix')[['pnl']].rename(columns={'pnl':'Nəticə ($)'}),height=220)
             else: st.caption('Günlük statistika hələ yoxdur.')
+
+    with tab_brain:
+        brain_cfg=_APP_CONFIG.get('brain',{}); gate_path=DATA_DIR/'brain'/'gate.json'
+        try: gate=json.loads(gate_path.read_text(encoding='utf-8'))
+        except (OSError,ValueError): gate={'status':'FAIL','reasons':['Yekun test qiymətləndirməsi hələ aparılmayıb.']}
+        active=bool(brain_cfg.get('enabled',False) and gate.get('status')=='PASS')
+        if active: st.success('Beyin aktivdir · qəbul yoxlamasından keçib')
+        elif gate.get('status')=='PASS': st.info('Müşahidə rejimindədir · qəbul yoxlaması keçib, lakin config-də aktiv edilməyib')
+        else:
+            st.warning('Müşahidə rejimindədir · yoxlamadan keçməyib')
+            for reason in gate.get('reasons',[]): st.caption('• '+translate_message(reason))
+        if gate.get('evaluated_at'): st.caption('Son qiymətləndirmə: '+local_time(gate['evaluated_at']))
+        calibration=gate.get('metrics',{}).get('calibration',[])
+        st.subheader('Ehtimal kalibrlənməsi')
+        if calibration:
+            cal=pd.DataFrame(calibration).rename(columns={'predicted':'Proqnoz','actual':'Fakt','bucket':'Ehtimal aralığı','samples':'Nümunə sayı'}).set_index('Ehtimal aralığı')
+            st.line_chart(cal[['Proqnoz','Fakt']],height=230)
+        else: st.caption('Test və canlı kalibrlənmə məlumatı yoxdur.')
+        st.subheader('Müqayisə və qatların töhfəsi')
+        ablation=gate.get('metrics',{}).get('ablation',{})
+        if ablation:
+            st.table(pd.DataFrame([{'Model':name,'Əməliyyat':row['trades'],'Qazanma faizi':f"{row['win_rate']:.1%}",'Gözlənilən nəticə (R)':row['expectancy_r'],'Mənfəət əmsalı':row['profit_factor']} for name,row in ablation.items()]))
+        else: st.caption('Ablasiya nəticəsi mövcud deyil.')
+        scanned=int((status or {}).get('scan_scanned',0)); total=int((status or {}).get('scan_total',0)); interval=float(_APP_CONFIG.get('loop',{}).get('interval_seconds',15))
+        rotation=total/max(1,scanned)*interval if total else 0
+        st.metric('Dövriyyə təhlili',f"{int((status or {}).get('scan_top_n',0))} alət təhlil edildi · təxmini tam dövr {rotation:.0f} san")
+        st.subheader('Açıq mövqe üzrə oxşar hallar')
+        if opened:
+            selected_open=st.selectbox('Alət',opened,key='brain_open_symbol',format_func=lambda row:f"{row['symbol']} · {direction_label(row['direction'])}")
+            try:
+                stored=json.loads(selected_open.get('features') or '{}'); cases=stored.get('brain',{}).get('memory',{}).get('cases',[])
+            except (ValueError,TypeError): cases=[]
+            if cases: st.table(pd.DataFrame([{'Alət':case.get('symbol'),'Vaxt':local_time(case.get('time')),'Oxşarlıq məsafəsi':case.get('distance')} for case in cases[:3]]))
+            else: st.caption('Bu mövqe üçün keçmişdə uyğun oxşar hal tapılmayıb.')
+        else: st.caption('Hazırda açıq bot mövqeyi yoxdur.')
 
 if __name__=='__main__': main()

@@ -33,6 +33,16 @@ CLOSE_REASON_LABELS = {
 }
 
 _MESSAGE_LABELS = {
+    'no calibration bucket has 200+ test samples': 'Kalibrlənmə üçün 200-dən çox nümunəsi olan test aralığı yoxdur',
+    'calibration error': 'Kalibrlənmə xətası',
+    'is not below limit': 'təyin olunmuş həddən aşağı deyil',
+    'fewer than required selected test trades': 'Test dövründə seçilmiş əməliyyat sayı tələb olunan həddən azdır',
+    'selected test expectancy is not positive': 'Test dövründə gözlənilən nəticə müsbət deyil',
+    'selected test profit factor is not above the limit': 'Test dövrünün mənfəət əmsalı tələb olunan həddi keçmir',
+    'fewer than two of three subperiods are profitable': 'Üç alt dövrdən ikisi müsbət deyil',
+    'fewer than required distinct symbols': 'Fərqli alətlərin sayı tələb olunan həddən azdır',
+    'results depend too heavily on one asset group': 'Nəticələr həddən artıq bir aktiv qrupundan asılıdır',
+    'missing columns:': 'Çatışmayan sütunlar:',
     'kill switch active': 'Təcili dayandırma aktivdir',
     'STOP kill switch is active': 'Təcili dayandırma aktivdir',
     'symbol session closes soon': 'Alətin sessiyası tezliklə bağlanır',
