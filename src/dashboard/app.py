@@ -23,6 +23,18 @@ def _lock_pid():
     try: return int((ROOT/'data'/'bot.lock').read_text(encoding='utf-8').split()[0])
     except (OSError,ValueError,IndexError): return None
 
+def _supervisor_pid():
+    try: return int((ROOT/'data'/'supervisor.pid').read_text(encoding='utf-8').strip())
+    except (OSError,ValueError): return None
+
+def _supervisor_running():
+    pid=_supervisor_pid()
+    if pid and _pid_running(pid): return True
+    if pid:
+        try: (ROOT/'data'/'supervisor.pid').unlink(missing_ok=True)
+        except OSError: pass
+    return False
+
 def _pid_running(pid):
     if not pid: return False
     if os.name=='nt':
@@ -49,11 +61,11 @@ def _heartbeat_fresh(status,now=None):
 
 def _start_bot():
     """Start one detached bot process, with both UI and bot locks guarding races."""
-    status=queries.get_bot_status(DB_PATH); pid=_lock_pid(); running=_pid_running(pid)
+    status=queries.get_bot_status(DB_PATH); pid=_lock_pid(); running=_pid_running(pid); supervisor_running=_supervisor_running()
     lock_path=ROOT/'data'/'bot.lock'
     if lock_path.exists() and not running:
         lock_path.unlink(missing_ok=True)
-    if running or _heartbeat_fresh(status): return False,'Bot already appears to be running.'
+    if running or supervisor_running or _heartbeat_fresh(status): return False,'Bot already appears to be running.'
     guard=ROOT/'data'/'dashboard-start.lock'; guard.parent.mkdir(parents=True,exist_ok=True)
     try: handle=guard.open('x',encoding='utf-8')
     except FileExistsError: return False,'A Start request is already in progress.'
@@ -61,9 +73,15 @@ def _start_bot():
         handle.write(f'{os.getpid()} {time.time_ns()}\n'); handle.close()
         stop=ROOT/'STOP'
         if stop.exists(): stop.unlink()
-        python=ROOT/'.venv'/'Scripts'/'python.exe'; script=ROOT/'scripts'/'run_bot.py'
+        (ROOT/'data'/'supervisor.stop').unlink(missing_ok=True)
+        python=ROOT/'.venv'/'Scripts'/'python.exe'; script=ROOT/'scripts'/'run_forever.py'
+        log_path=ROOT/'logs'/'bot_stdout.log'; log_path.parent.mkdir(parents=True,exist_ok=True)
         flags=getattr(subprocess,'DETACHED_PROCESS',0x00000008)|getattr(subprocess,'CREATE_NEW_PROCESS_GROUP',0x00000200)
-        subprocess.Popen([str(python),str(script)],cwd=ROOT,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,close_fds=True,creationflags=flags)
+        breakaway=getattr(subprocess,'CREATE_BREAKAWAY_FROM_JOB',0x01000000)
+        with log_path.open('a',encoding='utf-8',buffering=1) as output:
+            options={'cwd':ROOT,'stdin':subprocess.DEVNULL,'stdout':output,'stderr':subprocess.STDOUT,'close_fds':True}
+            try: subprocess.Popen([str(python),str(script)],creationflags=flags|breakaway,**options)
+            except OSError: subprocess.Popen([str(python),str(script)],creationflags=flags,**options)
         return True,'Bot start requested.'
     except Exception as exc:
         (ROOT/'STOP').write_text('PAUSE\n',encoding='utf-8')
@@ -117,7 +135,7 @@ def main():
     detail_end=(datetime.combine(selected,dt_time.min,tzinfo=AZ_TZ)+timedelta(days=1)).astimezone(timezone.utc).isoformat()
     status=queries.get_bot_status(DB_PATH); snapshot=queries.get_latest_snapshot(DB_PATH)
     summary=queries.get_day_summary(today_start,today_end,DB_PATH)
-    stale=not _heartbeat_fresh(status); pid=_lock_pid(); process_running=_pid_running(pid)
+    stale=not _heartbeat_fresh(status); pid=_lock_pid(); supervisor_running=_supervisor_running(); process_running=_pid_running(pid) or supervisor_running
     account=(status or {}).get('account_type','UNKNOWN').upper(); paused=(ROOT/'STOP').exists()
     mt5_connected=bool((status or {}).get('mt5_connected',0)) and not stale
     if not process_running:
@@ -132,6 +150,8 @@ def main():
         status_text=f'🟢 Bot işləyir · {account if account == "DEMO" else "Hesab"} hesab'; status_kind='good'
     colors={'good':'#167d3f','warn':'#a66a00','bad':'#b42318'}
     st.markdown(f'<div class="status-bar" style="background:{colors[status_kind]}">{status_text}</div>',unsafe_allow_html=True)
+    restart_count=queries.get_supervisor_restart_count(today_start,today_end,DB_PATH)
+    st.caption(f'Nəzarətçi: {"işləyir" if supervisor_running else "dayanıb"} · Bu gün yenidən başladılma: {restart_count}')
     st.markdown('<style>.status-bar{color:white;padding:.75rem 1rem;border-radius:.55rem;font-weight:650;margin:.4rem 0 1rem}.metric-card{padding:1.1rem 1rem;border:1px solid rgba(128,128,128,.25);border-radius:.7rem;min-height:105px}.metric-label{font-size:.95rem;opacity:.8}.metric-value{font-size:1.7rem;font-weight:700;margin-top:.3rem}.metric-detail{font-size:.8rem;opacity:.75;margin-top:.2rem}div[data-testid="stButton"] button{min-height:3rem;font-weight:650}</style>',unsafe_allow_html=True)
 
     controls=st.columns([1.4,1.15,1.4])

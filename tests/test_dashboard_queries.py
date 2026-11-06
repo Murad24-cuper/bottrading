@@ -20,6 +20,9 @@ def test_dashboard_queries_return_database_only_views_and_queue_commands(tmp_pat
     assert queries.get_closed_trades(start,end,path)[0]['sl']==1.09
     assert queries.get_latest_signals(path)[0]['score']==1.5
     assert queries.get_recent_events(path)[0]['level']=='WARNING'
+    with db.connect() as conn:
+        conn.execute("INSERT INTO bot_events(time,level,source,message) VALUES (?,?,?,?)",('2026-11-05T12:00:00+00:00','WARNING','supervisor','Restarting bot after exit code 1; restart 1/5 in window, delay=10s'))
+    assert queries.get_supervisor_restart_count(start,end,path)==1
     assert queries.get_equity_curve(start,end,path)[0]['equity']==101.5
     assert queries.get_daily_pnl(path)[0]['pnl']==1.5
     assert queries.get_bot_status(path)['status']=='running'

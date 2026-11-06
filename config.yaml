@@ -121,6 +121,10 @@ live:
   equity_snapshot_seconds: 30
   heartbeat_seconds: 10
   command_ttl_seconds: 60        # Dashboard commands expire after this many seconds
+supervisor:
+  restart_backoff_seconds: [10, 30, 60] # Delay before successive crash restarts
+  max_restarts_per_hour: 5       # Stop after this many restarts in one hour
+  restart_window_minutes: 60     # Sliding restart limit window
 history:
   data_dir: data/history
   ranges_months: {M1: 3, M5: 12, M15: 36, H1: 36}

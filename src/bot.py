@@ -52,6 +52,7 @@ class TradingBot:
         self.stop_event=False; self._connection_down=False; self.lock=BotLock(settings.root/'data'/'bot.lock')
         self._stop_after_cycle=False
         self._cycle_reservations=[]
+        self.exit_reason=''
     @property
     def live(self): return self.settings.config['live']
     def _now(self):
@@ -63,6 +64,11 @@ class TradingBot:
     def _event(self,level,message):
         log.log(getattr(logging,level.upper(),logging.INFO),message)
         self.db.log_event(level.upper(),'bot',message)
+    def _request_supervisor_stop(self,reason):
+        self.exit_reason=str(reason)
+        path=self.settings.root/'data'/'supervisor.stop'
+        path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text(self.exit_reason+'\n',encoding='utf-8')
     def _components(self):
         mt5=self.client.mt5
         service=SymbolService(mt5,self.settings)
@@ -86,6 +92,7 @@ class TradingBot:
         except OSError: content=''
         if re.search(r'\bHALT\b',content,re.IGNORECASE):
             self._event('WARNING','STOP contains HALT; exiting cleanly without closing positions')
+            self._request_supervisor_stop('HALT kill switch')
             self._set_status('stopped')
             return True
         return False
@@ -100,8 +107,10 @@ class TradingBot:
                     if failed: raise RuntimeError('; '.join(failed))
                 elif action=='stop':
                     self._stop_after_cycle=True
+                    self._request_supervisor_stop('dashboard stop command')
                 elif action=='close_all_stop':
                     self._stop_after_cycle=True
+                    self._request_supervisor_stop('dashboard close-all-and-stop command')
                     results=self.executor.close_all('kill')
                     failed=[r.message for r in results if not r.success]
                     if failed: raise RuntimeError('; '.join(failed))
@@ -238,6 +247,8 @@ class TradingBot:
             if not self._critical_reported:
                 self._event('CRITICAL','Maximum consecutive cycle errors reached; new entries disabled, position management continues')
                 self._critical_reported=True
+            self.exit_reason='error limit reached'
+            self.stop_event=True
     def cycle(self):
         self.cycle_number+=1; now=self._now()
         if self._halt_requested(): return CycleResult(False,0)
@@ -269,23 +280,42 @@ class TradingBot:
                 try: self._set_status('error' if self._connection_down or (self.last_error and not self.trading_disabled) else ('managing_only' if self.trading_disabled else 'running'))
                 except Exception: pass
     def run_forever(self,max_cycles=None):
-        cycles=0; previous_handler=None
-        def request_stop(*_): self.stop_event=True
-        self.lock.acquire()
+        cycles=0; previous_handlers={}
+        def request_stop(signum,*_):
+            try: label=signal.Signals(signum).name
+            except (ValueError,AttributeError): label='process signal'
+            self.exit_reason=f'signal {label}'
+            self.stop_event=True
+            try: self._request_supervisor_stop(self.exit_reason)
+            except OSError: pass
+        locked=False
         try:
-            try: previous_handler=signal.signal(signal.SIGINT,request_stop)
-            except (ValueError,OSError): previous_handler=None
+            self.lock.acquire(); locked=True
+            for name in ('SIGINT','SIGTERM','SIGBREAK'):
+                signum=getattr(signal,name,None)
+                if signum is None: continue
+                try: previous_handlers[signum]=signal.signal(signum,request_stop)
+                except (ValueError,OSError): pass
             while not self.stop_event:
                 cycle_started=self.monotonic(); result=self.cycle(); cycles+=1
-                if not result.continue_running or (max_cycles is not None and cycles>=max_cycles): break
+                if not result.continue_running:
+                    self.exit_reason=self.exit_reason or 'bot requested normal stop'
+                    break
+                if max_cycles is not None and cycles>=max_cycles:
+                    self.exit_reason='test cycle limit reached'
+                    break
                 elapsed=max(0.0,self.monotonic()-cycle_started)
                 self._heartbeat_sleep(max(0.0,result.sleep_seconds-elapsed))
         finally:
-            if previous_handler is not None:
-                try: signal.signal(signal.SIGINT,previous_handler)
+            for signum,handler in previous_handlers.items():
+                try: signal.signal(signum,handler)
                 except (ValueError,OSError): pass
-            try:
-                if self.client.mt5 is not None: self.client.close()
-            finally:
-                try: self._set_status('stopped')
-                finally: self.lock.release()
+            if not self.exit_reason: self.exit_reason='stop event received' if self.stop_event else 'normal loop exit'
+            try: self._event('INFO',f'bot exiting reason={self.exit_reason}')
+            except Exception: log.exception('Could not persist bot exiting event')
+            if locked:
+                try:
+                    if self.client.mt5 is not None: self.client.close()
+                finally:
+                    try: self._set_status('stopped')
+                    finally: self.lock.release()

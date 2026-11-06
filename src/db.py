@@ -234,7 +234,8 @@ class Database:
                 expires=datetime.fromisoformat(row['expires_at'].replace('Z','+00:00')) if row['expires_at'] else created+timedelta(seconds=60)
                 created=created.replace(tzinfo=timezone.utc) if created.tzinfo is None else created.astimezone(timezone.utc)
                 expires=expires.replace(tzinfo=timezone.utc) if expires.tzinfo is None else expires.astimezone(timezone.utc)
-                if expires<=now or (started is not None and created<started):
+                before_start=started is not None and created<started and row['command'] not in {'stop','close_all_stop'}
+                if expires<=now or before_start:
                     connection.execute("UPDATE commands SET status='expired',message='expired before processing',processed_time=? WHERE id=?",(now.isoformat(),row['id']))
                 elif row['status']=='pending': ready.append(dict(row))
             return ready

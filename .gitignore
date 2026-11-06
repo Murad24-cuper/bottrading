@@ -6,6 +6,8 @@ data/history/
 reports/
 STOP
 data/bot.lock
+data/supervisor.pid
+data/supervisor.stop
 .venv/
 __pycache__/
 .pytest_cache/

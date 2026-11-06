@@ -57,6 +57,10 @@ def get_latest_signals(path=None,limit=50):
 def get_recent_events(path=None,limit=30):
     return _rows(path,'SELECT time,level,source,message FROM bot_events ORDER BY time DESC LIMIT ?',(int(limit),))
 
+def get_supervisor_restart_count(start_utc,end_utc,path=None):
+    rows=_rows(path,"SELECT COUNT(*) AS count FROM bot_events WHERE source='supervisor' AND message LIKE 'Restarting bot after exit code %' AND time>=? AND time<?",(start_utc,end_utc))
+    return int(rows[0]['count']) if rows else 0
+
 def get_adaptive_gates(path=None):
     return _rows(path,'SELECT scope,name,disabled_until,expectancy,sample_size,reason FROM adaptive_gates WHERE disabled_until>? ORDER BY scope,name',(datetime.now(timezone.utc).isoformat(),))
 

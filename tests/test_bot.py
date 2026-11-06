@@ -133,6 +133,7 @@ def test_stop_command_exits_after_management_before_scanning(tmp_path):
     result=bot.cycle()
     assert result.continue_running is False
     assert scanner.calls==0 and executor.closed_all==0
+    assert 'dashboard stop command' in (tmp_path/'data'/'supervisor.stop').read_text(encoding='utf-8')
     assert db.get_bot_status()['status']=='stopped'
     with db.connect() as conn: assert conn.execute('SELECT status FROM commands WHERE id=?',(command,)).fetchone()[0]=='done'
 
@@ -142,7 +143,16 @@ def test_close_all_stop_closes_then_exits(tmp_path):
     result=bot.cycle()
     assert result.continue_running is False
     assert executor.closed_all==1 and scanner.calls==0
+    assert 'dashboard close-all-and-stop command' in (tmp_path/'data'/'supervisor.stop').read_text(encoding='utf-8')
     with db.connect() as conn: assert conn.execute('SELECT status FROM commands WHERE id=?',(command,)).fetchone()[0]=='done'
+
+def test_run_forever_records_exit_reason(tmp_path):
+    bot,db,_,client,_,_,_=make_bot(tmp_path,'shadow')
+    bot.run_forever(max_cycles=1)
+    with db.connect() as conn:
+        rows=conn.execute("SELECT message FROM bot_events WHERE message LIKE 'bot exiting reason=%'").fetchall()
+    assert any('test cycle limit reached' in row['message'] for row in rows)
+    assert client.closed and not (tmp_path/'data'/'bot.lock').exists()
 
 def test_cycle_reservations_enforce_max_open_when_terminal_positions_lag(tmp_path):
     bot,db,_,_,_,executor,_=make_bot(tmp_path,'trade',['breakout'],candidate=False)
