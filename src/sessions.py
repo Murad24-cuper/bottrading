@@ -48,3 +48,30 @@ def next_session_close(frame: pd.DataFrame, now_utc: datetime,
             candidate += timedelta(days=7)
         upcoming.append((candidate, float(gap_hours)))
     return min(upcoming, key=lambda item: item[0]) if upcoming else None
+
+def session_context(frame: pd.DataFrame, now_utc: datetime|None=None) -> dict:
+    """Summarize UTC trading session and range versus recent same-session days."""
+    now=now_utc or datetime.now(timezone.utc)
+    now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+    hour=now.hour
+    if 12<=hour<16: name='London-NY overlap'; opened=12
+    elif 7<=hour<12: name='London'; opened=7
+    elif 16<=hour<21: name='New York'; opened=16
+    elif 0<=hour<7: name='Asia'; opened=0
+    else: name='off-hours'; opened=21
+    if frame is None or frame.empty or not isinstance(frame.index,pd.DatetimeIndex):
+        return {'session':name,'minutes_since_open':int((now.hour-opened)*60+now.minute),'range':None,'average_range':None,'range_vs_average':None}
+    data=frame.iloc[:-1].copy(); ix=data.index
+    if ix.tz is None: ix=ix.tz_localize(timezone.utc)
+    else: ix=ix.tz_convert(timezone.utc)
+    data.index=ix
+    tod=(data.index.hour>=opened)&(data.index.date==now.date())&(data.index<=now)
+    current=data.loc[tod]
+    current_range=float(current.high.max()-current.low.min()) if not current.empty else 0.0
+    ranges=[]
+    for day in sorted(set(data.index.date)):
+        if day>=now.date(): continue
+        selected=data.loc[(data.index.date==day)&(data.index.hour>=opened)&(data.index.hour<now.hour+1)]
+        if not selected.empty: ranges.append(float(selected.high.max()-selected.low.min()))
+    avg=sum(ranges[-20:])/len(ranges[-20:]) if ranges else None
+    return {'session':name,'minutes_since_open':int((now.hour-opened)*60+now.minute),'range':current_range,'average_range':avg,'range_vs_average':current_range/avg if avg else None}
