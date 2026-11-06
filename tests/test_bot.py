@@ -40,7 +40,7 @@ class FakeExecutor:
     def close_all(self,reason): self.closed_all+=1; return []
 
 def make_settings(root,mode='shadow',strategies=None,max_errors=5):
-    risk={'risk_per_trade_pct':.5,'daily_loss_limit_pct':3,'weekly_loss_limit_pct':8,'max_open_positions':10,'max_positions_per_group':4,'max_positions_per_currency':2,'max_positions_per_underlying_group':2,'symbol_cooldown_minutes':30,'max_trades_per_symbol_per_day':5,'max_margin_usage_pct':40,'max_hold_minutes':720,'first_target_r':.7,'scale_out_pct':50,'trail_atr_mult':1.5,'stagnation_minutes':45,'stagnation_min_r':.3,'momentum_lookback_bars':5,'breakeven_cost_multiplier':1,'no_entry_before_close_minutes':60,'max_session_gap_hours':6,'min_risk_reward':1,'max_cost_to_target_ratio':.3}
+    risk={'risk_per_trade_pct':.5,'daily_loss_limit_pct':3,'weekly_loss_limit_pct':8,'max_trades_per_day':150,'max_open_positions':10,'max_positions_per_group':4,'max_positions_per_currency':2,'max_positions_per_underlying_group':2,'symbol_cooldown_minutes':30,'max_trades_per_symbol_per_day':5,'max_margin_usage_pct':40,'max_hold_minutes':720,'first_target_r':.7,'scale_out_pct':50,'trail_atr_mult':1.5,'stagnation_minutes':45,'stagnation_min_r':.3,'momentum_lookback_bars':5,'breakeven_cost_multiplier':1,'no_entry_before_close_minutes':60,'max_session_gap_hours':6,'min_risk_reward':1,'max_cost_to_target_ratio':.3}
     return SimpleNamespace(root=root,magic_number=20260001,risk=SimpleNamespace(**risk),db_path=root/'bot.db',config={'live':{'mode':mode,'strategies':strategies or [],'max_cycle_errors':max_errors,'equity_snapshot_seconds':30,'heartbeat_seconds':10},'risk':risk,'loop':{'interval_seconds':5}})
 
 def make_bot(tmp_path,mode='shadow',strategies=None,candidate=True,max_errors=5,clock=None):
@@ -169,6 +169,20 @@ def test_cycle_reservations_enforce_max_open_when_terminal_positions_lag(tmp_pat
     with db.connect() as conn:
         rows=conn.execute("SELECT skip_reason FROM signals WHERE symbol='US30' ORDER BY id DESC LIMIT 1").fetchone()
     assert rows[0]=='maximum open positions reached'
+
+def test_cycle_reservations_enforce_global_daily_trade_cap(tmp_path):
+    bot,db,_,_,_,executor,_=make_bot(tmp_path,'trade',['breakout'],candidate=False)
+    bot.settings.config['risk']['max_trades_per_day']=1
+    candidates=[]
+    for symbol in ('AAA','BBB'):
+        signal=Signal(symbol,'buy','M1',100,99,102,.8,'breakout','test')
+        signal_id=db.insert_signal(symbol=symbol,strategy='breakout',direction='buy',timeframe='M1',confidence=.8,entry=100,sl=99,tp=102,expected_cost=.1,taken=0,skip_reason='')
+        candidates.append(SimpleNamespace(symbol=symbol,asset_group='other',strategy='breakout',signal=signal,cost={'cost':.1},symbol_spec={'trade_tick_value':1,'trade_tick_size':1,'volume_min':.01,'volume_step':.01,'volume_max':5},score=5,signal_row_id=signal_id))
+    bot.scanner.candidates=candidates; bot.cycle()
+    assert len(executor.opened)==1
+    with db.connect() as conn:
+        skipped=conn.execute("SELECT skip_reason FROM signals WHERE symbol='BBB'").fetchone()[0]
+    assert skipped=='maximum trades today reached'
 
 def test_terminal_trade_permission_blocks_new_entries(tmp_path):
     bot,db,mt5,_,_,executor,item=make_bot(tmp_path,'trade',['breakout'])

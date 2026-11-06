@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS daily_stats(
  wins INTEGER, losses INTEGER, max_drawdown REAL, invested_margin_peak REAL);
 CREATE TABLE IF NOT EXISTS daily_report(date TEXT PRIMARY KEY, created_at TEXT NOT NULL, payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS weekly_limits(week_start TEXT PRIMARY KEY, start_balance REAL NOT NULL, stopped INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS maintenance_runs(task TEXT NOT NULL, run_key TEXT NOT NULL, completed_at TEXT NOT NULL, PRIMARY KEY(task,run_key));
 CREATE TABLE IF NOT EXISTS equity_snapshots(
  time TEXT, balance REAL, equity REAL, margin REAL, free_margin REAL, open_positions INTEGER);
 CREATE TABLE IF NOT EXISTS bot_events(time TEXT, level TEXT, source TEXT, message TEXT);
@@ -175,6 +176,18 @@ class Database:
         target=Path(destination); target.parent.mkdir(parents=True,exist_ok=True)
         with self.connect() as source, sqlite3.connect(target) as dest: source.backup(dest)
         return target
+    def maintenance_done(self,task,run_key):
+        with self.connect() as connection:
+            return connection.execute('SELECT 1 FROM maintenance_runs WHERE task=? AND run_key=?',(str(task),str(run_key))).fetchone() is not None
+    def mark_maintenance_done(self,task,run_key,now=None):
+        stamp=(now or datetime.now(timezone.utc)).isoformat()
+        with self.connect() as connection:
+            connection.execute('INSERT OR IGNORE INTO maintenance_runs(task,run_key,completed_at) VALUES (?,?,?)',(str(task),str(run_key),stamp))
+    def vacuum(self):
+        """Checkpoint WAL and vacuum only outside any active transaction."""
+        with self.connect() as connection:
+            connection.execute('PRAGMA wal_checkpoint(PASSIVE)')
+            connection.execute('VACUUM')
     def insert_signal(self,**values):
         values.setdefault('time',datetime.now(timezone.utc).isoformat())
         values.setdefault('score',0.0)

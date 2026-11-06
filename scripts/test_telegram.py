@@ -13,6 +13,9 @@ def main():
         return 1
     notifier.send('manual_test','✅ Ticarət botu Telegram bildiriş testi uğurludur.')
     notifier.queue.join()
+    if notifier.failures:
+        print('Telegram-a bildiriş göndərilmədi. Token və chat ID-ni yoxlayın.')
+        return 1
     print('Test bildirişi Telegram-a göndərildi.')
     return 0
 

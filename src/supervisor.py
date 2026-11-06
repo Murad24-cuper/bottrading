@@ -33,6 +33,7 @@ def run_restart_supervisor(
     clock: Callable[[], float] = time.time,
 ) -> int:
     """Restart unexpected exits with bounded backoff and a sliding hourly cap."""
+    global _notifier
     restarts: deque[float] = deque()
     while True:
         if stop_requested():
@@ -46,18 +47,23 @@ def run_restart_supervisor(
         if stop_requested():
             log_event('INFO', 'bot exiting reason=dashboard stop command')
             return 0
+        if return_code != 0:
+            if _notifier is None: _notifier=TelegramNotifier()
+            _notifier.send('crash',f'💥 Bot prosesi gözlənilmədən dayandı · çıxış kodu {return_code}.')
         now = clock()
         while restarts and now - restarts[0] >= window_seconds:
             restarts.popleft()
         if len(restarts) >= max_restarts:
             log_event('CRITICAL', f'Supervisor restart limit reached: {max_restarts} restarts within {window_seconds} seconds; last child exit={return_code}')
+            if _notifier is None: _notifier=TelegramNotifier()
+            _notifier.send('supervisor_limit','🚨 Nəzarətçi son bir saatda çoxsaylı xətalara görə botu dayandırdı.')
+            _notifier.flush()
             log_event('INFO', 'bot exiting reason=supervisor restart limit exceeded')
             return 1
         delay = int(backoff_seconds[min(len(restarts), len(backoff_seconds) - 1)])
         restarts.append(now)
         message=f'Restarting bot after exit code {return_code}; restart {len(restarts)}/{max_restarts} in window, delay={delay}s'
         log_event('WARNING', message)
-        global _notifier
         if _notifier is None: _notifier=TelegramNotifier()
         _notifier.send('supervisor_restart',f'🔄 Nəzarətçi botu yenidən başladır · cəhd {len(restarts)}/{max_restarts}.')
         sleep(delay)

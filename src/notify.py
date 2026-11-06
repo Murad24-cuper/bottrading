@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 from queue import Queue, Empty
 from threading import Thread, Lock
 import os
+import logging
 
 
 class TelegramNotifier:
@@ -15,6 +16,7 @@ class TelegramNotifier:
         self.post=post
         self.clock=clock or (lambda:datetime.now(timezone.utc))
         self.queue=Queue(); self._last={}; self._lock=Lock(); self._thread=None
+        self.failures=0
         if self.enabled:
             self._thread=Thread(target=self._worker,name='telegram-notifier',daemon=True); self._thread.start()
 
@@ -31,7 +33,10 @@ class TelegramNotifier:
         while True:
             try: message=self.queue.get(timeout=1)
             except Empty: continue
-            try: self._deliver(message)
+            try:
+                if not self._deliver(message):
+                    self.failures+=1
+                    logging.getLogger('bot.notify').warning('Telegram bildirişi iki cəhddən sonra göndərilmədi')
             finally: self.queue.task_done()
 
     def _deliver(self,message):
@@ -45,7 +50,12 @@ class TelegramNotifier:
         for _ in range(2):
             try:
                 response=post(url,json={'chat_id':self.chat_id,'text':message},timeout=5)
-                if getattr(response,'status_code',200)<400: return
+                if getattr(response,'status_code',200)<400: return True
             except Exception:
                 continue
+        return False
+
+    def flush(self):
+        """Wait for queued notifications during an orderly process shutdown."""
+        if self.enabled: self.queue.join()
 

@@ -86,3 +86,24 @@ def test_database_backup_contains_committed_wal_data(tmp_path):
     target=db.backup(tmp_path/'backups'/'copy.db')
     with sqlite3.connect(target) as conn:
         assert conn.execute('SELECT message FROM bot_events').fetchone()[0]=='preserve me'
+
+def test_retention_removes_old_rows_and_thins_equity_snapshots(tmp_path):
+    from datetime import datetime,timezone,timedelta
+    db=Database(tmp_path/'retention.db'); now=datetime(2026,11,6,tzinfo=timezone.utc); old=(now-timedelta(days=31)).isoformat()
+    db.insert_signal(time=old,symbol='EURUSD',strategy='test',direction='buy',timeframe='M1',confidence=.5,entry=1,sl=.9,tp=1.1,expected_cost=0,taken=0,skip_reason='')
+    with db.connect() as conn: conn.execute('INSERT INTO bot_events(time,level,source,message) VALUES (?,?,?,?)',(old,'WARNING','test','old'))
+    with db.connect() as conn:
+        for minute in (1,2,5,6):
+            conn.execute('INSERT INTO equity_snapshots(time,balance,equity,margin,free_margin,open_positions) VALUES (?,?,?,?,?,?)',((now-timedelta(days=31)).replace(minute=minute).isoformat(),1,1,0,1,0))
+    db.maintain(now,7,30,30,5)
+    with db.connect() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM signals').fetchone()[0]==0
+        assert conn.execute('SELECT COUNT(*) FROM bot_events').fetchone()[0]==0
+        assert conn.execute('SELECT COUNT(*) FROM equity_snapshots').fetchone()[0]==2
+
+def test_weekly_vacuum_and_idempotent_maintenance_marker(tmp_path):
+    db=Database(tmp_path/'vacuum.db')
+    assert not db.maintenance_done('daily','2026-11-06')
+    db.mark_maintenance_done('daily','2026-11-06')
+    assert db.maintenance_done('daily','2026-11-06')
+    db.vacuum()

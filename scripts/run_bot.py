@@ -10,6 +10,7 @@ from src.config import load_settings
 from src.bot import TradingBot
 from src.db import Database
 from src.notify import TelegramNotifier
+from src.paths import project_paths
 
 ROOT=Path(__file__).resolve().parents[1]
 _crash_file=None
@@ -18,7 +19,7 @@ _crash_file=None
 def install_crash_handlers():
     """Persist fatal Python and thread tracebacks for detached launches."""
     global _crash_file
-    log_dir=ROOT/'logs'; log_dir.mkdir(parents=True,exist_ok=True)
+    _,log_dir=project_paths(ROOT); log_dir.mkdir(parents=True,exist_ok=True)
     _crash_file=(log_dir/'crash.log').open('a',encoding='utf-8',buffering=1)
     faulthandler.enable(file=_crash_file,all_threads=True)
     old_sys_hook=sys.excepthook
@@ -66,6 +67,6 @@ def main():
 
 if __name__=='__main__':
     if sys.stdout is None or sys.stderr is None:
-        detached_log=(ROOT/'logs'/'bot_stdout.log'); detached_log.parent.mkdir(parents=True,exist_ok=True)
+        _,log_dir=project_paths(ROOT); detached_log=log_dir/'bot_stdout.log'; detached_log.parent.mkdir(parents=True,exist_ok=True)
         stream=detached_log.open('a',encoding='utf-8',buffering=1); sys.stdout=stream; sys.stderr=stream
     raise SystemExit(main())

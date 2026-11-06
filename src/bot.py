@@ -15,7 +15,7 @@ from .risk import calc_volume,check_trade_allowed
 from .scanner import MarketScanner
 from .symbols import SymbolService
 from .symbols import underlying_group,underlying_key
-from .time_utils import mt5_epoch_to_utc
+from .time_utils import mt5_epoch_to_utc, server_clock_drift_seconds
 from .notify import TelegramNotifier
 
 log=get_logger(__name__)
@@ -51,7 +51,8 @@ class TradingBot:
         self.process_started_at=self._now()
         self.cycle_number=0; self.consecutive_errors=0; self.trading_disabled=False; self.last_error=''; self._critical_reported=False
         self._market_closed_logged=False; self._last_snapshot=0.0; self._started=False; self._last_account_type='unknown'; self._daily_peak_equity=0.0
-        self.stop_event=False; self._connection_down=False; self.lock=BotLock(settings.root/'data'/'bot.lock')
+        data_dir=getattr(settings,'data_dir',settings.root/'data')
+        self.stop_event=False; self._connection_down=False; self.lock=BotLock(data_dir/'bot.lock')
         self._stop_after_cycle=False
         self._cycle_reservations=[]
         self.exit_reason=''
@@ -60,7 +61,9 @@ class TradingBot:
         self.notifier=TelegramNotifier(rate_limit_minutes=notify_cfg.get('rate_limit_minutes',5))
         self._health_failures=0; self._entries_health_blocked=False; self._trade_allowed=False; self._last_daily_summary=''; self._last_maintenance_day=''
         self._last_notified_trade_id=self.db.latest_trade_id() if hasattr(self.db,'latest_trade_id') else 0
-        self._observed_utc_day=self._now().date()
+        self._observed_utc_day=self._now().date()-timedelta(days=1)
+        self._daily_limit_alert_day=''; self._weekly_limit_alert_week=''
+        self._clock_checked=False
     @property
     def live(self): return self.settings.config['live']
     def _now(self):
@@ -83,6 +86,7 @@ class TradingBot:
         connected=bool(getattr(terminal,'connected',True)) if terminal is not None else not hasattr(mt5,'terminal_info')
         trade_allowed=bool(getattr(terminal,'trade_allowed',False)) if terminal is not None else not hasattr(mt5,'terminal_info')
         self._trade_allowed=trade_allowed
+        self._connection_down=not connected
         if not connected:
             self._health_failures+=1
             self._connection_down=True
@@ -95,6 +99,11 @@ class TradingBot:
                 return False
             terminal=mt5.terminal_info(); connected=bool(terminal and getattr(terminal,'connected',True)); trade_allowed=bool(terminal and getattr(terminal,'trade_allowed',False))
             self._trade_allowed=trade_allowed
+            self._connection_down=not connected
+            if not connected and self._health_failures>=int(self.settings.config.get('health',{}).get('reconnect_failures_before_pause',3)) and not self._entries_health_blocked:
+                self._entries_health_blocked=True
+                self._event('CRITICAL',f'MT5 bağlantısı {self._health_failures} bərpa cəhdindən sonra yoxdur; yeni əməliyyatlar bloklandı')
+                self._notify('mt5_reconnect_critical','🚨 MT5 bağlantısı üç dəfə bərpa olunmadı; yeni əməliyyatlar bağlantı bərpa edilənədək bloklandı.')
         stale_limit=int(self.settings.config.get('health',{}).get('stale_ticks_seconds',120))
         positions=self._owned_positions() if hasattr(mt5,'positions_get') else []
         stale=[]
@@ -135,7 +144,7 @@ class TradingBot:
         return connected and trade_allowed and not stale and not self._entries_health_blocked
     def _request_supervisor_stop(self,reason):
         self.exit_reason=str(reason)
-        path=self.settings.root/'data'/'supervisor.stop'
+        path=getattr(self.settings,'data_dir',self.settings.root/'data')/'supervisor.stop'
         path.parent.mkdir(parents=True,exist_ok=True)
         path.write_text(self.exit_reason+'\n',encoding='utf-8')
     def _components(self):
@@ -155,6 +164,22 @@ class TradingBot:
         self._event('INFO',f"Bot started mode={self.live['mode']} account={self._last_account_type} equity={state.equity:.2f} enabled={enabled} allowed_live={allowed}")
         self._notify('started',f"🟢 Bot başladı · rejim: {self.live['mode']} · hesab: {self._last_account_type} · kapital: {state.equity:.2f} $")
         self._started=True
+    def _check_clock(self,now):
+        if self._clock_checked: return
+        self._clock_checked=True
+        try:
+            service=getattr(self.scanner,'symbols',None)
+            symbol=service.resolve_alias('EURUSD') if service and hasattr(service,'resolve_alias') else 'EURUSD'
+            if not symbol: return
+            mt5=self.client.mt5; tick=mt5.symbol_info_tick(symbol); stamp=getattr(tick,'time_msc',0)/1000 if tick and getattr(tick,'time_msc',0) else getattr(tick,'time',0) if tick else 0
+            if not stamp: return
+            age=(now-mt5_epoch_to_utc(stamp,mt5)).total_seconds()
+            if age>int(self.settings.config.get('health',{}).get('stale_ticks_seconds',120)): return
+            drift=server_clock_drift_seconds(mt5,symbol,now)
+            if drift is not None and drift>30:
+                self._event('WARNING',f'PC UTC saatı MT5 server vaxtından təxminən {drift:.0f} saniyə fərqlənir')
+                self._notify('clock_drift','⚠️ Kompüterin UTC saatı MT5 vaxtı ilə 30 saniyədən çox fərqlənir.')
+        except Exception as exc: self._event('WARNING',f'Saat uyğunluğu yoxlanıla bilmədi: {exc}')
     def _halt_requested(self):
         path=self.settings.root/'STOP'
         if not path.exists(): return False
@@ -302,14 +327,16 @@ class TradingBot:
         self._notify('daily_summary',message); self._last_daily_summary=day
     def _daily_maintenance(self,now):
         day=now.date().isoformat()
-        if self._last_maintenance_day==day: return
+        if self._last_maintenance_day==day or self.db.maintenance_done('daily',day):
+            self._last_maintenance_day=day; return
         cfg=self.settings.config.get('db',{})
         self.db.maintain(now,cfg.get('signals_retention_days',7),cfg.get('events_retention_days',30),cfg.get('equity_retention_days',30),cfg.get('equity_downsample_minutes',5))
-        backups=self.settings.root/'data'/'backups'
+        backups=getattr(self.settings,'data_dir',self.settings.root/'data')/'backups'
         self.db.backup(backups/f'bot_{day.replace("-","")}.db')
         keep=int(cfg.get('backup_keep_days',14))
         files=sorted(backups.glob('bot_????????.db'))
         for old in files[:-keep]: old.unlink(missing_ok=True)
+        self.db.mark_maintenance_done('daily',day,now)
         self._last_maintenance_day=day
     def _daily_rollover_report(self,now):
         if now.date()<=self._observed_utc_day: return
@@ -319,9 +346,18 @@ class TradingBot:
     def _connected_cycle(self,now):
         self._cycle_reservations=[]
         self._components(); account=self._account_type(); state=get_account_state(self.client.mt5); self._startup(state)
+        self._check_clock(now)
         health_ok=self._health(now)
         self.executor.sync_positions(); getattr(self.executor,'enforce_adverse_move_exit',lambda *_:None)(self.settings); self.executor.enforce_time_stop(self.settings); self.executor.enforce_session_close(self.settings,now)
         self._notify_closed_losses()
+        pnl_today,pnl_week=self._pnl_periods(now)
+        open_rows={int(row['ticket']):row for row in self.db.get_open_trades()}
+        floating=sum(float(p.profit)+float(getattr(p,'swap',0) or 0)+float(open_rows.get(int(p.ticket),{}).get('commission') or 0) for p in self._owned_positions())
+        if pnl_today+floating<=-float(state.balance)*float(self.settings.config['risk']['daily_loss_limit_pct'])/100 and self._daily_limit_alert_day!=now.date().isoformat():
+            self._notify('daily_loss','🛑 Gündəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.'); self._daily_limit_alert_day=now.date().isoformat()
+        week_key=(now-timedelta(days=now.weekday())).date().isoformat()
+        if pnl_week+floating<=-float(state.balance)*float(self.settings.config['risk']['weekly_loss_limit_pct'])/100 and self._weekly_limit_alert_week!=week_key:
+            self._notify('weekly_loss','🛑 Həftəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.'); self._weekly_limit_alert_week=week_key
         risk_cfg=self.settings.config['risk']
         if hasattr(self.db,'refresh_adaptive_gates'):
             disabled=self.db.refresh_adaptive_gates(risk_cfg.get('gating_window',20),risk_cfg.get('gating_disable_hours',24),self.settings.magic_number,now)
@@ -341,7 +377,7 @@ class TradingBot:
             self._event('INFO','Tradable market symbols are available again')
             self._market_closed_logged=False
         allow_entries=health_ok and self.consecutive_errors<int(self.live['max_cycle_errors']) and not self.trading_disabled
-        week_start=(now-timedelta(days=now.weekday())).date().isoformat()
+        week_start=week_key
         weekly=self.db.get_or_create_week_start(week_start,state.balance)
         weekly_limit=float(weekly['start_balance'])*(1-float(risk_cfg['weekly_loss_limit_pct'])/100)
         if float(state.equity)<=weekly_limit and not int(weekly.get('stopped') or 0):
@@ -360,6 +396,10 @@ class TradingBot:
         self._daily_rollover_report(now)
         self._daily_maintenance(now)
         self._daily_summary(now)
+        vacuum_key=now.strftime('%G-W%V')
+        db_cfg=self.settings.config.get('db',{})
+        if now.weekday()==int(db_cfg.get('vacuum_weekday_utc',6)) and not positions and not self.db.maintenance_done('vacuum',vacuum_key):
+            self.db.vacuum(); self.db.mark_maintenance_done('vacuum',vacuum_key,now)
         if self.monotonic()-self._last_snapshot>=int(self.live['equity_snapshot_seconds']):
             self.db.insert_equity_snapshot(time=now.isoformat(),balance=state.balance,equity=state.equity,margin=state.margin,free_margin=state.free_margin,open_positions=len(positions))
             self._last_snapshot=self.monotonic()
@@ -383,12 +423,17 @@ class TradingBot:
             self.client.ensure_connected()
         except Exception as exc:
             self._connection_down=True
+            self._health_failures+=1
+            threshold=int(self.settings.config.get('health',{}).get('reconnect_failures_before_pause',3))
+            if self._health_failures>=threshold and not self._entries_health_blocked:
+                self._entries_health_blocked=True
+                self._event('CRITICAL',f'MT5 bağlantısı {self._health_failures} bərpa cəhdindən sonra yoxdur; yeni əməliyyatlar bloklandı: {exc}')
+                self._notify('mt5_reconnect_critical','🚨 MT5 bağlantısı üç dəfə bərpa olunmadı; yeni əməliyyatlar bağlantı bərpa edilənədək bloklandı.')
             self._record_error(exc)
             try: self._set_status('error')
             except Exception: pass
             idx=min(max(self.consecutive_errors-1,0),len(RECONNECT_BACKOFF)-1)
             return CycleResult(True,RECONNECT_BACKOFF[idx])
-        self._connection_down=False
         now=self._now()
         try:
             result=self._connected_cycle(now)
@@ -447,3 +492,5 @@ class TradingBot:
                 finally:
                     try: self._set_status('stopped')
                     finally: self.lock.release()
+            try: self.notifier.flush()
+            except Exception: log.exception('Telegram bildirişləri dayandırılarkən tamamlanmadı')

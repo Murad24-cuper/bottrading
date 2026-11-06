@@ -294,7 +294,7 @@ class Executor:
             reason=self._close_reason([deal],forced='partial_tp')
         self.db.insert_partial_close(deal_ticket=deal_ticket or None,ticket=int(row['ticket']),symbol=row['symbol'],time=mt5_epoch_to_utc(deal.time,self.mt5).isoformat(),volume=float(getattr(deal,'volume',0) or 0),price=float(getattr(deal,'price',0) or 0),profit=float(getattr(deal,'profit',0) or 0),commission=float(getattr(deal,'commission',0) or 0),swap=float(getattr(deal,'swap',0) or 0),reason=reason)
     def _close_reason(self,deals,forced=None,row=None):
-        if forced in {'partial_tp','trail','early_exit','momentum_lost','stagnant','time','session_close','manual','kill'}: return forced
+        if forced in {'partial_tp','trail','early_exit','momentum_lost','stagnant','time','session_close','manual','kill','weekly_stop'}: return forced
         m=self.mt5
         for deal in reversed(deals):
             reason=getattr(deal,'reason',None)
