@@ -157,4 +157,7 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     for key in ('signals_retention_days','events_retention_days','equity_retention_days','equity_downsample_minutes','backup_keep_days'):
         if type(db.get(key)) is not int or db[key]<=0: raise ValueError(f'db.{key} must be a positive integer')
     if type(db.get('vacuum_weekday_utc')) is not int or not 0<=db['vacuum_weekday_utc']<=6: raise ValueError('db.vacuum_weekday_utc must be between 0 and 6')
+    dashboard=config.get('dashboard',{})
+    for key in ('real_balance_default','real_risk_pct_default'):
+        if not isinstance(dashboard.get(key),(int,float)) or dashboard[key]<=0: raise ValueError(f'dashboard.{key} must be positive')
     return Settings(config,int(login) if login else None,credentials['MT5_PASSWORD'],credentials['MT5_SERVER'],os.getenv('MT5_PATH') or None,os.getenv('ALLOW_REAL','false').lower()=='true',path.parent,risk)

@@ -1,5 +1,6 @@
 from src.db import Database
 from src.dashboard import queries
+import pytest
 
 def test_dashboard_queries_return_database_only_views_and_queue_commands(tmp_path):
     path=tmp_path/'dashboard.db'; db=Database(path)
@@ -32,3 +33,18 @@ def test_dashboard_queries_return_database_only_views_and_queue_commands(tmp_pat
     import pytest
     with pytest.raises(ValueError,match='already pending or running'):
         queries.enqueue_command('close_all',path)
+
+def test_performance_report_includes_commissions_partial_closes_and_breakdowns(tmp_path):
+    path=tmp_path/'metrics.db'; db=Database(path)
+    db.insert_trade(ticket=11,symbol='EURUSD',asset_group='forex',direction='buy',volume=.1,open_time='2026-11-01T00:00:00+00:00',close_time='2026-11-02T00:00:00+00:00',profit=2,commission=-.2,swap=0,magic=1,status='closed',close_reason='trail',strategy='trend_pullback')
+    db.insert_partial_close(ticket=11,symbol='EURUSD',volume=.05,price=1.2,profit=.5,commission=-.05,swap=0,reason='partial_tp',time='2026-11-02T00:00:00+00:00')
+    db.insert_trade(ticket=12,symbol='GOLD',asset_group='metals',direction='sell',volume=.01,open_time='2026-11-01T00:00:00+00:00',close_time='2026-11-03T00:00:00+00:00',profit=-1,commission=-.1,swap=0,magic=1,status='closed',close_reason='sl',strategy='mean_reversion')
+    db.insert_equity_snapshot(time='2026-11-01T00:00:00+00:00',equity=100, balance=100,margin=0,free_margin=100,open_positions=0)
+    db.insert_equity_snapshot(time='2026-11-02T00:00:00+00:00',equity=90, balance=90,margin=0,free_margin=90,open_positions=0)
+    result=queries.get_performance_report('2026-11-01T00:00:00+00:00','2026-11-04T00:00:00+00:00',path)
+    assert result['overall']['trades']==2
+    assert result['overall']['expectancy']==pytest.approx(.575)
+    assert result['overall']['average_win']==pytest.approx(2.25)
+    assert result['overall']['average_loss']==pytest.approx(1.1)
+    assert result['overall']['max_drawdown_pct']==pytest.approx(10)
+    assert set(result['by_asset_group'])=={'forex','metals'}

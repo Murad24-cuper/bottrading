@@ -28,6 +28,7 @@ CLOSE_REASON_LABELS = {
     'session_close': 'Bazar bağlanır',
     'manual': 'Əl ilə bağlandı',
     'kill': 'Təcili dayandırma',
+    'weekly_stop': 'Həftəlik limit',
     'error': 'Xəta',
 }
 

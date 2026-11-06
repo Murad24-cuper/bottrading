@@ -129,6 +129,9 @@ notify:
   big_loss_usd: 5.0              # Notify on a single larger net loss
   daily_summary_utc: "21:00"     # Daily summary time in UTC
   rate_limit_minutes: 5          # Per-event notification cooldown
+dashboard:
+  real_balance_default: 100      # Starting value for the small-account simulation
+  real_risk_pct_default: 1.0     # Planned risk percent used in that simulation
 db:
   signals_retention_days: 7      # Keep recent signals for detailed dashboard views
   events_retention_days: 30      # Keep operational events for 30 days
