@@ -81,6 +81,11 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     if isinstance(raw.get('max_session_gap_hours'),bool) or not isinstance(raw.get('max_session_gap_hours'),(int,float)) or raw['max_session_gap_hours']<=0: raise ValueError('risk.max_session_gap_hours must be positive')
     for key in ('first_target_r','trail_atr_mult','stagnation_min_r','breakeven_cost_multiplier','sl_move_mult','tp_move_mult','early_exit_volume_spike_ratio'):
         if isinstance(raw.get(key),bool) or not isinstance(raw.get(key),(int,float)) or not math.isfinite(raw[key]) or raw[key]<=0: raise ValueError(f'risk.{key} must be positive')
+    if raw['max_hold_extended_minutes']<raw['max_hold_minutes']: raise ValueError('risk.max_hold_extended_minutes must be at least risk.max_hold_minutes')
+    if not raw['early_exit_min_r']<raw['early_exit_max_r']<=0: raise ValueError('risk.early_exit_min_r must be less than risk.early_exit_max_r and both must be non-positive')
+    if type(raw.get('early_exit_enabled')) is not bool: raise ValueError('risk.early_exit_enabled must be boolean')
+    weights=raw.get('early_exit_weights')
+    if not isinstance(weights,dict) or any(key not in weights or type(weights[key]) is not int or weights[key]<0 for key in ('ema_cross','swing_break','momentum','volume_spike')): raise ValueError('risk.early_exit_weights must define non-negative integer weights for every exit signal')
     if type(raw.get('scale_out_pct')) is not int or not 1<=raw['scale_out_pct']<=99: raise ValueError('risk.scale_out_pct must be an integer from 1 to 99')
     if type(raw['symbol_cooldown_minutes']) is not int or raw['symbol_cooldown_minutes']<0: raise ValueError('risk.symbol_cooldown_minutes must be a non-negative integer')
     spreads=raw.get('max_spread_points')
@@ -108,6 +113,8 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     if not isinstance(scanner.get('min_score'),(int,float)): raise ValueError('scanner.min_score must be numeric')
     if not isinstance(scanner.get('min_confidence'),(int,float)) or not 0<=scanner['min_confidence']<=1: raise ValueError('scanner.min_confidence must be between 0 and 1')
     if type(scanner.get('require_mtf_agreement')) is not bool: raise ValueError('scanner.require_mtf_agreement must be boolean')
+    for key in ('mtf_ema_fast','mtf_ema_slow'):
+        if type(scanner.get(key)) is not int or scanner[key]<=0: raise ValueError(f'scanner.{key} must be a positive integer')
     for key in ('max_spread_vs_median','spread_median_lookback_hours','spread_median_cache_seconds','extend_min_score'):
         if not isinstance(scanner.get(key),(int,float)) or scanner[key]<=0: raise ValueError(f'scanner.{key} must be positive')
     point_sizes=scanner.get('timeframe_point_sizes',{})

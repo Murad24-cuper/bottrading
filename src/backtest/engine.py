@@ -1,6 +1,7 @@
 """Bar-by-bar multi-symbol simulator with conservative fills and risk checks."""
 from __future__ import annotations
 from dataclasses import dataclass,replace
+from collections import defaultdict
 from datetime import datetime,timezone,timedelta
 from types import SimpleNamespace
 import math
@@ -10,6 +11,10 @@ from ..market_data import price_distance_to_money
 from ..scanner import expected_value_score
 from ..strategies import load_strategies
 from .. import indicators as ind
+from ..trade_rules import (adverse_exit_score, continuation_metrics, may_extend,
+                           mtf_direction_agrees, scale_out_volume, should_exit_early,
+                           stop_protects_profit, stop_target_from_atr, spread_within_median,
+                           stagnation_due)
 
 TF_DELTA={'M1':timedelta(minutes=1),'M5':timedelta(minutes=5),'M15':timedelta(minutes=15),'H1':timedelta(hours=1)}
 
@@ -59,7 +64,7 @@ class Backtester:
                 if gap>0.5: closures.append((close_at,gap))
             session_events[symbol]=closures
         signal_lookback=int(self.settings.config['backtest'].get('signal_lookback_bars',300))
-        balance=self.start_equity; positions={}; pending={}; trades=[]; curve=[]; last_prices={}; last_signal_bar={}; daily_pnl={}; weekly_pnl={}; symbol_trade_counts={}; symbol_last_close={}; commission=float(self.settings.config['backtest']['commission_per_lot_per_side']); slippage=float(self.settings.config['backtest']['slippage_points'])
+        balance=self.start_equity; positions={}; pending={}; trades=[]; curve=[]; last_prices={}; last_signal_bar={}; daily_pnl={}; weekly_pnl={}; symbol_trade_counts={}; symbol_last_close={}; closed_outcomes=defaultdict(list); adaptive_until={}; commission=float(self.settings.config['backtest']['commission_per_lot_per_side']); slippage=float(self.settings.config['backtest']['slippage_points'])
         account_currency='USD'
         def floating_total(): return sum(float(p.get('profit',0)) for p in positions.values())
         def close_position(symbol,pos,when,price,reason,spread_price,partial=False):
@@ -75,7 +80,11 @@ class Backtester:
             exit_commission=commission*pos['volume']; balance+=gross-exit_commission
             net=gross-pos['entry_commission']-exit_commission
             cost=pos['spread_cost']+pos['entry_commission']+exit_commission+pos['slippage_cost']+abs(exit_price-price)*factor*pos['volume']
+            total_net=net+float(pos.get('realized_partial_net',0))
             trades.append({'symbol':symbol,'asset_group':pos['asset_group'],'strategy':pos['strategy'],'direction':pos['direction'],'volume':pos['volume'],'open_time':pos['open_time'].isoformat(),'close_time':when.isoformat(),'open_price':pos['entry_price'],'close_price':exit_price,'sl':pos['sl'],'tp':pos['tp'],'profit':gross,'commission':-(pos['entry_commission']+exit_commission),'swap':0.0,'net_profit':net,'costs':cost,'close_reason':reason,'holding_minutes':(when-pos['open_time']).total_seconds()/60,'hour':pos['open_time'].hour})
+            if not partial:
+                for scope,name in (('strategy',pos['strategy']),('group',pos['asset_group'])):
+                    closed_outcomes[(scope,name)].append(total_net)
             if not partial: symbol_last_close[symbol]=when
             return net
         for open_time in timeline:
@@ -116,7 +125,7 @@ class Backtester:
                     if not allowed or target_money<=0 or expected_value_score(signal.confidence,target_money,risk_money,cost_est['cost'])<=0: continue
                     entry_commission=commission*volume; balance-=entry_commission
                     cost_tick_value=float(spec.get('trade_tick_value',tick_value_loss))
-                    positions[symbol]={'entry_price':entry,'entry_base':entry_base,'open_time':open_time,'direction':signal.direction,'volume':volume,'initial_volume':volume,'initial_risk':abs(entry-signal.sl_price),'peak_favorable_r':0.0,'scale_out_done':False,'sl':signal.sl_price,'tp':signal.tp_price,'timeframe':signal.timeframe,'strategy':signal.strategy_name,'asset_group':queued['group'],'entry_commission':entry_commission,'spread_cost':spread_cost,'slippage_cost':slippage*point/tick_size*cost_tick_value*volume,'margin':margin,'profit':0.0}
+                    positions[symbol]={'entry_price':entry,'entry_base':entry_base,'open_time':open_time,'direction':signal.direction,'volume':volume,'initial_volume':volume,'initial_risk':abs(entry-signal.sl_price),'peak_favorable_r':0.0,'scale_out_done':False,'sl':signal.sl_price,'tp':signal.tp_price,'timeframe':signal.timeframe,'strategy':signal.strategy_name,'asset_group':queued['group'],'entry_commission':entry_commission,'spread_cost':spread_cost,'slippage_cost':slippage*point/tick_size*cost_tick_value*volume,'margin':margin,'profit':0.0,'realized_partial_net':0.0,'extension_until':None,'extended_minutes':0}
                     symbol_trade_counts[(symbol,now.date())]=trades_today+1
                 # Intrabar exits use bid OHLC and ask OHLC. If stop and target both hit, stop wins.
                 pos=positions.get(symbol)
@@ -137,16 +146,17 @@ class Backtester:
                         target_level=pos['entry_price']+(1 if is_buy else -1)*initial_risk*float(risk['first_target_r'])
                         reached=(high>=target_level) if is_buy else (low+spread_price<=target_level)
                         if reached and not pos['scale_out_done']:
-                            step=float(spec.get('volume_step',0.01)); minimum=float(spec.get('volume_min',step)); desired=pos['volume']*float(risk['scale_out_pct'])/100
-                            partial=math.floor(desired/step+1e-10)*step
-                            if partial<minimum-1e-9 or pos['volume']-partial<minimum-1e-9: partial=pos['volume']
+                            step=float(spec.get('volume_step',0.01)); minimum=float(spec.get('volume_min',step))
+                            partial,close_all=scale_out_volume(pos['volume'],step,minimum,float(risk['scale_out_pct']))
                             closing={**pos,'volume':partial,'entry_commission':pos['entry_commission']*partial/pos['volume'],'spread_cost':pos['spread_cost']*partial/pos['volume'],'slippage_cost':pos['slippage_cost']*partial/pos['volume']}
                             fill=target_level if is_buy else target_level-spread_price
                             net=close_position(symbol,closing,bar_end,fill,'partial_tp',spread_price,partial=partial<pos['volume'])
+                            pos['realized_partial_net']+=net
                             daily_pnl[bar_end.date()]=daily_pnl.get(bar_end.date(),0)+net; monday=(bar_end-timedelta(days=bar_end.weekday())).date(); weekly_pnl[monday]=weekly_pnl.get(monday,0)+net
                             if partial>=pos['volume']: positions.pop(symbol); pos=None
                             else:
                                 remain=pos['volume']-partial; fraction=remain/pos['volume']; pos['volume']=remain; pos['entry_commission']*=fraction; pos['spread_cost']*=fraction; pos['slippage_cost']*=fraction; pos['scale_out_done']=True
+                        estimated_cost=0.0
                         if pos is not None and pos['scale_out_done']:
                             tick_value=float(spec.get('trade_tick_value',spec.get('tick_value',spec.get('trade_tick_value_loss',0))) or 0); tick_size=float(spec.get('trade_tick_size',spec.get('tick_size',0)) or 0)
                             factor=tick_value/tick_size if tick_size>0 and tick_value>0 else 0
@@ -154,7 +164,7 @@ class Backtester:
                             be_distance=(estimated_cost*float(risk['breakeven_cost_multiplier'])/(factor*pos['volume'])) if factor>0 and pos['volume']>0 else 0
                             be=pos['entry_price']+(be_distance if is_buy else -be_distance)
                             if (is_buy and be<close and be>pos['sl']) or (not is_buy and be>close and (pos['sl']==0 or be<pos['sl'])): pos['sl']=be
-                            tf=pos.get('timeframe') if pos.get('timeframe') in data[symbol] else tf
+                            tf='M1' if 'M1' in data[symbol] else pos.get('timeframe') if pos.get('timeframe') in data[symbol] else tf
                             history_frame=data[symbol].get(tf)
                             if history_frame is not None:
                                 known=history_frame.loc[history_frame.index<=open_time]
@@ -169,16 +179,52 @@ class Backtester:
                         if pos is not None:
                             age=(bar_end-pos['open_time']).total_seconds()/60
                             session_event=next(((stamp,gap) for stamp,gap in session_events.get(symbol,[]) if stamp>=open_time),None)
+                            max_hold=float(risk.get('max_hold_minutes',10)); max_extended=float(risk.get('max_hold_extended_minutes',max_hold))
+                            reason=''
                             if session_event and session_event[1]>max_session_gap and 0<=(session_event[0]-open_time).total_seconds()/60<=float(risk['no_entry_before_close_minutes']): reason='session_close'
-                            elif age>=float(risk['stagnation_minutes']) and pos['peak_favorable_r']<float(risk['stagnation_min_r']): reason='stagnant'
-                            elif age>=self.settings.risk.max_hold_minutes: reason='time'
-                            else: reason=''
+                            elif stagnation_due(age,pos['peak_favorable_r'],float(risk['stagnation_minutes']),float(risk['stagnation_min_r'])): reason='stagnant'
+                            elif age>=max_extended: reason='time'
+                            elif age>=max_hold:
+                                remaining=pos.get('extension_until')
+                                try: remaining_dt=datetime.fromisoformat(remaining) if remaining else None
+                                except (ValueError,TypeError): remaining_dt=None
+                                if remaining_dt and remaining_dt.tzinfo is None: remaining_dt=remaining_dt.replace(tzinfo=timezone.utc)
+                                if remaining_dt and bar_end<remaining_dt: reason=''
+                                else:
+                                    known={name:frame.loc[frame.index<=open_time] for name,frame in data[symbol].items()}
+                                    aligned,rising,score=continuation_metrics(known,pos['direction'],int(self.settings.config['scanner'].get('mtf_ema_fast',5)),int(self.settings.config['scanner'].get('mtf_ema_slow',13)),int(risk.get('early_exit_roc_period',5)))
+                                    factor=float(spec.get('trade_tick_value',spec.get('tick_value',0)) or 0)/float(spec.get('trade_tick_size',spec.get('tick_size',1)) or 1)
+                                    be_cost=estimated_cost*float(risk['breakeven_cost_multiplier'])/(factor*pos['volume']) if factor>0 and pos['volume']>0 else 0
+                                    protected=stop_protects_profit(pos['direction'],pos['sl'],pos['entry_price'],be_cost)
+                                    can_extend=may_extend(close>pos['entry_price'] if is_buy else close<pos['entry_price'],pos['scale_out_done'],protected,aligned,rising,score,float(self.settings.config['scanner'].get('extend_min_score',.7)),age,max_extended)
+                                    if can_extend:
+                                        step=min(float(risk.get('extend_step_minutes',10)),max_extended-age)
+                                        pos['extension_until']=(bar_end+timedelta(minutes=step)).isoformat()
+                                        pos['extended_minutes']=int(pos.get('extended_minutes',0)+math.ceil(step))
+                                        reason=''
+                                    else: reason='time'
+                            if pos is not None and pos in positions.values() and not reason:
+                                m1=data[symbol].get('M1')
+                                known_m1=m1.loc[m1.index<=open_time] if m1 is not None else None
+                                if risk.get('early_exit_enabled'):
+                                    score,reasons=adverse_exit_score(known_m1,pos['direction'],risk)
+                                    if should_exit_early((close-pos['entry_price'])/initial_risk if is_buy else (pos['entry_price']-close)/initial_risk,score,risk): reason='early_exit'
                             if reason:
                                 net=close_position(symbol,pos,bar_end,close,reason,spread_price); daily_pnl[bar_end.date()]=daily_pnl.get(bar_end.date(),0)+net; monday=(bar_end-timedelta(days=bar_end.weekday())).date(); weekly_pnl[monday]=weekly_pnl.get(monday,0)+net; positions.pop(symbol)
                 # Generate at the close. Each strategy runs only when its own trigger bar advances.
                 for strategy in self.strategies:
                     group=self.specs.get(symbol,{}).get('asset_group','other')
                     if group not in getattr(strategy,'allowed_groups',[group]): continue
+                    window=int(self.settings.config['risk'].get('gating_window',20)); disable_hours=float(self.settings.config['risk'].get('gating_disable_hours',24))
+                    gated=False
+                    for scope,name in (('strategy',strategy.name),('group',group)):
+                        history_results=closed_outcomes[(scope,name)]
+                        if len(history_results)>=window and sum(history_results[-window:])/window<0:
+                            until=adaptive_until.get((scope,name))
+                            if until is None or bar_end>=until:
+                                adaptive_until[(scope,name)]=bar_end+timedelta(hours=disable_hours); until=adaptive_until[(scope,name)]
+                            if bar_end<until: gated=True
+                    if gated: continue
                     available=[value for value in strategy.required_timeframes if value in data[symbol]]
                     trigger=min(available,key=lambda value:TF_DELTA[value]) if available else (tf if not strategy.required_timeframes else None)
                     if trigger is None: continue
@@ -198,6 +244,24 @@ class Backtester:
                             supplied[name]=frame.iloc[max(0,complete_count-signal_lookback):complete_count]
                     sig=strategy.generate_signal(symbol,supplied)
                     if sig is None or symbol in positions: continue
+                    scanner_cfg=self.settings.config.get('scanner',{}); risk_cfg=self.settings.config['risk']
+                    if float(sig.confidence)<float(scanner_cfg.get('min_confidence',0.0)): continue
+                    if scanner_cfg.get('require_mtf_agreement',False) and not mtf_direction_agrees(supplied,sig.direction,fast=int(scanner_cfg.get('mtf_ema_fast',5)),slow=int(scanner_cfg.get('mtf_ema_slow',13))): continue
+                    m1=data[symbol].get('M1')
+                    if 'sl_move_mult' in risk_cfg and 'tp_move_mult' in risk_cfg:
+                        if m1 is None or 'M1' not in supplied: continue
+                        m1_history=supplied['M1']; atr_value=float(ind.atr(m1_history).iloc[-1])
+                        if not math.isfinite(atr_value) or atr_value<=0: continue
+                        spread_price=self._spread_points(row)*self._point(symbol,self.specs.get(symbol,{}))
+                        sig.sl_price,sig.tp_price=stop_target_from_atr(float(sig.entry_hint),sig.direction,atr_value,spread_price,float(risk_cfg['sl_move_mult']),float(risk_cfg['tp_move_mult']))
+                    if 'max_spread_vs_median' in scanner_cfg:
+                        if m1 is None: continue
+                        median_bars=int(float(scanner_cfg.get('spread_median_lookback_hours',24))*60)
+                        m1_known=m1.loc[m1.index<=open_time]
+                        spreads=m1_known.spread.tail(median_bars+1) if 'spread' in m1_known else pd.Series(dtype=float)
+                        spread_median=float(spreads.iloc[:-1].median()) if len(spreads)>1 else 0.0
+                        current_spread=float(spreads.iloc[-1]) if len(spreads) else self._spread_points(row)
+                        if not spread_within_median(current_spread,spread_median,float(scanner_cfg['max_spread_vs_median'])): continue
                     indices=data[symbol][tf].index; next_pos=indices.searchsorted(open_time,side='right')
                     if next_pos>=len(indices): continue
                     next_idx=indices[next_pos]

@@ -219,7 +219,7 @@ def main():
         st.subheader('Müvəqqəti söndürülən strategiyalar və qruplar')
         if adaptive:
             group_names={'forex':'Valyuta','metals':'Metallar','indices':'İndekslər','energy':'Enerji','crypto':'Kripto','stocks':'Səhmlər','other':'Digər'}
-            st.table(pd.DataFrame([{'Növ':'Strategiya' if r['scope']=='strategy' else 'Alət qrupu','Ad':strategy_label(r['name']) if r['scope']=='strategy' else group_names.get(r['name'],r['name']),'Son 20 əməliyyatın gözlənilən nəticəsi':format_money(r['expectancy'],signed=True),'Nümunə':r['sample_size'],'Aktivdir':'Bəli · '+local_time(r['disabled_until'])} for r in adaptive]))
+            st.table(pd.DataFrame([{'Növ':'Strategiya' if r['scope']=='strategy' else 'Alət qrupu','Ad':strategy_label(r['name']) if r['scope']=='strategy' else group_names.get(r['name'],r['name']),'Son 20 əməliyyatın gözlənilən nəticəsi':format_money(r['expectancy'],signed=True),'Səbəb':'Son bağlanmış əməliyyatlardakı orta nəticə mənfidir','Nümunə':r['sample_size'],'Söndürülüb':'Bəli · '+local_time(r['disabled_until'])} for r in adaptive]))
         else: st.caption('Hazırda müvəqqəti söndürülən strategiya və qrup yoxdur.')
         try:
             import ast

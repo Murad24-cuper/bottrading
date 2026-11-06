@@ -37,7 +37,7 @@ def test_confidence_gate():
 def test_extension_requires_protected_profitable_trade_and_score():
     args = dict(in_profit=True, scaled_out=True, stop_protects_profit=True, mtf_agrees=True,
                 momentum_rising=True, continuation_score=.8, minimum_score=.7,
-                age_minutes=10, max_minutes=10)
+                age_minutes=10, max_minutes=60)
     assert may_extend(**args)
     assert not may_extend(**{**args, 'in_profit': False})
     assert not may_extend(**{**args, 'stop_protects_profit': False})

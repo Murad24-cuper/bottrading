@@ -9,6 +9,10 @@ def test_default_config_loads_for_offline_work(monkeypatch):
     assert settings.risk.max_hold_minutes==10
     assert settings.risk.first_target_r==0.8
     assert settings.risk.scale_out_pct==50
+    assert settings.risk.risk_per_trade_pct==0.25
+    assert settings.config['scanner']['min_confidence']==0.6
+    assert settings.config['scanner']['require_mtf_agreement'] is True
+    assert settings.config['risk']['min_risk_reward']==1.3
     assert settings.risk.no_entry_before_close_minutes==60
     assert settings.risk.max_session_gap_hours==6
     assert settings.config['scanner']['top_movers']==40

@@ -51,3 +51,21 @@ def test_scanner_mocked_market_data_logs_negative_and_ranks_positive(tmp_path,mo
     assert scanner.last_scan_stats['symbols_scanned']==2
     assert scanner.last_scan_stats['scan_complete'] is True
     assert scanner.last_scan_stats['top_movers']==2
+
+def test_cached_m1_history_refetches_when_longer_spread_window_is_needed(tmp_path,monkeypatch):
+    import src.scanner as scanner_module
+    from src import market_data
+    class MT5:
+        def symbol_info(self,symbol): return SimpleNamespace(point=.0001)
+    settings=SimpleNamespace(config={'scanner':{'timeframe_point_sizes':{}}},risk=SimpleNamespace(),root=tmp_path)
+    scanner=MarketScanner(MT5(),settings,Database(tmp_path/'cache.db'),FakeSymbols())
+    calls=[]
+    def candles(mt5,symbol,timeframe,count):
+        calls.append(count)
+        length=min(count,30 if count<100 else 1500)
+        return pd.DataFrame({'open':np.ones(length),'high':np.ones(length),'low':np.ones(length),'close':np.ones(length),
+                             'tick_volume':np.ones(length),'spread':np.ones(length)},index=pd.date_range('2026-01-01',periods=length,freq='min',tz='UTC'))
+    monkeypatch.setattr(market_data,'get_closed_candles',candles)
+    scanner._bars('EURUSD','M1',30)
+    assert len(scanner._bars('EURUSD','M1',1445))==1445
+    assert calls==[1,30,1,1445]

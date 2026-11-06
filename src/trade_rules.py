@@ -113,7 +113,7 @@ def may_extend(in_profit: bool, scaled_out: bool, stop_protects_profit: bool, mt
                momentum_rising: bool, continuation_score: float, minimum_score: float, age_minutes: float,
                max_minutes: float) -> bool:
     """Allow an extension only when every profit-protection condition is met."""
-    return (age_minutes >= max_minutes and age_minutes < 60 and in_profit and scaled_out and
+    return (float(age_minutes) < float(max_minutes) and in_profit and scaled_out and
             stop_protects_profit and mtf_agrees and momentum_rising and continuation_score >= minimum_score)
 
 

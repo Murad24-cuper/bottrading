@@ -103,6 +103,8 @@ scanner:
   min_score: 0.0
   min_confidence: 0.6
   require_mtf_agreement: true
+  mtf_ema_fast: 5               # Fast EMA for M1/M5/M15 direction agreement
+  mtf_ema_slow: 13              # Slow EMA for M1/M5/M15 direction agreement
   max_spread_vs_median: 1.5
   spread_median_lookback_hours: 24
   spread_median_cache_seconds: 300

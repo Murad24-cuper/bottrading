@@ -28,6 +28,22 @@ Create an empty file named `STOP` in this project folder to block new entries wh
 - `max_open_positions`: total position limit. `max_positions_per_group`: correlation limit for each asset group. `max_positions_per_currency` limits net FX/metals exposure per currency. `max_positions_per_underlying_group` limits correlated index exposure.
 - `max_margin_usage_pct`: maximum projected used margin as a share of equity. Leverage is only a margin constraint; it never sets position size.
 - `first_target_r` and `scale_out_pct`: close part of a position at the first favorable R target. If the broker's minimum volume prevents a split, close the full position there.
+
+## 10-minute trade rules
+
+The default strategy horizon is 10 minutes. Signals are filtered so M1, M5 and M15 agree, confidence is at least 0.6, and the current spread is no more than 1.5 times the symbol's 24-hour median. SL/TP distances use `ATR(M1) * sqrt(10)`: `risk.sl_move_mult` (0.8) sets the stop and `risk.tp_move_mult` (1.2) sets the target. The target must retain at least 1.3 times the stop risk after estimated costs, and spread plus commission may use at most 25% of target value.
+
+- `risk.risk_per_trade_pct` (0.25): maximum equity risk at the stop.
+- `risk.max_hold_minutes` (10): normal hard holding limit. Positions may extend only under the protected-profit conditions below.
+- `risk.max_hold_extended_minutes` (60), `risk.extend_step_minutes` (10), and `scanner.extend_min_score` (0.7): extension ceiling, recheck interval and minimum continuation score.
+- `risk.first_target_r` (0.8), `risk.scale_out_pct` (50), `risk.trail_atr_mult` (1.0), `risk.stagnation_minutes` (4), and `risk.stagnation_min_r` (0.2): scale-out, ATR trail and stagnation exit.
+- `risk.early_exit_*`: adverse M1 EMA, swing, momentum and tick-volume thresholds. Early exit is considered only between -0.2R and -0.7R.
+- `scanner.require_mtf_agreement`, `scanner.mtf_ema_fast`, `scanner.mtf_ema_slow`, and `scanner.min_confidence`: direction and confidence entry filters.
+- `scanner.max_spread_vs_median`, `scanner.spread_median_lookback_hours`, and `scanner.spread_median_cache_seconds`: spread anomaly threshold, sample horizon and cache duration.
+- `risk.symbol_cooldown_minutes` (5) and `risk.max_trades_per_symbol_per_day` (20): symbol renewal limits.
+- `risk.gating_window` (20) and `risk.gating_disable_hours` (24): disable strategies or asset groups whose latest closed-trade expectancy is negative. Active gates appear in the dashboard details.
+
+Extension requires an open profit, completed scale-out, stop at breakeven plus estimated costs or better, M1/M5/M15 continuation agreement and improving M1 momentum. At each configured extension interval the conditions are checked again. A position that fails any condition closes at its time limit; all positions close at the extended ceiling.
 - `breakeven_cost_multiplier`: after scale-out, move the stop to breakeven plus estimated round-trip costs.
 - `trail_atr_mult`: trail the remaining volume by ATR on its entry timeframe. Stops only move in the protective direction.
 - `momentum_lookback_bars`: closed-bar lookback for detecting momentum reversal. `stagnation_minutes` and `stagnation_min_r` close positions that have not progressed enough. `max_hold_minutes` is the high safety ceiling (720 minutes by default).

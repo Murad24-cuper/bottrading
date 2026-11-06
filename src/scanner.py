@@ -56,7 +56,7 @@ class MarketScanner:
             self.db.log_event('WARNING','scanner',f'Skipping {symbol} {timeframe}: closed-bar read failed: {exc}')
             return None
         if latest.empty: return cached
-        if cached is None or cached.empty or latest.index[-1]>cached.index[-1]:
+        if cached is None or cached.empty or latest.index[-1]>cached.index[-1] or len(cached)<count:
             try:
                 cached=market_data.get_closed_candles(self.mt5,symbol,timeframe,count)
             except RuntimeError as exc:
@@ -166,7 +166,7 @@ class MarketScanner:
                     strategy_diagnostics[strategy.name][getattr(strategy,'last_skip_reason','conditions_not_met')]+=1; continue
                 if not confidence_allowed(signal.confidence,float(cfg.get('min_confidence',0.0))):
                     reason='confidence below scanner.min_confidence'; self._write_signal(signal,0,reason); strategy_diagnostics[strategy.name]['confidence_below_minimum']+=1; continue
-                if cfg.get('require_mtf_agreement',True) and not mtf_direction_agrees(candles,signal.direction):
+                if cfg.get('require_mtf_agreement',True) and not mtf_direction_agrees(candles,signal.direction,fast=int(cfg.get('mtf_ema_fast',5)),slow=int(cfg.get('mtf_ema_slow',13))):
                     reason='M1/M5/M15 direction disagreement'; self._write_signal(signal,0,reason); strategy_diagnostics[strategy.name]['mtf_disagreement']+=1; continue
                 if 'M1' not in candles:
                     self._write_signal(signal,0,'M1 history missing for 10-minute target'); continue
