@@ -62,7 +62,7 @@ def _pid_running(pid):
     except (OSError,ValueError,ProcessLookupError): return False
 
 def _heartbeat_fresh(status,now=None):
-    try: return bool(status and status.get('time') and (now or datetime.now(timezone.utc))-_as_utc(status['time'])<=timedelta(seconds=60))
+    try: return bool(status and status.get('status') in {'running','managing_only','error'} and status.get('time') and (now or datetime.now(timezone.utc))-_as_utc(status['time'])<=timedelta(seconds=60))
     except (ValueError,TypeError): return False
 
 def _start_bot():

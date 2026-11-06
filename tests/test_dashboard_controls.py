@@ -3,6 +3,10 @@ from pathlib import Path
 
 from src.dashboard import app
 
+def test_stopped_bot_with_fresh_heartbeat_is_not_running():
+    status={'time':datetime.now(timezone.utc).isoformat(),'status':'stopped'}
+    assert not app._heartbeat_fresh(status)
+
 
 def test_start_control_launches_detached_supervisor_and_logs_output(tmp_path,monkeypatch):
     monkeypatch.setattr(app,'ROOT',tmp_path)
@@ -31,7 +35,7 @@ def test_start_control_launches_detached_supervisor_and_logs_output(tmp_path,mon
 def test_start_control_refuses_a_fresh_heartbeat(tmp_path,monkeypatch):
     monkeypatch.setattr(app,'ROOT',tmp_path)
     monkeypatch.setattr(app,'DB_PATH',tmp_path/'data'/'bot.db')
-    monkeypatch.setattr(app.queries,'get_bot_status',lambda path:{'time':datetime.now(timezone.utc).isoformat()})
+    monkeypatch.setattr(app.queries,'get_bot_status',lambda path:{'time':datetime.now(timezone.utc).isoformat(),'status':'running'})
     monkeypatch.setattr(app.subprocess,'Popen',lambda *args,**kwargs:(_ for _ in ()).throw(AssertionError('must not launch')))
     ok,message=app._start_bot()
     assert not ok and 'already appears' in message
