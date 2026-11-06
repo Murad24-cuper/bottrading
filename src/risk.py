@@ -90,16 +90,17 @@ def check_trade_allowed(signal, account, open_positions, pnl_today, pnl_week, se
     if tp is None or entry is None: return False,'entry and take-profit are required'
     if signal.direction=='buy' and not sl<entry<tp: return False,'invalid SL/TP side for buy'
     if signal.direction=='sell' and not tp<entry<sl: return False,'invalid SL/TP side for sell'
-    rr=abs(tp-entry)/abs(entry-sl)
-    if rr<risk['min_risk_reward']: return False,'risk/reward below minimum'
     cost=float(cost_estimate.get('cost',0) or 0) if isinstance(cost_estimate,dict) else float(cost_estimate or 0)
     spec=symbol_spec or {}
     tick_value=float(spec.get('trade_tick_value_profit') or spec.get('trade_tick_value') or spec.get('tick_value') or spec.get('trade_tick_value_loss') or 0)
+    loss_tick_value=float(spec.get('trade_tick_value_loss') or spec.get('trade_tick_value') or spec.get('tick_value') or tick_value)
     tick_size=float(spec.get('trade_tick_size') or spec.get('tick_size') or 0)
-    if volume is None or not all(math.isfinite(x) for x in (float(volume),tick_value,tick_size)) or volume<=0 or tick_value<=0 or tick_size<=0:
+    if volume is None or not all(math.isfinite(x) for x in (float(volume),tick_value,loss_tick_value,tick_size)) or volume<=0 or tick_value<=0 or loss_tick_value<=0 or tick_size<=0:
         return False,'cost-to-target estimate cannot be converted to money'
     target_money=abs(float(tp)-float(entry))/tick_size*tick_value*volume
+    risk_money=abs(float(entry)-float(sl))/tick_size*loss_tick_value*volume
     if not math.isfinite(target_money) or not math.isfinite(cost) or target_money<=0 or cost<0 or cost/target_money>risk['max_cost_to_target_ratio']: return False,'cost-to-target ratio too high'
+    if (target_money-cost)/risk_money<float(risk['min_risk_reward']): return False,'net risk/reward below minimum'
     equity=float(_value(account,'equity',balance)); margin=float(_value(account,'margin',0))
     if not math.isfinite(equity) or not math.isfinite(margin) or not math.isfinite(float(required_margin)) or equity<=0 or required_margin<0 or (margin+float(required_margin))/equity*100>risk['max_margin_usage_pct']: return False,'margin usage cap exceeded'
     return True,'allowed'

@@ -6,8 +6,8 @@ def test_default_config_loads_for_offline_work(monkeypatch):
     root=Path(__file__).resolve().parents[1]
     settings=config_module.load_settings(root/'config.yaml',env_path='deliberately-not-loaded.env',require_credentials=False)
     assert settings.config['account']['mode']=='demo'
-    assert settings.risk.max_hold_minutes==720
-    assert settings.risk.first_target_r==0.7
+    assert settings.risk.max_hold_minutes==10
+    assert settings.risk.first_target_r==0.8
     assert settings.risk.scale_out_pct==50
     assert settings.risk.no_entry_before_close_minutes==60
     assert settings.risk.max_session_gap_hours==6

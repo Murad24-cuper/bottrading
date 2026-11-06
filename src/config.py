@@ -76,10 +76,10 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
         value=raw.get(key)
         if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<=low or (high is not None and value>high):
             raise ValueError(f'risk.{key} must be > {low}' + (f' and <= {high}' if high else ''))
-    for key in ('max_open_positions','max_positions_per_group','max_positions_per_currency','max_positions_per_underlying_group','max_trades_per_symbol_per_day','max_hold_minutes','momentum_lookback_bars','stagnation_minutes','no_entry_before_close_minutes'):
+    for key in ('max_open_positions','max_positions_per_group','max_positions_per_currency','max_positions_per_underlying_group','max_trades_per_symbol_per_day','max_hold_minutes','max_hold_extended_minutes','extend_step_minutes','gating_window','gating_disable_hours','momentum_lookback_bars','stagnation_minutes','no_entry_before_close_minutes','early_exit_score_threshold','early_exit_ema_fast','early_exit_ema_slow','early_exit_swing_lookback','early_exit_rsi_period','early_exit_roc_period','early_exit_volume_lookback'):
         if type(raw.get(key)) is not int or raw[key]<=0: raise ValueError(f'risk.{key} must be a positive integer')
     if isinstance(raw.get('max_session_gap_hours'),bool) or not isinstance(raw.get('max_session_gap_hours'),(int,float)) or raw['max_session_gap_hours']<=0: raise ValueError('risk.max_session_gap_hours must be positive')
-    for key in ('first_target_r','trail_atr_mult','stagnation_min_r','breakeven_cost_multiplier'):
+    for key in ('first_target_r','trail_atr_mult','stagnation_min_r','breakeven_cost_multiplier','sl_move_mult','tp_move_mult','extend_min_score','early_exit_volume_spike_ratio'):
         if isinstance(raw.get(key),bool) or not isinstance(raw.get(key),(int,float)) or not math.isfinite(raw[key]) or raw[key]<=0: raise ValueError(f'risk.{key} must be positive')
     if type(raw.get('scale_out_pct')) is not int or not 1<=raw['scale_out_pct']<=99: raise ValueError('risk.scale_out_pct must be an integer from 1 to 99')
     if type(raw['symbol_cooldown_minutes']) is not int or raw['symbol_cooldown_minutes']<0: raise ValueError('risk.symbol_cooldown_minutes must be a non-negative integer')
@@ -106,6 +106,10 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
         if type(scanner.get(key)) is not int or scanner[key]<=0: raise ValueError(f'scanner.{key} must be a positive integer')
     if not isinstance(scanner.get('max_spread_volatility_ratio'),(int,float)) or scanner['max_spread_volatility_ratio']<=0: raise ValueError('scanner.max_spread_volatility_ratio must be positive')
     if not isinstance(scanner.get('min_score'),(int,float)): raise ValueError('scanner.min_score must be numeric')
+    if not isinstance(scanner.get('min_confidence'),(int,float)) or not 0<=scanner['min_confidence']<=1: raise ValueError('scanner.min_confidence must be between 0 and 1')
+    if type(scanner.get('require_mtf_agreement')) is not bool: raise ValueError('scanner.require_mtf_agreement must be boolean')
+    for key in ('max_spread_vs_median','spread_median_lookback_hours','spread_median_cache_seconds','extend_min_score'):
+        if not isinstance(scanner.get(key),(int,float)) or scanner[key]<=0: raise ValueError(f'scanner.{key} must be positive')
     point_sizes=scanner.get('timeframe_point_sizes',{})
     if not isinstance(point_sizes,dict) or any(not isinstance(value,(int,float)) or value<=0 for value in point_sizes.values()): raise ValueError('scanner.timeframe_point_sizes must map symbols to positive point sizes')
     if not isinstance(config['loop'].get('interval_seconds'),(int,float)) or config['loop']['interval_seconds']<=0: raise ValueError('loop.interval_seconds must be > 0')

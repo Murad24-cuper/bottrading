@@ -11,6 +11,7 @@ from .features import build_features
 from .risk import calc_volume
 from .strategies import load_strategies
 from .symbols import SymbolService
+from .trade_rules import confidence_allowed, mtf_direction_agrees, stop_target_from_atr, spread_within_median
 
 @dataclass
 class Candidate:
@@ -46,7 +47,7 @@ class MarketScanner:
         self.mt5,self.settings,self.db=mt5,settings,db
         self.symbols=symbol_service or SymbolService(mt5,settings)
         self._cache={}; self._cursor=0; self._strategies=load_strategies(settings); self.last_universe_size=0
-        self._volatility_cache={}; self.last_scan_stats={}; self.last_strategy_diagnostics={}
+        self._volatility_cache={}; self._spread_cache={}; self.last_scan_stats={}; self.last_strategy_diagnostics={}
     def _bars(self,symbol,timeframe,count):
         key=(symbol,timeframe); cached=self._cache.get(key)
         try:
@@ -86,6 +87,18 @@ class MarketScanner:
             if not force and (info is None or tick is None): rejection['tick unavailable']+=1; continue
             point=float(getattr(info,'point',0) or 0) if info else 0.0
             spread_price=max(0.0,float(tick.ask)-float(tick.bid)) if tick else 0.0
+            if not force and spread_price>0 and point>0:
+                spread_cfg=cfg
+                lookback=int(spread_cfg.get('spread_median_lookback_hours',24))*60
+                median_cache=self._spread_cache.get(symbol)
+                if not median_cache or (datetime.now(timezone.utc)-median_cache['time']).total_seconds()>int(spread_cfg.get('spread_median_cache_seconds',300)):
+                    spread_frame=self._bars(symbol,'M1',lookback+5)
+                    median=float(spread_frame.spread.tail(lookback).median()) if spread_frame is not None and not spread_frame.empty else 0.0
+                    median_cache={'median_points':median,'time':datetime.now(timezone.utc)}
+                    self._spread_cache[symbol]=median_cache
+                current_points=spread_price/point
+                if not spread_within_median(current_points,median_cache['median_points'],float(spread_cfg.get('max_spread_vs_median',1.5))):
+                    rejection['spread above 24h median limit']+=1; continue
             cached=self._volatility_cache.get(symbol); max_ratio=float(cfg['max_spread_volatility_ratio'])
             if not force and cached and (datetime.now(timezone.utc)-cached['time']).total_seconds()<=int(cfg['movement_timeframe_minutes'])*60 and cached['atr']>0 and spread_price/cached['atr']>max_ratio:
                 rejection['spread too high relative to recent volatility']+=1; continue
@@ -109,7 +122,8 @@ class MarketScanner:
             if symbol not in open_symbols and spread_ratio>max_ratio:
                 move_rejections['spread too high relative to recent volatility']+=1; continue
             relative_range=recent_range/max(spread_price,snapshots.get(symbol,{}).get('point',0.0)*.01,1e-12)
-            score=(recent_range/price)*math.log1p(relative_range)
+            expected_move=atr*math.sqrt(10)
+            score=expected_move/max(spread_price,snapshots.get(symbol,{}).get('point',0.0),1e-12)
             movement.append((score,symbol))
         self._cursor=(start+visited)%max(1,len(universe))
         top_n=int(cfg['top_movers'])
@@ -127,7 +141,7 @@ class MarketScanner:
                     rejection[session_reason]+=1
                     continue
             group=self.symbols.get_asset_group(symbol); strategies=[s for s in self._strategies if group in s.allowed_groups]
-            needed=sorted({tf for strategy in strategies for tf in strategy.required_timeframes})
+            needed=sorted({tf for strategy in strategies for tf in strategy.required_timeframes} | ({'M1','M5','M15'} if cfg.get('require_mtf_agreement',True) else set()))
             if not needed: continue
             candles={tf:self._bars(symbol,tf,int(cfg['candle_count'])) for tf in needed}
             candles={tf:df for tf,df in candles.items() if df is not None and len(df)>=60}
@@ -144,6 +158,17 @@ class MarketScanner:
                 signal=strategy.generate_signal(symbol,candles)
                 if signal is None:
                     strategy_diagnostics[strategy.name][getattr(strategy,'last_skip_reason','conditions_not_met')]+=1; continue
+                if not confidence_allowed(signal.confidence,float(cfg.get('min_confidence',0.0))):
+                    reason='confidence below scanner.min_confidence'; self._write_signal(signal,0,reason); strategy_diagnostics[strategy.name]['confidence_below_minimum']+=1; continue
+                if cfg.get('require_mtf_agreement',True) and not mtf_direction_agrees(candles,signal.direction):
+                    reason='M1/M5/M15 direction disagreement'; self._write_signal(signal,0,reason); strategy_diagnostics[strategy.name]['mtf_disagreement']+=1; continue
+                if 'M1' not in candles:
+                    self._write_signal(signal,0,'M1 history missing for 10-minute target'); continue
+                m1_atr=float(ind.atr(candles['M1']).iloc[-1])
+                if not math.isfinite(m1_atr) or m1_atr<=0:
+                    self._write_signal(signal,0,'M1 ATR unavailable'); continue
+                tick=self.mt5.symbol_info_tick(symbol); spread=max(0.0,float(tick.ask)-float(tick.bid)) if tick else 0.0
+                signal.sl_price,signal.tp_price=stop_target_from_atr(float(signal.entry_hint),signal.direction,m1_atr,spread,float(self.settings.config['risk']['sl_move_mult']),float(self.settings.config['risk']['tp_move_mult']))
                 if signal.sl_price is None or signal.tp_price is None or signal.entry_hint is None:
                     self._write_signal(signal,0,'signal missing entry, SL, or TP'); continue
                 if signal.direction=='buy' and not signal.sl_price<signal.entry_hint<signal.tp_price:

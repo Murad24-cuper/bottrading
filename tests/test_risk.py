@@ -108,7 +108,7 @@ def test_check_trade_allowed_minimum_risk_reward(tmp_path):
     signal.tp_price=99.5
     assert check()[1]=='invalid SL/TP side for buy'
     signal.tp_price=100.5; signal.sl_price=99
-    assert check()[1]=='risk/reward below minimum'
+    assert check()[1]=='net risk/reward below minimum'
 def test_check_trade_allowed_cost_ratio(tmp_path):
     _,_,_,_,allowed,check=make_context(tmp_path); assert allowed[0]
     assert check(cost_estimate={'cost':1})[1]=='cost-to-target ratio too high'
