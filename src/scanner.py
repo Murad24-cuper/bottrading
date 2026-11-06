@@ -5,6 +5,7 @@ from time import perf_counter
 from datetime import datetime,timezone
 from collections import Counter, defaultdict
 import math
+import json
 from . import market_data
 from . import indicators as ind
 from .features import build_features
@@ -12,6 +13,12 @@ from .risk import calc_volume
 from .strategies import load_strategies
 from .symbols import SymbolService
 from .trade_rules import confidence_allowed, mtf_direction_agrees, stop_target_from_atr, spread_within_median
+from .patterns.chart import detect_chart_patterns
+from .patterns.candles import detect_candlestick_patterns
+from .patterns.fibonacci import fibonacci_retracement
+from .levels import key_levels
+from .sessions import session_context
+from .market_context import build_market_context,context_for_signal
 
 @dataclass
 class Candidate:
@@ -141,6 +148,9 @@ class MarketScanner:
         ranked=sorted(movement,key=lambda item:item[0],reverse=True)
         top_symbols=[symbol for _,symbol in ranked[:top_n]]
         top_symbols.extend(symbol for symbol in sorted(open_symbols) if symbol not in top_symbols)
+        cached_context={symbol:{'M15':self._cache[(symbol,'M15')]} for symbol in top_symbols if (symbol,'M15') in self._cache}
+        context_groups={symbol:self.symbols.get_asset_group(symbol) for symbol in cached_context}
+        cycle_context=build_market_context(cached_context,context_groups)
         results=[]; strategy_diagnostics=defaultdict(Counter)
         analysed=[]
         for symbol in top_symbols:
@@ -161,7 +171,17 @@ class MarketScanner:
             candles={tf:df for tf,df in candles.items() if df is not None and len(df)>=60}
             if not candles: continue
             analysed.append(symbol)
-            features=build_features(candles); info=self.mt5.symbol_info(symbol)
+            features=build_features(candles)
+            analysis_candles=dict(candles)
+            if 'H1' not in analysis_candles:
+                analysis_candles['H1']=self._bars(symbol,'H1',int(cfg.get('analysis_candle_count',250)))
+            chart={tf:detect_chart_patterns(analysis_candles[tf],tf,float(cfg.get('pattern_tolerance',.015))) for tf in ('M5','M15') if tf in analysis_candles and analysis_candles[tf] is not None}
+            candles_found=[pattern for tf in ('M1','M5','M15') if tf in analysis_candles and analysis_candles[tf] is not None for pattern in detect_candlestick_patterns(analysis_candles[tf],tf)]
+            fib={tf:fibonacci_retracement(analysis_candles[tf],tf) for tf in ('M15','H1') if tf in analysis_candles and analysis_candles[tf] is not None}
+            levels=key_levels(analysis_candles.get('M15')) if analysis_candles.get('M15') is not None else {}
+            session=session_context(analysis_candles.get('M15'))
+            features['observations']={'chart_patterns':chart,'candlestick_patterns':candles_found,'fibonacci':fib,'key_levels':levels,'session':session,'market_context':cycle_context}
+            info=self.mt5.symbol_info(symbol)
             if info is None: continue
             spec=info._asdict(); account=self.mt5.account_info()
             if account is None: continue
@@ -172,40 +192,43 @@ class MarketScanner:
                 signal=strategy.generate_signal(symbol,candles)
                 if signal is None:
                     strategy_diagnostics[strategy.name][getattr(strategy,'last_skip_reason','conditions_not_met')]+=1; continue
+                feature_snapshot=dict(features); observations=dict(features.get('observations',{}))
+                observations['signal_context']=context_for_signal(cycle_context,symbol,signal.direction,group)
+                feature_snapshot['observations']=observations
                 if not confidence_allowed(signal.confidence,float(cfg.get('min_confidence',0.0))):
-                    reason='confidence below scanner.min_confidence'; self._write_signal(signal,0,reason); strategy_diagnostics[strategy.name]['confidence_below_minimum']+=1; continue
+                    reason='confidence below scanner.min_confidence'; self._write_signal(signal,0,reason,features=feature_snapshot); strategy_diagnostics[strategy.name]['confidence_below_minimum']+=1; continue
                 if cfg.get('require_mtf_agreement',True) and not mtf_direction_agrees(candles,signal.direction,fast=int(cfg.get('mtf_ema_fast',5)),slow=int(cfg.get('mtf_ema_slow',13)),min_agree=int(cfg.get('mtf_min_agree',3))):
-                    reason='M1/M5/M15 direction disagreement'; self._write_signal(signal,0,reason); strategy_diagnostics[strategy.name]['mtf_disagreement']+=1; continue
+                    reason='M1/M5/M15 direction disagreement'; self._write_signal(signal,0,reason,features=feature_snapshot); strategy_diagnostics[strategy.name]['mtf_disagreement']+=1; continue
                 if 'M1' not in candles:
                     horizon=int(self.settings.config['risk']['move_horizon_minutes'])
-                    self._write_signal(signal,0,f'M1 history missing for {horizon}-minute target'); continue
+                    self._write_signal(signal,0,f'M1 history missing for {horizon}-minute target',features=feature_snapshot); continue
                 m1_atr=float(ind.atr(candles['M1']).iloc[-1])
                 if not math.isfinite(m1_atr) or m1_atr<=0:
-                    self._write_signal(signal,0,'M1 ATR unavailable'); continue
+                    self._write_signal(signal,0,'M1 ATR unavailable',features=feature_snapshot); continue
                 tick=self.mt5.symbol_info_tick(symbol)
                 if tick is None:
-                    self._write_signal(signal,0,'tick unavailable at entry sizing'); continue
+                    self._write_signal(signal,0,'tick unavailable at entry sizing',features=feature_snapshot); continue
                 # Size from the executable side used by order_send, not a prior candle close.
                 signal.entry_hint=float(tick.ask if signal.direction=='buy' else tick.bid)
                 spread=max(0.0,float(tick.ask)-float(tick.bid))
                 risk_cfg=self.settings.config['risk']
                 signal.sl_price,signal.tp_price=stop_target_from_atr(float(signal.entry_hint),signal.direction,m1_atr,spread,float(risk_cfg['sl_move_mult']),float(risk_cfg['tp_move_mult']),float(risk_cfg['move_horizon_minutes']))
                 if signal.sl_price is None or signal.tp_price is None or signal.entry_hint is None:
-                    self._write_signal(signal,0,'signal missing entry, SL, or TP'); continue
+                    self._write_signal(signal,0,'signal missing entry, SL, or TP',features=feature_snapshot); continue
                 if signal.direction=='buy' and not signal.sl_price<signal.entry_hint<signal.tp_price:
-                    self._write_signal(signal,0,'invalid stop/target side'); continue
+                    self._write_signal(signal,0,'invalid stop/target side',features=feature_snapshot); continue
                 if signal.direction=='sell' and not signal.tp_price<signal.entry_hint<signal.sl_price:
-                    self._write_signal(signal,0,'invalid stop/target side'); continue
+                    self._write_signal(signal,0,'invalid stop/target side',features=feature_snapshot); continue
                 volume,volume_reason=calc_volume(account.equity,self.settings.risk.risk_per_trade_pct,signal.entry_hint,signal.sl_price,spec)
                 if volume<=0:
-                    self._write_signal(signal,0,volume_reason); continue
+                    self._write_signal(signal,0,volume_reason,features=feature_snapshot); continue
                 cost=market_data.get_cost_estimate(self.mt5,symbol,volume)
                 risk_money=market_data.price_distance_to_money(self.mt5,symbol,abs(signal.entry_hint-signal.sl_price),volume)
                 reward_money=market_data.price_distance_to_money(self.mt5,symbol,abs(signal.tp_price-signal.entry_hint),volume)
                 score=expected_value_score(signal.confidence,reward_money,risk_money,cost['cost'])
                 reason='expected value is non-positive' if score<=0 else ('below scanner.min_score' if score<float(cfg['min_score']) else '')
-                candidate=Candidate(symbol,group,strategy.name,signal,signal.confidence,volume,risk_money,reward_money,cost,score,features,spec,reason)
-                candidate.signal_row_id=self._write_signal(signal,cost['cost'],reason,score); results.append(candidate)
+                candidate=Candidate(symbol,group,strategy.name,signal,signal.confidence,volume,risk_money,reward_money,cost,score,feature_snapshot,spec,reason)
+                candidate.signal_row_id=self._write_signal(signal,cost['cost'],reason,score,feature_snapshot); results.append(candidate)
         self.last_strategy_diagnostics={name:dict(counts) for name,counts in strategy_diagnostics.items()}
         best=rank_candidates([c for c in results if not c.skip_reason])
         winners={c.symbol:c for c in best}
@@ -225,8 +248,8 @@ class MarketScanner:
     def scan(self):
         """Part 3 live-loop interface; performs one bounded, read-only scan."""
         return self.scan_once()
-    def _write_signal(self,signal,cost,skip_reason,score=0.0):
-        return self.db.insert_signal(time=datetime.now(timezone.utc).isoformat(),symbol=signal.symbol,strategy=signal.strategy_name,direction=signal.direction,timeframe=signal.timeframe,confidence=signal.confidence,entry=signal.entry_hint,sl=signal.sl_price,tp=signal.tp_price,expected_cost=cost,score=score,taken=0,skip_reason=skip_reason or '')
+    def _write_signal(self,signal,cost,skip_reason,score=0.0,features=None):
+        return self.db.insert_signal(time=datetime.now(timezone.utc).isoformat(),symbol=signal.symbol,strategy=signal.strategy_name,direction=signal.direction,timeframe=signal.timeframe,confidence=signal.confidence,entry=signal.entry_hint,sl=signal.sl_price,tp=signal.tp_price,expected_cost=cost,score=score,taken=0,skip_reason=skip_reason or '',features=json.dumps(features or {},sort_keys=True,default=str))
     def _set_skip_reason(self,row_id,reason):
         with self.db.connect() as connection:
             connection.execute('UPDATE signals SET skip_reason=? WHERE id=?',(reason,row_id))

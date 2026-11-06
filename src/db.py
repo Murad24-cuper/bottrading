@@ -31,14 +31,14 @@ CREATE TABLE IF NOT EXISTS trades(
  strategy TEXT, reason TEXT, magic INTEGER, status TEXT, close_reason TEXT,
  timeframe TEXT, initial_risk REAL, initial_volume REAL, scale_out_done INTEGER DEFAULT 0, peak_favorable_r REAL DEFAULT 0,
  extension_until TEXT, extended_minutes INTEGER DEFAULT 0, estimated_spread_cost REAL DEFAULT 0,
- estimated_commission_cost REAL DEFAULT 0);
+ estimated_commission_cost REAL DEFAULT 0, features TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS partial_closes(
  id INTEGER PRIMARY KEY, deal_ticket INTEGER, ticket INTEGER, symbol TEXT, time TEXT, volume REAL,
  price REAL, profit REAL, commission REAL, swap REAL, reason TEXT);
 CREATE TABLE IF NOT EXISTS signals(
  id INTEGER PRIMARY KEY, time TEXT, symbol TEXT, strategy TEXT, direction TEXT,
  timeframe TEXT, confidence REAL, entry REAL, sl REAL, tp REAL, expected_cost REAL, score REAL DEFAULT 0,
- taken INTEGER, skip_reason TEXT);
+ taken INTEGER, skip_reason TEXT, features TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS daily_stats(
  date TEXT PRIMARY KEY, start_balance REAL, end_balance REAL, pnl REAL, trades_count INTEGER,
  wins INTEGER, losses INTEGER, max_drawdown REAL, invested_margin_peak REAL);
@@ -74,7 +74,7 @@ class Database:
             connection.execute('PRAGMA journal_mode=WAL')
             connection.executescript(SCHEMA)
             trade_columns={row['name'] for row in connection.execute('PRAGMA table_info(trades)')}
-            for name, sql_type in {'timeframe':'TEXT','initial_risk':'REAL','initial_volume':'REAL','scale_out_done':'INTEGER DEFAULT 0','peak_favorable_r':'REAL DEFAULT 0','extension_until':'TEXT','extended_minutes':'INTEGER DEFAULT 0','estimated_spread_cost':'REAL DEFAULT 0','estimated_commission_cost':'REAL DEFAULT 0'}.items():
+            for name, sql_type in {'timeframe':'TEXT','initial_risk':'REAL','initial_volume':'REAL','scale_out_done':'INTEGER DEFAULT 0','peak_favorable_r':'REAL DEFAULT 0','extension_until':'TEXT','extended_minutes':'INTEGER DEFAULT 0','estimated_spread_cost':'REAL DEFAULT 0','estimated_commission_cost':'REAL DEFAULT 0','features':"TEXT NOT NULL DEFAULT '{}'"}.items():
                 if name not in trade_columns: connection.execute(f'ALTER TABLE trades ADD COLUMN {name} {sql_type}')
             connection.execute('UPDATE trades SET initial_volume=volume WHERE initial_volume IS NULL')
             partial_columns={row['name'] for row in connection.execute('PRAGMA table_info(partial_closes)')}
@@ -85,6 +85,7 @@ class Database:
                 if name not in status_columns: connection.execute(f'ALTER TABLE bot_status ADD COLUMN {name} {sql_type}')
             columns={row['name'] for row in connection.execute('PRAGMA table_info(signals)')}
             if 'score' not in columns: connection.execute('ALTER TABLE signals ADD COLUMN score REAL DEFAULT 0')
+            if 'features' not in columns: connection.execute("ALTER TABLE signals ADD COLUMN features TEXT NOT NULL DEFAULT '{}'")
             command_columns={row['name'] for row in connection.execute('PRAGMA table_info(commands)')}
             if 'created_at' not in command_columns: connection.execute('ALTER TABLE commands ADD COLUMN created_at TEXT')
             if 'expires_at' not in command_columns: connection.execute('ALTER TABLE commands ADD COLUMN expires_at TEXT')

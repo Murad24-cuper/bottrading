@@ -12,6 +12,9 @@ def test_create_insert_update_and_query_trades(tmp_path):
     assert db.get_open_trades()==[]
     assert db.get_trades_for_day('2026-11-05')[0]['status']=='closed'
     assert db.get_pnl_since('2026-11-05T00:00:00+00:00')==1.9
+    with db.connect() as conn:
+        assert "features" in {r['name'] for r in conn.execute('PRAGMA table_info(trades)')}
+        assert "features" in {r['name'] for r in conn.execute('PRAGMA table_info(signals)')}
 
 def test_signal_stats_snapshot_event_and_wal(tmp_path):
     db=Database(tmp_path/'dashboard.db')

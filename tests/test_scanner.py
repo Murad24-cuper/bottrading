@@ -52,9 +52,12 @@ def test_scanner_mocked_market_data_logs_negative_and_ranks_positive(tmp_path,mo
     assert [item.symbol for item in result]==['EURUSD']
     assert result[0].signal.entry_hint==1.0001
     with db.connect() as connection:
-        rows=[dict(r) for r in connection.execute('SELECT symbol,taken,skip_reason FROM signals ORDER BY id')]
+        rows=[dict(r) for r in connection.execute('SELECT symbol,taken,skip_reason,features FROM signals ORDER BY id')]
     assert len(rows)==2 and all(r['taken']==0 for r in rows)
     assert rows[0]['skip_reason']=='' and 'non-positive' in rows[1]['skip_reason']
+    import json
+    feature_json=json.loads(rows[0]['features'])
+    assert 'observations' in feature_json and 'candlestick_patterns' in feature_json['observations']
     assert scanner.last_scan_stats['total_symbols']==2
     assert scanner.last_scan_stats['symbols_scanned']==2
     assert scanner.last_scan_stats['scan_complete'] is True
