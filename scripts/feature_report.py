@@ -14,7 +14,7 @@ def main():
     db=Path(args.db) if args.db else Path(config.get('db_path','data/bot.db'))
     if not db.is_absolute(): db=ROOT/db
     with sqlite3.connect(db.resolve().as_uri()+'?mode=ro',uri=True,timeout=5) as conn:
-        conn.execute('PRAGMA busy_timeout=5000'); trades=closed_trade_features(conn)
+        conn.row_factory=sqlite3.Row; conn.execute('PRAGMA busy_timeout=5000'); trades=closed_trade_features(conn)
     report=analyze_feature_impact(trades)
     output=Path(args.output) if args.output else ROOT/'reports'/f"feature_impact_{datetime.now(timezone.utc).date().isoformat()}.csv"
     output.parent.mkdir(parents=True,exist_ok=True)
