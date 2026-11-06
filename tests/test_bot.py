@@ -144,6 +144,22 @@ def test_close_all_stop_closes_then_exits(tmp_path):
     assert executor.closed_all==1 and scanner.calls==0
     with db.connect() as conn: assert conn.execute('SELECT status FROM commands WHERE id=?',(command,)).fetchone()[0]=='done'
 
+def test_cycle_reservations_enforce_max_open_when_terminal_positions_lag(tmp_path):
+    bot,db,_,_,_,executor,_=make_bot(tmp_path,'trade',['breakout'],candidate=False)
+    bot.settings.config['risk']['max_open_positions']=2
+    symbols=['GOLD','OIL','US30']
+    candidates=[]
+    for name in symbols:
+        signal=Signal(name,'buy','M1',100,99,102,.8,'breakout','test')
+        row=db.insert_signal(symbol=name,strategy='breakout',direction='buy',timeframe='M1',confidence=.8,entry=100,sl=99,tp=102,expected_cost=.1,score=5,taken=0,skip_reason='')
+        candidates.append(SimpleNamespace(symbol=name,asset_group='other',strategy='breakout',signal=signal,cost={'cost':.1},symbol_spec={'trade_tick_value':1,'trade_tick_size':1,'volume_min':.01,'volume_step':.01,'volume_max':5},score=5,signal_row_id=row))
+    bot.scanner.candidates=candidates
+    bot.cycle()
+    assert len(executor.opened)==2
+    with db.connect() as conn:
+        rows=conn.execute("SELECT skip_reason FROM signals WHERE symbol='US30' ORDER BY id DESC LIMIT 1").fetchone()
+    assert rows[0]=='maximum open positions reached'
+
 def test_run_forever_releases_lock_and_shuts_down_client(tmp_path):
     bot,_,_,client,_,_,_=make_bot(tmp_path,candidate=False)
     bot.run_forever(max_cycles=1)

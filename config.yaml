@@ -31,6 +31,7 @@ risk:
 # Broker names vary by XM server and account type. These are search patterns.
 universe:
   include_groups: [forex, metals, indices, energy, crypto, stocks]
+  refresh_minutes: 5           # Refresh broker symbol discovery/cache interval
   exclude_symbols: []
   exclude_dated_futures: true    # Exclude names ending in month/year contract codes
   symbol_aliases:
@@ -76,15 +77,15 @@ strategies:
     timeframes: [M1, M5]
     params: {atr_period: 14, volatility_ratio: 1.1, target_atr: 0.4, stop_atr: 0.65, max_spread_target_ratio: 0.35, lookback_bars: 100}
 loop:
-  interval_seconds: 5
+  interval_seconds: 15            # Period target; work time is subtracted from this interval
 scanner:
-  max_seconds_per_cycle: 15
+  max_seconds_per_cycle: 12
   max_candidates: 10
   candle_count: 250
   min_score: 0.0
   top_movers: 40                 # Full strategy analysis runs only on top movers
   movement_timeframe_minutes: 30 # Short-term movement measurement for ranking
-  max_spread_volatility_ratio: 0.35 # Skip when spread is too large vs recent ATR
+  max_spread_volatility_ratio: 1.0  # Skip when spread exceeds one ATR; target cost gate remains stricter
   timeframe_point_sizes: {}     # Optional symbol point sizes for candle spread pricing
 live:
   mode: trade                   # shadow = record decisions only; trade = submit orders

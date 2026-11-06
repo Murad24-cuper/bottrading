@@ -93,6 +93,7 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     login=credentials['MT5_LOGIN']
     if login and not login.isdigit(): raise ValueError('MT5_LOGIN must be a numeric account number')
     if not isinstance(config['universe'].get('include_groups'),list) or not isinstance(config['universe'].get('exclude_symbols'),list) or not isinstance(config['universe'].get('symbol_aliases'),dict): raise ValueError('universe include_groups, exclude_symbols and symbol_aliases must be configured')
+    if type(config['universe'].get('refresh_minutes')) is not int or config['universe']['refresh_minutes']<=0: raise ValueError('universe.refresh_minutes must be a positive integer')
     if type(config['universe'].get('exclude_dated_futures',True)) is not bool: raise ValueError('universe.exclude_dated_futures must be boolean')
     if not isinstance(config['timeframes'],list) or not config['timeframes']: raise ValueError('timeframes must be a non-empty list')
     if any(tf not in {'M1','M5','M15','H1'} for tf in config['timeframes']): raise ValueError('timeframes may contain only M1, M5, M15 and H1')

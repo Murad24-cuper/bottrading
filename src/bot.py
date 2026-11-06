@@ -51,6 +51,7 @@ class TradingBot:
         self._market_closed_logged=False; self._last_snapshot=0.0; self._started=False; self._last_account_type='unknown'; self._daily_peak_equity=0.0
         self.stop_event=False; self._connection_down=False; self.lock=BotLock(settings.root/'data'/'bot.lock')
         self._stop_after_cycle=False
+        self._cycle_reservations=[]
     @property
     def live(self): return self.settings.config['live']
     def _now(self):
@@ -149,9 +150,16 @@ class TradingBot:
             reason=f'order_calc_margin failed: {self.client.mt5.last_error()}'; self._signal_update(candidate,False,reason); return False
         service=getattr(self.scanner,'symbols',None)
         open_positions=[]
+        db_open={int(row['ticket']):row for row in self.db.get_open_trades()}
         for p in positions:
             info=self.client.mt5.symbol_info(p.symbol); group=service.get_asset_group(p.symbol) if service else candidate.asset_group
-            open_positions.append({'symbol':p.symbol,'asset_group':group,'exposure_group':underlying_group(p.symbol,group),'underlying':underlying_key(p.symbol),'direction':'buy' if p.type==self.client.mt5.POSITION_TYPE_BUY else 'sell','currency_base':getattr(info,'currency_base','') if info else '','currency_profit':getattr(info,'currency_profit','') if info else '','profit':float(p.profit)+float(getattr(p,'swap',0) or 0)})
+            row=db_open.get(int(p.ticket),{})
+            open_positions.append({'symbol':p.symbol,'asset_group':group,'exposure_group':underlying_group(p.symbol,group),'underlying':underlying_key(p.symbol),'direction':'buy' if p.type==self.client.mt5.POSITION_TYPE_BUY else 'sell','currency_base':getattr(info,'currency_base','') if info else '','currency_profit':getattr(info,'currency_profit','') if info else '','profit':float(p.profit)+float(getattr(p,'swap',0) or 0)+float(row.get('commission') or 0)})
+        visible_symbols={str(position['symbol']) for position in open_positions}
+        reserved_margin=0.0
+        for reservation in self._cycle_reservations:
+            if reservation['position']['symbol'] not in visible_symbols:
+                open_positions.append(reservation['position']); reserved_margin+=reservation['margin']
         pnl_today,pnl_week=self._pnl_periods(now)
         cooldown=self.settings.risk.symbol_cooldown_minutes
         cooldown_active=cooldown>0 and self.db.symbol_closed_since(candidate.symbol,now-timedelta(minutes=cooldown),self.settings.magic_number)
@@ -161,12 +169,13 @@ class TradingBot:
         if service and hasattr(service,'next_session_close'):
             upcoming=service.next_session_close(candidate.symbol,now,0.0)
             session_closing=bool(upcoming and 0<=(upcoming[0]-now).total_seconds()/60<=self.settings.risk.no_entry_before_close_minutes)
-        allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,self.settings,candidate.cost,candidate.asset_group,now,margin,volume,spec,cooldown_active,symbol_trades_today,session_closing)
+        allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,self.settings,candidate.cost,candidate.asset_group,now,margin+reserved_margin,volume,spec,cooldown_active,symbol_trades_today,session_closing)
         if not allowed:
             self._signal_update(candidate,False,why); return False
         result=self.executor.open_trade(signal,volume)
         if not result.success:
             self._signal_update(candidate,False,result.message); return False
+        self._cycle_reservations.append({'position':{'symbol':candidate.symbol,'asset_group':candidate.asset_group,'exposure_group':underlying_group(candidate.symbol,candidate.asset_group),'underlying':underlying_key(candidate.symbol),'direction':signal.direction,'currency_base':spec.get('currency_base',''),'currency_profit':spec.get('currency_profit',''),'profit':0.0},'margin':float(margin)})
         self._signal_update(candidate,True,'')
         # Refresh portfolio state before the next ranked candidate.
         get_account_state(self.client.mt5); self._owned_positions()
@@ -175,13 +184,16 @@ class TradingBot:
         day=now.date().isoformat(); previous=self.db.get_daily_stats(day)
         closed=self.db.get_closed_trades_for_day(day)
         net=lambda row:float(row.get('profit') or 0)+float(row.get('commission') or 0)+float(row.get('swap') or 0)
-        closed_pnl=sum(net(row) for row in closed); floating=sum(float(p.profit)+float(getattr(p,'swap',0) or 0) for p in positions)
+        closed_pnl=sum(net(row) for row in closed)+self.db.get_partial_pnl_since(datetime.fromisoformat(now.date().isoformat()+'T00:00:00+00:00'))
+        open_rows={int(row['ticket']):row for row in self.db.get_open_trades()}
+        floating=sum(float(p.profit)+float(getattr(p,'swap',0) or 0)+float(open_rows.get(int(p.ticket),{}).get('commission') or 0) for p in positions)
         start=previous['start_balance'] if previous else state.balance
         if not self._daily_peak_equity or not previous: self._daily_peak_equity=max(float(start),float(state.equity))
         self._daily_peak_equity=max(self._daily_peak_equity,float(state.equity))
         peak_margin=max(float(previous.get('invested_margin_peak') or 0) if previous else 0,float(state.margin))
         self.db.upsert_daily_stats(date=day,start_balance=float(start),end_balance=float(state.balance),pnl=closed_pnl+floating,trades_count=len(closed),wins=sum(net(x)>0 for x in closed),losses=sum(net(x)<0 for x in closed),max_drawdown=max(float(previous.get('max_drawdown') or 0) if previous else 0,self._daily_peak_equity-float(state.equity)),invested_margin_peak=peak_margin)
     def _connected_cycle(self,now):
+        self._cycle_reservations=[]
         self._components(); account=self._account_type(); state=get_account_state(self.client.mt5); self._startup(state)
         self.executor.sync_positions(); self.executor.enforce_time_stop(self.settings); self.executor.enforce_session_close(self.settings,now)
         self._process_commands()
@@ -258,9 +270,10 @@ class TradingBot:
             try: previous_handler=signal.signal(signal.SIGINT,request_stop)
             except (ValueError,OSError): previous_handler=None
             while not self.stop_event:
-                result=self.cycle(); cycles+=1
+                cycle_started=self.monotonic(); result=self.cycle(); cycles+=1
                 if not result.continue_running or (max_cycles is not None and cycles>=max_cycles): break
-                self._heartbeat_sleep(result.sleep_seconds)
+                elapsed=max(0.0,self.monotonic()-cycle_started)
+                self._heartbeat_sleep(max(0.0,result.sleep_seconds-elapsed))
         finally:
             if previous_handler is not None:
                 try: signal.signal(signal.SIGINT,previous_handler)

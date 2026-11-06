@@ -10,9 +10,9 @@ CREATE TABLE IF NOT EXISTS trades(
  volume REAL, open_time TEXT, close_time TEXT, open_price REAL, close_price REAL,
  sl REAL, tp REAL, profit REAL, commission REAL, swap REAL, margin_used REAL,
  strategy TEXT, reason TEXT, magic INTEGER, status TEXT, close_reason TEXT,
- timeframe TEXT, initial_risk REAL, scale_out_done INTEGER DEFAULT 0, peak_favorable_r REAL DEFAULT 0);
+ timeframe TEXT, initial_risk REAL, initial_volume REAL, scale_out_done INTEGER DEFAULT 0, peak_favorable_r REAL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS partial_closes(
- id INTEGER PRIMARY KEY, ticket INTEGER, symbol TEXT, time TEXT, volume REAL,
+ id INTEGER PRIMARY KEY, deal_ticket INTEGER, ticket INTEGER, symbol TEXT, time TEXT, volume REAL,
  price REAL, profit REAL, commission REAL, swap REAL, reason TEXT);
 CREATE TABLE IF NOT EXISTS signals(
  id INTEGER PRIMARY KEY, time TEXT, symbol TEXT, strategy TEXT, direction TEXT,
@@ -46,8 +46,12 @@ class Database:
             connection.execute('PRAGMA journal_mode=WAL')
             connection.executescript(SCHEMA)
             trade_columns={row['name'] for row in connection.execute('PRAGMA table_info(trades)')}
-            for name, sql_type in {'timeframe':'TEXT','initial_risk':'REAL','scale_out_done':'INTEGER DEFAULT 0','peak_favorable_r':'REAL DEFAULT 0'}.items():
+            for name, sql_type in {'timeframe':'TEXT','initial_risk':'REAL','initial_volume':'REAL','scale_out_done':'INTEGER DEFAULT 0','peak_favorable_r':'REAL DEFAULT 0'}.items():
                 if name not in trade_columns: connection.execute(f'ALTER TABLE trades ADD COLUMN {name} {sql_type}')
+            connection.execute('UPDATE trades SET initial_volume=volume WHERE initial_volume IS NULL')
+            partial_columns={row['name'] for row in connection.execute('PRAGMA table_info(partial_closes)')}
+            if 'deal_ticket' not in partial_columns: connection.execute('ALTER TABLE partial_closes ADD COLUMN deal_ticket INTEGER')
+            connection.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_partial_deal_ticket ON partial_closes(deal_ticket) WHERE deal_ticket IS NOT NULL')
             status_columns={row['name'] for row in connection.execute('PRAGMA table_info(bot_status)')}
             for name, sql_type in {'mt5_connected':'INTEGER DEFAULT 0','scan_total':'INTEGER','scan_scanned':'INTEGER','scan_complete':'INTEGER','scan_stage1_passed':'INTEGER','scan_top_n':'INTEGER','scan_signals':'INTEGER','scan_seconds':'REAL','scan_rejections':'TEXT','strategy_diagnostics':'TEXT'}.items():
                 if name not in status_columns: connection.execute(f'ALTER TABLE bot_status ADD COLUMN {name} {sql_type}')
@@ -123,9 +127,19 @@ class Database:
             return connection.execute('SELECT last_insert_rowid()').fetchone()[0]
     def insert_partial_close(self,**values):
         values.setdefault('time',datetime.now(timezone.utc).isoformat())
-        with self.connect() as connection: self._insert(connection,'partial_closes',values)
+        columns=list(values)
+        with self.connect() as connection:
+            cursor=connection.execute(f"INSERT OR IGNORE INTO partial_closes ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",[values[key] for key in columns])
+            return cursor.rowcount
     def get_partial_closes(self,ticket):
         with self.connect() as connection: return [dict(row) for row in connection.execute('SELECT * FROM partial_closes WHERE ticket=? ORDER BY time,id',(int(ticket),))]
+    def get_partial_deal_tickets(self,ticket):
+        with self.connect() as connection: return {int(row[0]) for row in connection.execute('SELECT deal_ticket FROM partial_closes WHERE ticket=? AND deal_ticket IS NOT NULL',(int(ticket),))}
+    def get_partial_pnl_since(self,dt):
+        stamp=dt.isoformat() if hasattr(dt,'isoformat') else str(dt)
+        with self.connect() as connection:
+            row=connection.execute('SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) FROM partial_closes WHERE time>=?',(stamp,)).fetchone()
+            return float(row[0])
     def update_signal(self,signal_id,**values):
         if not values: return
         columns=list(values)
@@ -185,4 +199,6 @@ class Database:
     def get_pnl_since(self,dt):
         stamp=dt.isoformat() if hasattr(dt,'isoformat') else str(dt)
         with self.connect() as connection:
-            return float(connection.execute("SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) FROM trades WHERE status='closed' AND close_time>=?",(stamp,)).fetchone()[0])
+            closed=float(connection.execute("SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) FROM trades WHERE status='closed' AND close_time>=?",(stamp,)).fetchone()[0])
+            partial=float(connection.execute("SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) FROM partial_closes WHERE time>=?",(stamp,)).fetchone()[0])
+            return closed+partial

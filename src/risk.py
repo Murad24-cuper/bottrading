@@ -79,8 +79,9 @@ def check_trade_allowed(signal, account, open_positions, pnl_today, pnl_week, se
     if candidate_group:
         group_count=sum((_value(p,'exposure_group') or underlying_group(_value(p,'symbol',''),_value(p,'asset_group') or _group(p)))==candidate_group for p in open_positions)
         if group_count>=risk.get('max_positions_per_underlying_group',2): return False,'maximum positions for underlying group reached'
-    base,quote=_currency_pair(signal.symbol,spec=symbol_spec)
-    if base and quote:
+    pair=_currency_pair(signal.symbol,spec=symbol_spec)
+    if pair:
+        base,quote=pair
         exposure=_currency_exposure(open_positions,{'symbol':signal.symbol,'asset_group':symbol_group,'direction':signal.direction,'currency_base':base,'currency_profit':quote})
         for currency,value in exposure.items():
             if abs(value)>risk.get('max_positions_per_currency',2): return False,f'maximum net exposure for {currency} reached'

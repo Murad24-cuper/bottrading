@@ -1,5 +1,6 @@
 from datetime import datetime,timezone,timedelta
 from types import SimpleNamespace
+import pytest
 from src.models import Signal,AccountState
 from src.risk import calc_volume,check_trade_allowed
 
@@ -14,6 +15,14 @@ def test_calc_volume_rounds_down_to_step():
     assert calc_volume(150,0.5,1.1,1.099,SPEC)[0]==0.07
 def test_calc_volume_caps_at_volume_max():
     assert calc_volume(100000,50,1.1,1.099,{**SPEC,'volume_max':0.2})[0]==0.2
+
+@pytest.mark.parametrize('entry,sl,tick_size,tick_value',[(1.1,1.099,.00001,1.0),(2000,1999,.01,1.0),(5000,4990,1.0,.1),(50000,49900,.1,.01),(100,99,.01,.1)])
+def test_volume_risk_uses_tick_money_for_major_asset_classes(entry,sl,tick_size,tick_value):
+    spec={**SPEC,'trade_tick_size':tick_size,'trade_tick_value_loss':tick_value,'volume_max':100}
+    volume,reason=calc_volume(1000,.5,entry,sl,spec)
+    assert reason=='ok' and volume>0
+    risk=abs(entry-sl)/tick_size*tick_value*volume
+    assert risk<=5+1e-8
 
 def make_context(tmp_path):
     risk={'risk_per_trade_pct':0.5,'daily_loss_limit_pct':3.0,'weekly_loss_limit_pct':8.0,'max_open_positions':10,'max_positions_per_group':4,'max_positions_per_currency':2,'max_positions_per_underlying_group':2,'symbol_cooldown_minutes':30,'max_trades_per_symbol_per_day':5,'max_margin_usage_pct':40.0,'max_hold_minutes':720,'min_risk_reward':1.0,'max_cost_to_target_ratio':0.3,'max_spread_points':{},'no_entry_before_close_minutes':60,'max_session_gap_hours':6}
@@ -76,6 +85,11 @@ def test_same_underlying_with_broker_suffix_is_blocked(tmp_path):
     signal.symbol='US500Cash'
     positions=[{'symbol':'US500-DEC26','asset_group':'indices','direction':'sell'}]
     assert check(open_positions=positions,symbol_group='indices')[1]=='underlying already has open position'
+
+def test_non_fx_symbol_without_currency_metadata_does_not_crash(tmp_path):
+    _,_,signal,_,_,check=make_context(tmp_path)
+    signal.symbol='AAPL'
+    assert check(symbol_group='stocks')[0] is True
 def test_underlying_group_limit_blocks_correlated_indices(tmp_path):
     _,_,signal,_,_,check=make_context(tmp_path)
     signal.symbol='US500Cash'

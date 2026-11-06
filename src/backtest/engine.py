@@ -48,15 +48,16 @@ class Backtester:
             choices=[tf for tf in ('M1','M5','M15','H1') if tf in frames]
             if choices: base_tf[symbol]=choices[0]; timeline.update(frames[choices[0]].index.to_pydatetime())
         timeline=sorted(timeline)
-        session_closes={}
+        session_events={}
         max_session_gap=float(self.settings.config['risk']['max_session_gap_hours'])
         for symbol,tf in base_tf.items():
             index=data[symbol][tf].index
             closures=[]
             for prior,following in zip(index[:-1],index[1:]):
                 close_at=prior.to_pydatetime()+TF_DELTA[tf]
-                if (following.to_pydatetime()-close_at).total_seconds()/3600>max_session_gap: closures.append(close_at)
-            session_closes[symbol]=closures
+                gap=(following.to_pydatetime()-close_at).total_seconds()/3600
+                if gap>0.5: closures.append((close_at,gap))
+            session_events[symbol]=closures
         signal_lookback=int(self.settings.config['backtest'].get('signal_lookback_bars',300))
         balance=self.start_equity; positions={}; pending={}; trades=[]; curve=[]; last_prices={}; last_signal_bar={}; daily_pnl={}; weekly_pnl={}; symbol_trade_counts={}; symbol_last_close={}; commission=float(self.settings.config['backtest']['commission_per_lot_per_side']); slippage=float(self.settings.config['backtest']['slippage_points'])
         account_currency='USD'
@@ -89,7 +90,7 @@ class Backtester:
                 # Fill signals formed on the preceding closed bar at this bar's open.
                 for queued in pending.pop((symbol,open_time),[]):
                     if symbol in positions: continue
-                    next_close=next((stamp for stamp in session_closes.get(symbol,[]) if stamp>=open_time),None)
+                    next_close=next((stamp for stamp,gap in session_events.get(symbol,[]) if stamp>=open_time),None)
                     if next_close and 0<=(next_close-open_time).total_seconds()/60<=float(self.settings.config['risk']['no_entry_before_close_minutes']): continue
                     signal=queued['signal']; entry_base=float(row.open); entry=entry_base+spread_price if signal.direction=='buy' else entry_base
                     entry+=slippage*point if signal.direction=='buy' else -slippage*point
@@ -161,14 +162,14 @@ class Backtester:
                                 if len(known)>lookback:
                                     momentum=float(known.close.iloc[-1])-float(known.close.iloc[-1-lookback])
                                     if (is_buy and momentum<0) or (not is_buy and momentum>0):
-                                        net=close_position(symbol,pos,bar_end,close,'momentum_lost',spread_price); daily_pnl[bar_end.date()]=daily_pnl.get(bar_end.date(),0)+net; positions.pop(symbol); pos=None
+                                        net=close_position(symbol,pos,bar_end,close,'momentum_lost',spread_price); daily_pnl[bar_end.date()]=daily_pnl.get(bar_end.date(),0)+net; monday=(bar_end-timedelta(days=bar_end.weekday())).date(); weekly_pnl[monday]=weekly_pnl.get(monday,0)+net; positions.pop(symbol); pos=None
                                 if pos is not None and len(known)>=14:
                                     atr=float(ind.atr(known).iloc[-1]); trail=close-atr*float(risk['trail_atr_mult']) if is_buy else close+atr*float(risk['trail_atr_mult'])
                                     if math.isfinite(trail) and ((is_buy and pos['sl']<trail<close) or (not is_buy and (pos['sl']==0 or close<trail<pos['sl']))): pos['sl']=trail
                         if pos is not None:
                             age=(bar_end-pos['open_time']).total_seconds()/60
-                            next_close=next((stamp for stamp in session_closes.get(symbol,[]) if stamp>=open_time),None)
-                            if next_close and 0<=(next_close-open_time).total_seconds()/60<=float(risk['no_entry_before_close_minutes']): reason='session_close'
+                            session_event=next(((stamp,gap) for stamp,gap in session_events.get(symbol,[]) if stamp>=open_time),None)
+                            if session_event and session_event[1]>max_session_gap and 0<=(session_event[0]-open_time).total_seconds()/60<=float(risk['no_entry_before_close_minutes']): reason='session_close'
                             elif age>=float(risk['stagnation_minutes']) and pos['peak_favorable_r']<float(risk['stagnation_min_r']): reason='stagnant'
                             elif age>=self.settings.risk.max_hold_minutes: reason='time'
                             else: reason=''

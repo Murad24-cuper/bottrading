@@ -28,14 +28,15 @@ def get_latest_snapshot(path=None):
 
 def get_day_summary(start_utc,end_utc,path=None):
     closed=_rows(path,"SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) AS pnl,COUNT(*) AS trades FROM trades WHERE status='closed' AND close_time>=? AND close_time<?",(start_utc,end_utc))
+    partial=_rows(path,"SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) AS pnl,COALESCE(SUM(CASE WHEN profit+COALESCE(commission,0)+COALESCE(swap,0)>0 THEN profit+COALESCE(commission,0)+COALESCE(swap,0) ELSE 0 END),0) AS taken,COALESCE(SUM(CASE WHEN profit+COALESCE(commission,0)+COALESCE(swap,0)<0 THEN -(profit+COALESCE(commission,0)+COALESCE(swap,0)) ELSE 0 END),0) AS lost FROM partial_closes WHERE time>=? AND time<?",(start_utc,end_utc))
     floats=_rows(path,"SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) AS pnl FROM trades WHERE status='open'")
     winning=_rows(path,"SELECT COALESCE(SUM(profit+COALESCE(commission,0)+COALESCE(swap,0)),0) AS amount FROM trades WHERE status='closed' AND close_time>=? AND close_time<? AND profit+COALESCE(commission,0)+COALESCE(swap,0)>0",(start_utc,end_utc))
     losing=_rows(path,"SELECT COALESCE(SUM(-(profit+COALESCE(commission,0)+COALESCE(swap,0))),0) AS amount FROM trades WHERE status='closed' AND close_time>=? AND close_time<? AND profit+COALESCE(commission,0)+COALESCE(swap,0)<0",(start_utc,end_utc))
     wins=_rows(path,"SELECT COUNT(*) AS n FROM trades WHERE status='closed' AND close_time>=? AND close_time<? AND profit+COALESCE(commission,0)+COALESCE(swap,0)>0",(start_utc,end_utc))
     losses=_rows(path,"SELECT COUNT(*) AS n FROM trades WHERE status='closed' AND close_time>=? AND close_time<? AND profit+COALESCE(commission,0)+COALESCE(swap,0)<0",(start_utc,end_utc))
-    row=closed[0] if closed else {'pnl':0,'trades':0}; floating=floats[0]['pnl'] if floats else 0; win_count=wins[0]['n'] if wins else 0; loss_count=losses[0]['n'] if losses else 0
+    row=closed[0] if closed else {'pnl':0,'trades':0}; part=partial[0] if partial else {'pnl':0,'taken':0,'lost':0}; floating=floats[0]['pnl'] if floats else 0; win_count=wins[0]['n'] if wins else 0; loss_count=losses[0]['n'] if losses else 0
     count=win_count+loss_count
-    return {'closed_pnl':float(row['pnl']),'floating_pnl':float(floating),'net_pnl':float(row['pnl'])+float(floating),'trades':int(row['trades']),'wins':int(win_count),'losses':int(loss_count),'win_rate':win_count/count if count else 0.0,'taken':float(winning[0]['amount']) if winning else 0.0,'lost':float(losing[0]['amount']) if losing else 0.0}
+    return {'closed_pnl':float(row['pnl'])+float(part['pnl']),'floating_pnl':float(floating),'net_pnl':float(row['pnl'])+float(part['pnl'])+float(floating),'trades':int(row['trades']),'wins':int(win_count),'losses':int(loss_count),'win_rate':win_count/count if count else 0.0,'taken':(float(winning[0]['amount']) if winning else 0.0)+float(part['taken']),'lost':(float(losing[0]['amount']) if losing else 0.0)+float(part['lost'])}
 
 def get_open_positions(path=None):
     return _rows(path,"SELECT ticket,symbol,direction,volume,open_time,open_price,sl,tp,profit,commission,swap,strategy,magic FROM trades WHERE status='open' ORDER BY open_time")

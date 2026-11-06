@@ -22,8 +22,9 @@ class MT5Client:
         if account is None:
             err=mt5.last_error(); mt5.shutdown(); raise RuntimeError(f'MT5 account_info failed: {err}')
         demo_mode=getattr(mt5,'ACCOUNT_TRADE_MODE_DEMO',0)
-        if account.trade_mode!=demo_mode and not self.settings.allow_real:
-            mt5.shutdown(); raise RuntimeError('Real account refused: set ALLOW_REAL=true in .env to enable trading')
+        configured_mode=self.settings.config['account']['mode']
+        if account.trade_mode!=demo_mode and (not self.settings.allow_real or configured_mode!='real'):
+            mt5.shutdown(); raise RuntimeError('Real account refused: set account.mode=real in config.yaml and ALLOW_REAL=true in .env to enable trading')
         terminal=mt5.terminal_info()
         if terminal is None:
             err=mt5.last_error(); mt5.shutdown(); raise RuntimeError(f'MT5 terminal_info failed: {err}')

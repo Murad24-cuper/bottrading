@@ -1,5 +1,6 @@
 from datetime import date
 from src.db import Database
+import pytest
 
 def test_create_insert_update_and_query_trades(tmp_path):
     db=Database(tmp_path/'trades.db')
@@ -42,6 +43,7 @@ def test_partial_closes_are_persisted_by_ticket(tmp_path):
     db.insert_partial_close(ticket=42,symbol='EURUSD',volume=.01,price=1.1,profit=.2,commission=-.01,swap=0,reason='partial_tp')
     rows=db.get_partial_closes(42)
     assert len(rows)==1 and rows[0]['reason']=='partial_tp' and rows[0]['volume']==.01
+    assert db.get_pnl_since('2026-11-05T00:00:00+00:00')==pytest.approx(.19)
 
 def test_duplicate_pending_commands_are_refused(tmp_path):
     import pytest

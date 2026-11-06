@@ -72,14 +72,15 @@ class MarketScanner:
         open_symbols={str(p.symbol) for p in owned}
         universe=list(dict.fromkeys([*candidates,*sorted(open_symbols)])); self.last_universe_size=len(universe)
         stage1=[]; rejection=Counter(); snapshots={}; movement=[]; move_rejections=Counter()
-        budget=float(cfg['max_seconds_per_cycle']); start=self._cursor%max(1,len(universe)); visited=0
+        budget=float(cfg['max_seconds_per_cycle']); stage1_budget=budget*0.55; start=self._cursor%max(1,len(universe)); visited=0
         minutes=int(cfg['movement_timeframe_minutes']); m1_count=max(10,minutes)
         while visited<len(universe):
-            if visited and perf_counter()-started>=budget: break
+            if visited and perf_counter()-started>=stage1_budget: break
             symbol=universe[(start+visited)%len(universe)]; visited+=1
             force=symbol in open_symbols
             if not force:
-                ok,reason=self.symbols.is_tradable(symbol)
+                try: ok,reason=self.symbols.is_tradable(symbol,check_session=False)
+                except TypeError: ok,reason=self.symbols.is_tradable(symbol)
                 if not ok: rejection[reason]+=1; continue
             info=self.mt5.symbol_info(symbol); tick=self.mt5.symbol_info_tick(symbol) if hasattr(self.mt5,'symbol_info_tick') else None
             if not force and (info is None or tick is None): rejection['tick unavailable']+=1; continue
@@ -116,13 +117,22 @@ class MarketScanner:
         top_symbols=[symbol for _,symbol in ranked[:top_n]]
         top_symbols.extend(symbol for symbol in sorted(open_symbols) if symbol not in top_symbols)
         results=[]; strategy_diagnostics=defaultdict(Counter)
+        analysed=[]
         for symbol in top_symbols:
+            if analysed and perf_counter()-started>=budget: break
+            if symbol not in open_symbols:
+                try: session_ok,session_reason=self.symbols.is_tradable(symbol)
+                except TypeError: session_ok,session_reason=True,'tradable'
+                if not session_ok:
+                    rejection[session_reason]+=1
+                    continue
             group=self.symbols.get_asset_group(symbol); strategies=[s for s in self._strategies if group in s.allowed_groups]
             needed=sorted({tf for strategy in strategies for tf in strategy.required_timeframes})
             if not needed: continue
             candles={tf:self._bars(symbol,tf,int(cfg['candle_count'])) for tf in needed}
             candles={tf:df for tf,df in candles.items() if df is not None and len(df)>=60}
             if not candles: continue
+            analysed.append(symbol)
             features=build_features(candles); info=self.mt5.symbol_info(symbol)
             if info is None: continue
             spec=info._asdict(); account=self.mt5.account_info()
@@ -151,7 +161,6 @@ class MarketScanner:
                 candidate=Candidate(symbol,group,strategy.name,signal,signal.confidence,volume,risk_money,reward_money,cost,score,features,spec,reason)
                 candidate.signal_row_id=self._write_signal(signal,cost['cost'],reason,score); results.append(candidate)
         self.last_strategy_diagnostics={name:dict(counts) for name,counts in strategy_diagnostics.items()}
-        self._cursor=0
         best=rank_candidates([c for c in results if not c.skip_reason])
         winners={c.symbol:c for c in best}
         for item in results:
@@ -163,9 +172,9 @@ class MarketScanner:
             item.skip_reason='scanner candidate limit reached'
             if item.signal_row_id is not None: self._set_skip_reason(item.signal_row_id,item.skip_reason)
         elapsed=perf_counter()-started
-        self.last_scan_stats={'total_symbols':len(universe),'symbols_scanned':visited,'scan_complete':visited>=len(universe),'stage1_passed':len(stage1),'top_movers':len(top_symbols),'signals':len(results),'scan_seconds':round(elapsed,3),'stage1_rejections':dict(rejection+move_rejections),'strategy_diagnostics':self.last_strategy_diagnostics}
+        self.last_scan_stats={'total_symbols':len(universe),'symbols_scanned':visited,'scan_complete':visited>=len(universe),'stage1_passed':len(stage1),'top_movers':len(analysed),'top_movers_selected':len(top_symbols),'signals':len(results),'scan_seconds':round(elapsed,3),'stage1_rejections':dict(rejection+move_rejections),'strategy_diagnostics':self.last_strategy_diagnostics}
         if visited<len(universe): self.db.log_event('INFO','scanner',f'Scan budget reached after {visited}/{len(universe)} symbols; rotation resumes at {self._cursor}')
-        self.db.log_event('INFO','scanner',f"Scan total={len(universe)} scanned={visited} complete={visited>=len(universe)} stage1_passed={len(stage1)} top_movers={len(top_symbols)} signals={len(results)} seconds={elapsed:.3f} stage1_rejections={dict(rejection+move_rejections)} strategy_diagnostics={self.last_strategy_diagnostics}")
+        self.db.log_event('INFO','scanner',f"Scan total={len(universe)} scanned={visited} complete={visited>=len(universe)} stage1_passed={len(stage1)} top_movers_selected={len(top_symbols)} analysed={len(analysed)} signals={len(results)} seconds={elapsed:.3f} stage1_rejections={dict(rejection+move_rejections)} strategy_diagnostics={self.last_strategy_diagnostics}")
         return selected
     def scan(self):
         """Part 3 live-loop interface; performs one bounded, read-only scan."""

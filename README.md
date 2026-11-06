@@ -38,7 +38,7 @@ Create an empty file named `STOP` in this project folder to block new entries wh
 - `max_spread_points`: optional per-symbol spread ceilings. An empty mapping means no configured spread ceiling.
 - `executor.deviation_points`: maximum price deviation sent with an order.
 
-The scanner considers the configured asset groups across the broker's discovered symbol list. It first checks ticks and session/spread conditions, then ranks recent movement and fully analyzes at most `scanner.top_movers` symbols. `scanner.max_seconds_per_cycle` bounds the rotating universe scan; open positions remain included for management. The dashboard's scan panel shows totals, movers, signals, duration and rejection/strategy diagnostics.
+The scanner considers the configured asset groups across the broker's discovered symbol list. It first checks ticks and session/spread conditions, then ranks recent movement and fully analyzes at most `scanner.top_movers` symbols. `universe.refresh_minutes` controls broker symbol/cache refresh, while `scanner.max_seconds_per_cycle` bounds the rotating universe scan; open positions remain included for management. The dashboard's scan panel shows totals, movers, signals, duration and rejection/strategy diagnostics. The bot runs one cycle at a time and subtracts work time from `loop.interval_seconds`, so slow scans do not overlap or add an extra full interval of delay.
 
 `universe.symbol_aliases` contains search patterns, not fixed XM names. The terminal symbol list is always discovered at runtime. XM symbols and symbol suffixes vary by server/account; margin mode is read from `account_info()` and supports hedging and netting safeguards.
 

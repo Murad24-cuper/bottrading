@@ -24,20 +24,25 @@ def underlying_group(symbol,asset_group):
  if key.startswith(('JP','JPN','AUS','HK','SG')): return 'asia_pacific_indices'
  return 'other_indices'
 class SymbolService:
- def __init__(self,mt5,settings): self.mt5=mt5; self.settings=settings; self.cache=[]; self.loaded=0; self._session_cache={}
- def next_session_close(self,symbol,now_utc=None,min_gap_hours=0.0):
-  """Infer the next close from recurring gaps in the broker's H1 history."""
+ def __init__(self,mt5,settings): self.mt5=mt5; self.settings=settings; self.cache=[]; self.loaded=0; self._session_cache={}; self._candidate_cache=[]; self._candidate_loaded=0
+ def _session_frame(self,symbol):
   import time
-  from datetime import timedelta
   from .market_data import get_closed_candles
-  from .sessions import next_session_close
-  now=now_utc or datetime.now(timezone.utc); cached=self._session_cache.get(symbol)
+  cached=self._session_cache.get(symbol)
   if cached is None or time.monotonic()-cached[0]>900:
    try: frame=get_closed_candles(self.mt5,symbol,'H1',24*35)
    except (RuntimeError,ValueError): frame=None
    cached=(time.monotonic(),frame); self._session_cache[symbol]=cached
-  frame=cached[1]
-  if frame is None or len(frame)<48: return None
+  return cached[1]
+ def session_history_available(self,symbol):
+  """Require a week of H1 bars before treating inferred sessions as known."""
+  frame=self._session_frame(symbol)
+  return frame is not None and len(frame)>=24*7
+ def next_session_close(self,symbol,now_utc=None,min_gap_hours=0.0):
+  """Infer the next close from recurring gaps in the broker's H1 history."""
+  from .sessions import next_session_close
+  frame=self._session_frame(symbol); now=now_utc or datetime.now(timezone.utc)
+  if frame is None or len(frame)<24*7: return None
   return next_session_close(frame,now,float(min_gap_hours))
  def list_all_symbols(self,refresh_minutes=5):
   import time
@@ -77,7 +82,7 @@ class SymbolService:
    symbol=self.resolve_alias(alias)
    if symbol and self.mt5.symbol_select(symbol,True): selected.append(symbol)
   return list(dict.fromkeys(selected))
- def is_tradable(self,symbol):
+ def is_tradable(self,symbol,check_session=True,now_utc=None):
   i=self.mt5.symbol_info(symbol)
   if not i or not self.mt5.symbol_select(symbol,True): return False,'symbol unavailable'
   if i.trade_mode!=getattr(self.mt5,'SYMBOL_TRADE_MODE_FULL',4): return False,'symbol is not enabled for full trading'
@@ -86,9 +91,12 @@ class SymbolService:
   tick_utc=mt5_epoch_to_utc(stamp,self.mt5) if stamp else None
   age=(datetime.now(timezone.utc)-tick_utc).total_seconds() if tick_utc else float('inf')
   if not t or age< -5 or age>60: return False,'stale tick / market closed'
-  upcoming=self.next_session_close(symbol)
+  if check_session and not self.session_history_available(symbol): return False,'session history unavailable'
+  upcoming=self.next_session_close(symbol,now_utc,0.0) if check_session else None
   if upcoming:
-   minutes=(upcoming[0]-datetime.now(timezone.utc)).total_seconds()/60
+   now=now_utc or datetime.now(timezone.utc)
+   now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+   minutes=(upcoming[0]-now).total_seconds()/60
    if 0<=minutes<=self.settings.risk.no_entry_before_close_minutes: return False,'symbol session closes soon'
   lim=self.settings.risk.max_spread_points.get(symbol)
   spread=(t.ask-t.bid)/i.point
@@ -96,6 +104,9 @@ class SymbolService:
   return True,'tradable'
  def get_candidates(self,select=True):
   """Return all included broker names, selecting each into Market Watch."""
+  import time
+  if self._candidate_cache and time.monotonic()-self._candidate_loaded<int(self.settings.config['universe']['refresh_minutes'])*60:
+   return list(self._candidate_cache)
   self.select_liquid_symbols()
   u=self.settings.config['universe']; out=[]
   for item in self.list_all_symbols():
@@ -104,7 +115,8 @@ class SymbolService:
    if u.get('exclude_dated_futures',True) and is_dated_future(name): continue
    if select and not self.mt5.symbol_select(name,True): continue
    out.append(name)
-  return out
+  self._candidate_cache=out; self._candidate_loaded=time.monotonic()
+  return list(out)
  def get_universe(self):
   return [name for name in self.get_candidates() if self.is_tradable(name)[0]]
 

@@ -6,6 +6,7 @@ from src.symbols import SymbolService, is_dated_future, underlying_group, underl
 
 class FakeMT5:
     SYMBOL_TRADE_MODE_FULL = 4
+    TIMEFRAME_H1 = 16385
 
     def __init__(self, names):
         now = datetime.now(timezone.utc).timestamp()
@@ -27,10 +28,15 @@ class FakeMT5:
     def last_error(self):
         return (0, 'ok')
 
+    def copy_rates_from_pos(self,name,timeframe,start,count):
+        import time
+        stamp=int(time.time())
+        return [{'time':stamp-3600*(count-i+start),'open':1,'high':1.1,'low':.9,'close':1,'tick_volume':1,'spread':1} for i in range(count)]
+
 
 def make_service(names, exclude_dated=True):
     mt5 = FakeMT5(names)
-    config = {'universe': {'include_groups': ['indices'], 'exclude_symbols': [], 'exclude_dated_futures': exclude_dated, 'symbol_aliases': {}}, 'history': {'liquid_aliases': []}}
+    config = {'universe': {'include_groups': ['indices'], 'exclude_symbols': [], 'exclude_dated_futures': exclude_dated, 'symbol_aliases': {}, 'refresh_minutes':5}, 'history': {'liquid_aliases': []}}
     settings = SimpleNamespace(config=config, risk=SimpleNamespace(max_spread_points={}))
     return SymbolService(mt5, settings)
 
