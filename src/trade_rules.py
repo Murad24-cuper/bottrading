@@ -115,3 +115,21 @@ def may_extend(in_profit: bool, scaled_out: bool, stop_protects_profit: bool, mt
     """Allow an extension only when every profit-protection condition is met."""
     return (age_minutes >= max_minutes and age_minutes < 60 and in_profit and scaled_out and
             stop_protects_profit and mtf_agrees and momentum_rising and continuation_score >= minimum_score)
+
+
+def stop_protects_profit(direction: str, stop: float, entry: float, cost_distance: float) -> bool:
+    """Require the stop to cover entry and estimated round-trip costs."""
+    return float(stop) >= float(entry)+float(cost_distance) if direction == 'buy' else float(stop) <= float(entry)-float(cost_distance)
+
+
+def continuation_metrics(candles: dict[str, pd.DataFrame], direction: str, fast=5, slow=13, roc_period=5) -> tuple[bool, bool, float]:
+    """Return directional MTF agreement, improving directional momentum and score."""
+    aligned=mtf_direction_agrees(candles,direction,('M1','M5','M15'),fast,slow)
+    frame=candles.get('M1')
+    if frame is None or len(frame)<roc_period*2+1: return aligned,False,0.0
+    close=frame.close.astype(float)
+    latest=float(close.iloc[-1]/close.iloc[-1-roc_period]-1)
+    previous=float(close.iloc[-1-roc_period]/close.iloc[-1-2*roc_period]-1)
+    rising=(latest>0 and latest>previous) if direction=='buy' else (latest<0 and latest<previous)
+    score=float(aligned)+float(rising)
+    return aligned,rising,score/2

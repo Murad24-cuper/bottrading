@@ -13,6 +13,8 @@ def test_azerbaijani_labels_and_money_formatting():
     assert strategy_label('volatility_scalp')=='Sürətli'
     assert close_reason_label('partial_tp')=='Qazancın bir hissəsi götürüldü'
     assert close_reason_label('trail')=='Qazanc qorundu (izləyən stop)'
+    assert close_reason_label('early_exit')=='Erkən çıxış - risk artdı'
+    assert close_reason_label('extended')=='Uzadılıb (qazanc qorunur)'
     assert format_money(1010.09)=='1,010.09 $'
     assert format_money(1.2,signed=True)=='+1.20 $'
     assert format_money(-1.2,signed=True)=='-1.20 $'

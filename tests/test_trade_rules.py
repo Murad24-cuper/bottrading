@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from src.trade_rules import adverse_exit_score, confidence_allowed, mtf_direction_agrees, scale_out_volume, should_exit_early, stop_only_tightens, stagnation_due, stop_target_from_atr, spread_within_median, may_extend
+from src.trade_rules import adverse_exit_score, confidence_allowed, mtf_direction_agrees, scale_out_volume, should_exit_early, stop_only_tightens, stagnation_due, stop_protects_profit, continuation_metrics, stop_target_from_atr, spread_within_median, may_extend
 
 
 def _frame(direction='buy', bars=80):
@@ -71,3 +71,16 @@ def test_trailing_stop_only_tightens_and_stagnation_rule():
     assert not stop_only_tightens('sell',100,100.1)
     assert stagnation_due(4,.1,4,.2)
     assert not stagnation_due(3,.1,4,.2)
+
+
+def test_extension_requires_cost_protecting_stop_and_rising_momentum():
+    assert stop_protects_profit('buy',101,100,.5)
+    assert not stop_protects_profit('buy',100.4,100,.5)
+    assert stop_protects_profit('sell',99,100,.5)
+    index=np.arange(100,dtype=float); rising_close=np.exp(index*.01+index**2*.00002)
+    rising_frame=pd.DataFrame({'open':rising_close,'high':rising_close*1.001,'low':rising_close*.999,
+                               'close':rising_close,'tick_volume':np.full(100,10.)})
+    bars={tf:rising_frame for tf in ('M1','M5','M15')}
+    aligned,rising,score=continuation_metrics(bars,'buy')
+    assert aligned and rising and score==1
+    assert not continuation_metrics({'M1':bars['M1']},'buy')[0]

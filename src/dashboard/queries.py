@@ -39,7 +39,7 @@ def get_day_summary(start_utc,end_utc,path=None):
     return {'closed_pnl':float(row['pnl'])+float(part['pnl']),'floating_pnl':float(floating),'net_pnl':float(row['pnl'])+float(part['pnl'])+float(floating),'trades':int(row['trades']),'wins':int(win_count),'losses':int(loss_count),'win_rate':win_count/count if count else 0.0,'taken':(float(winning[0]['amount']) if winning else 0.0)+float(part['taken']),'lost':(float(losing[0]['amount']) if losing else 0.0)+float(part['lost'])}
 
 def get_open_positions(path=None):
-    return _rows(path,"SELECT ticket,symbol,direction,volume,open_time,open_price,sl,tp,profit,commission,swap,strategy,magic FROM trades WHERE status='open' ORDER BY open_time")
+    return _rows(path,"SELECT ticket,symbol,direction,volume,open_time,open_price,sl,tp,profit,commission,swap,strategy,magic,extended_minutes FROM trades WHERE status='open' ORDER BY open_time")
 
 def get_closed_trades(start_utc,end_utc,path=None):
     rows=_rows(path,"SELECT close_time,symbol,direction,volume,open_price,close_price,sl,tp,profit,commission,swap,close_reason,strategy FROM trades WHERE status='closed' AND close_time>=? AND close_time<? ORDER BY close_time DESC",(start_utc,end_utc))

@@ -19,6 +19,8 @@ CLOSE_REASON_LABELS = {
     'tp': 'Hədəfə çatdı',
     'partial_tp': 'Qazancın bir hissəsi götürüldü',
     'trail': 'Qazanc qorundu (izləyən stop)',
+    'early_exit': 'Erkən çıxış - risk artdı',
+    'extended': 'Uzadılıb (qazanc qorunur)',
     'sl': 'Zərər həddi',
     'momentum_lost': 'Hərəkət zəiflədi',
     'stagnant': 'Yerində sayırdı',

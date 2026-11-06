@@ -7,7 +7,7 @@ from .logger import get_logger
 from .time_utils import mt5_epoch_to_utc
 from . import market_data, indicators as ind
 from .risk import calc_volume
-from .trade_rules import adverse_exit_score, scale_out_volume, should_exit_early, stagnation_due, stop_only_tightens
+from .trade_rules import adverse_exit_score, continuation_metrics, may_extend, scale_out_volume, should_exit_early, stagnation_due, stop_only_tightens, stop_protects_profit
 
 log=get_logger(__name__)
 
@@ -150,13 +150,49 @@ class Executor:
         return ok
     def enforce_time_stop(self,settings=None):
         """Manage scale-outs, protective stops, momentum exits and the safety ceiling."""
-        config=(settings or self.settings).risk; now=datetime.now(timezone.utc); actions=[]
+        settings=settings or self.settings; config=settings.risk; raw=settings.config['risk']; now=datetime.now(timezone.utc); actions=[]
         for p in (self.mt5.positions_get() or []):
             if int(p.magic)!=self.settings.magic_number: continue
             row=next((item for item in self.db.get_open_trades() if int(item['ticket']) in {int(p.ticket),int(getattr(p,'identifier',p.ticket) or p.ticket)}),None)
             if row is None: continue
             opened=mt5_epoch_to_utc(p.time,self.mt5); age=(now-opened).total_seconds()/60
-            if age>=config.max_hold_minutes: actions.append(self.close_position(p.ticket,'time')); continue
+            if age>=float(raw['max_hold_extended_minutes']): actions.append(self.close_position(p.ticket,'time')); continue
+            if age>=config.max_hold_minutes:
+                deadline=row.get('extension_until')
+                try: deadline_dt=datetime.fromisoformat(deadline) if deadline else None
+                except (TypeError,ValueError): deadline_dt=None
+                if deadline_dt and deadline_dt.tzinfo is None: deadline_dt=deadline_dt.replace(tzinfo=timezone.utc)
+                if deadline_dt and now<deadline_dt:
+                    pass
+                else:
+                    is_buy=p.type==self.mt5.POSITION_TYPE_BUY; direction='buy' if is_buy else 'sell'
+                    entry=float(p.price_open); tick=self.mt5.symbol_info_tick(p.symbol)
+                    current=float(tick.bid if is_buy else tick.ask) if tick else entry
+                    in_profit=current>entry if is_buy else current<entry
+                    stop=float(p.sl or 0); info=self.mt5.symbol_info(p.symbol)
+                    cost_distance=0.0
+                    try:
+                        estimated=market_data.get_cost_estimate(self.mt5,p.symbol,float(p.volume))['cost']
+                        tv=float(info.trade_tick_value or 0) if info else 0; ts=float(info.trade_tick_size or 0) if info else 0
+                        if tv>0 and ts>0: cost_distance=float(estimated)*float(config.breakeven_cost_multiplier)/max(float(p.volume),1e-12)*ts/tv
+                    except Exception: pass
+                    protected=stop_protects_profit(direction,stop,entry,cost_distance)
+                    mtf=rising=False; score=0.0
+                    try:
+                        candles={tf:market_data.get_closed_candles(self.mt5,p.symbol,tf,80) for tf in ('M1','M5','M15')}
+                        mtf,rising,score=continuation_metrics(candles,direction)
+                    except Exception as exc: self._event(f'Could not score extension ticket={p.ticket}: {exc}','WARNING')
+                    minimum=float(settings.config['scanner'].get('extend_min_score',raw.get('extend_min_score',.7)))
+                    can_extend=may_extend(in_profit,int(row.get('scale_out_done') or 0)==1,protected,mtf,rising,score,minimum,age,float(raw['max_hold_extended_minutes']))
+                    if not can_extend:
+                        self._event(f'Time stop ticket={p.ticket} refused extension age={age:.1f} score={score:.2f} protected={protected} reason=continuation or protection criteria failed')
+                        actions.append(self.close_position(p.ticket,'time')); continue
+                    step=min(float(raw['extend_step_minutes']),float(raw['max_hold_extended_minutes'])-age)
+                    next_deadline=now+timedelta(minutes=step)
+                    extended=min(int(raw['max_hold_extended_minutes'])-config.max_hold_minutes,int(row.get('extended_minutes') or 0)+int(math.ceil(step)))
+                    self.db.update_open_trade(int(row['ticket']),extension_until=next_deadline.isoformat(),extended_minutes=extended)
+                    row=self.db.get_trade(int(row['ticket'])) or row
+                    self._event(f'Protected-profit extension ticket={p.ticket} age={age:.1f} score={score:.2f} until={next_deadline.isoformat()}')
             info=self.mt5.symbol_info(p.symbol); tick=self.mt5.symbol_info_tick(p.symbol)
             if info is None or tick is None: continue
             is_buy=p.type==self.mt5.POSITION_TYPE_BUY; current=float(tick.bid if is_buy else tick.ask); entry=float(p.price_open)
@@ -254,11 +290,11 @@ class Executor:
     def _record_partial_deal(self,row,deal):
         deal_ticket=int(getattr(deal,'ticket',0) or 0)
         reason=str(getattr(deal,'comment','') or '').strip().lower()
-        if reason not in {'tp','partial_tp','trail','momentum_lost','stagnant','sl','time','session_close','manual','kill'}:
+        if reason not in {'tp','partial_tp','trail','early_exit','momentum_lost','stagnant','sl','time','session_close','manual','kill'}:
             reason=self._close_reason([deal],forced='partial_tp')
         self.db.insert_partial_close(deal_ticket=deal_ticket or None,ticket=int(row['ticket']),symbol=row['symbol'],time=mt5_epoch_to_utc(deal.time,self.mt5).isoformat(),volume=float(getattr(deal,'volume',0) or 0),price=float(getattr(deal,'price',0) or 0),profit=float(getattr(deal,'profit',0) or 0),commission=float(getattr(deal,'commission',0) or 0),swap=float(getattr(deal,'swap',0) or 0),reason=reason)
     def _close_reason(self,deals,forced=None,row=None):
-        if forced in {'partial_tp','trail','momentum_lost','stagnant','time','session_close','manual','kill'}: return forced
+        if forced in {'partial_tp','trail','early_exit','momentum_lost','stagnant','time','session_close','manual','kill'}: return forced
         m=self.mt5
         for deal in reversed(deals):
             reason=getattr(deal,'reason',None)

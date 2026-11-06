@@ -183,6 +183,7 @@ def main():
     opened=queries.get_open_positions(DB_PATH); now_utc=datetime.now(timezone.utc)
     for row in opened:
         row['duration']=format_duration((now_utc-_as_utc(row['open_time'])).total_seconds()/60)
+        if int(row.get('extended_minutes') or 0)>0: row['duration']+= ' · Uzadılıb (qazanc qorunur)'
         row['direction_label']=direction_label(row['direction']); row['strategy_label']=strategy_label(row['strategy'])
         row['net_result']=float(row.get('profit') or 0)+float(row.get('commission') or 0)+float(row.get('swap') or 0)
     st.subheader('Açıq mövqelər')
