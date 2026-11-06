@@ -161,6 +161,26 @@ mt5:
 confluence:
   enabled: false                 # Observation only until evidence supports activation
   rules: []                       # Optional entry filters; disabled by default
+brain:
+  enabled: false                  # Live use remains disabled until the acceptance gate passes
+  shadow: true                    # Record analysis without changing current trade decisions
+  min_checklist: 0.55
+  min_probability: 0.55
+  min_ev_r: 0.05
+  k_neighbors: 300
+  kelly_fraction: 0.25
+  max_symbols: 400
+  max_reference_situations: 1500000
+  query_exclude_same_symbol_days: 1
+  checklist:
+    weights: {trend: 1.0, location: 1.0, pattern: 1.0, candle: 1.0, fibonacci: 0.7, levels: 1.0, momentum: 1.0, volatility: 0.8, session: 0.5, context: 0.5}
+  acceptance: {min_trades: 500, min_profit_factor: 1.1, min_symbols: 30, calibration_error: 0.05}
+  universe_quotas: {forex: 80, indices: 50, stocks: 100, crypto: 50, metals: 30, energy: 20}
+  retrain_day_utc: 6
+  retrain_hour_utc: 2
+  live_drift_window: 100
+  live_max_calibration_error: 0.1
+  live_min_expectancy_r: 0.0
 history:
   data_dir: data/history
   ranges_months: {M1: 6, M5: 24, M15: 24, H1: 36}
