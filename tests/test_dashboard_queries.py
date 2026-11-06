@@ -51,3 +51,10 @@ def test_performance_report_includes_commissions_partial_closes_and_breakdowns(t
     assert result['overall']['max_drawdown_pct']==pytest.approx(10)
     assert result['overall']['estimated_costs']==pytest.approx(.45)
     assert set(result['by_asset_group'])=={'forex','metals'}
+
+def test_dashboard_feature_impact_reads_persisted_closed_trade_features(tmp_path):
+    import json
+    path=tmp_path/'features.db'; db=Database(path)
+    db.insert_trade(ticket=99,status='closed',profit=1,commission=0,swap=0,features=json.dumps({'observations':{'with_usd_context':True}}))
+    result=queries.get_feature_impact(path)
+    assert result and result[0]['feature']=='observations.with_usd_context=true' and result[0]['trades']==1

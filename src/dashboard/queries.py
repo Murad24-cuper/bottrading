@@ -64,6 +64,11 @@ def get_top_skip_reasons_since(since_utc,path=None,limit=5):
     """Aggregate the most common recent signal rejection reasons."""
     return _rows(path,"SELECT skip_reason,COUNT(*) AS count FROM signals WHERE time>=? AND taken=0 AND COALESCE(skip_reason,'')<>'' GROUP BY skip_reason ORDER BY count DESC,skip_reason LIMIT ?",(since_utc,int(limit)))
 
+def get_feature_impact(path=None):
+    """Return closed-trade feature observations for the analysis tab."""
+    from ..analysis.feature_impact import analyze_feature_impact
+    return analyze_feature_impact(_rows(path,"SELECT profit,commission,swap,features FROM trades WHERE status='closed' ORDER BY close_time"))
+
 def get_signals_period(start_utc,end_utc,path=None,limit=5000):
     rows=_rows(path,'SELECT time,symbol,direction,entry,sl,tp,strategy,confidence,taken FROM signals WHERE time>=? AND time<? ORDER BY time DESC LIMIT ?',(start_utc,end_utc,int(limit)))
     return rows

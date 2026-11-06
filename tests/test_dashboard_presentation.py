@@ -1,6 +1,6 @@
 from src.dashboard.presentation import (
     close_reason_label, direction_label, format_duration, format_money,
-    local_time, strategy_label, translate_message,
+    feature_label, local_time, strategy_label, translate_message,
 )
 
 
@@ -33,3 +33,4 @@ def test_bot_messages_are_translated():
     assert 'Skanlama' in translate_message('Scan total=100 scanned=100 complete=True')
     assert translate_message('rsi_not_overbought')=='RSI həddən artıq alış zonasını göstərmir'
     assert 'Dəyişiklik yoxdur' in translate_message('Modify SL/TP ticket=1 success=False error=No changes')
+    assert feature_label('observations.with_usd_context=true')=='müşahidə.USD konteksti ilə=bəli'

@@ -17,7 +17,7 @@ from src.dashboard.readiness import readiness_checks, simulate_small_account
 from src.paths import project_paths
 from src.dashboard.presentation import (AZ_TZ, close_reason_label,
                                         direction_label, format_duration,
-                                        format_money, local_time,
+                                        feature_label, format_money, local_time,
                                         strategy_label, translate_message)
 load_dotenv(ROOT/'.env',override=False)
 DATA_DIR,LOG_DIR=project_paths(ROOT)
@@ -162,7 +162,7 @@ def main():
     st.caption(f'Nəzarətçi: {"işləyir" if supervisor_running else "dayanıb"} · Bu gün yenidən başladılma: {restart_count}')
     st.markdown('<style>.status-bar{color:white;padding:.75rem 1rem;border-radius:.55rem;font-weight:650;margin:.4rem 0 1rem}.metric-card{padding:1.1rem 1rem;border:1px solid rgba(128,128,128,.25);border-radius:.7rem;min-height:105px}.metric-label{font-size:.95rem;opacity:.8}.metric-value{font-size:1.7rem;font-weight:700;margin-top:.3rem}.metric-detail{font-size:.8rem;opacity:.75;margin-top:.2rem}div[data-testid="stButton"] button{min-height:3rem;font-weight:650}</style>',unsafe_allow_html=True)
 
-    tab_main, tab_report, tab_prepare, tab_detail = st.tabs(['Əsas', 'Hesabat', 'Hazırlıq', 'Ətraflı'])
+    tab_main, tab_report, tab_analysis, tab_prepare, tab_detail = st.tabs(['Əsas', 'Hesabat', 'Analiz', 'Hazırlıq', 'Ətraflı'])
     with tab_main:
         controls=st.columns([1.4,1.15,1.4])
         if st.session_state.get('action_message'):
@@ -262,6 +262,14 @@ def main():
         if stored:
             st.subheader('Saxlanmış günlük hesabatlar')
             st.dataframe(pd.DataFrame([{'Tarix':r['date'],'Nəticə':format_money(r['payload'].get('pnl'),signed=True),'Əməliyyat':r['payload'].get('trades_count',0)} for r in stored]),use_container_width=True,hide_index=True)
+
+    with tab_analysis:
+        st.subheader('Xüsusiyyətlərin müşahidə nəticələri')
+        st.info('Bunlar bağlanmış əməliyyatlardan hesablanan müşahidələrdir. Hazırda heç biri ticarət qərarlarında istifadə olunmur.')
+        impact=queries.get_feature_impact(DB_PATH)
+        if impact:
+            st.dataframe(pd.DataFrame([{'Xüsusiyyət':feature_label(row['feature']),'Əməliyyat sayı':row['trades'],'Qazanma faizi':f"{row['win_rate']:.1%}",'Fərq (baseline ilə)':f"{row['win_rate_difference']:+.1%}",'Orta nəticə':format_money(row['expectancy'],signed=True),'Sübut olunub?':'Bəli' if row['meaningful'] else 'Hələ az məlumat' if row['trades']<30 else 'Xeyr'} for row in impact]),use_container_width=True,hide_index=True)
+        else: st.caption('Xüsusiyyətlər üzrə müqayisə üçün hələ bağlanmış əməliyyat yoxdur.')
 
     with tab_prepare:
         now_utc=datetime.now(timezone.utc); seven_start=(now_utc-timedelta(days=7)).isoformat(); seven_end=now_utc.isoformat()
