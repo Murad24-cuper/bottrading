@@ -5,9 +5,35 @@ from collections import deque
 from collections.abc import Callable, Sequence
 from pathlib import Path
 import time
+from datetime import datetime, timezone
+import sqlite3
+import faulthandler
 from .notify import TelegramNotifier
 
 _notifier=None
+
+def heartbeat_is_stale(db_path: str | Path, hang_seconds: int, now: datetime | None = None) -> bool:
+    """Return true when the persisted live bot heartbeat exceeds its limit."""
+    try:
+        with sqlite3.connect(db_path, timeout=5) as connection:
+            connection.execute('PRAGMA busy_timeout=5000')
+            row=connection.execute("SELECT time,status FROM bot_status WHERE id=1").fetchone()
+        if not row or row[1] != 'running': return False
+        stamp=datetime.fromisoformat(str(row[0]).replace('Z','+00:00'))
+        if stamp.tzinfo is None: stamp=stamp.replace(tzinfo=timezone.utc)
+        return ((now or datetime.now(timezone.utc))-stamp.astimezone(timezone.utc)).total_seconds()>hang_seconds
+    except (OSError,sqlite3.Error,TypeError,ValueError):
+        return False
+
+def write_hang_report(log_dir: str | Path, reason: str) -> None:
+    """Capture recent bot log lines and the supervisor's current stack."""
+    root=Path(log_dir); root.mkdir(parents=True,exist_ok=True)
+    with (root/'crash.log').open('a',encoding='utf-8') as out:
+        out.write(f"\nHANG WATCHDOG {datetime.now(timezone.utc).isoformat()} {reason}\n--- last bot.log lines ---\n")
+        try: out.writelines((root/'bot.log').read_text(encoding='utf-8',errors='replace').splitlines(keepends=True)[-50:])
+        except OSError as exc: out.write(f'bot.log unavailable: {exc}\n')
+        out.write('--- supervisor faulthandler stack ---\n')
+        faulthandler.dump_traceback(file=out,all_threads=True)
 
 
 def clear_stale_pid_lock(path: str | Path, pid_is_alive: Callable[[int], bool]) -> bool:

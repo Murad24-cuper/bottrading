@@ -26,6 +26,7 @@ def test_signal_stats_snapshot_event_and_wal(tmp_path):
         assert conn.execute('SELECT COUNT(*) FROM equity_snapshots').fetchone()[0]==1
         assert conn.execute('SELECT level FROM bot_events').fetchone()[0]=='WARNING'
         assert conn.execute('PRAGMA journal_mode').fetchone()[0].lower()=='wal'
+        assert conn.execute('PRAGMA busy_timeout').fetchone()[0]==5000
 
 def test_commands_have_utc_expiry_and_expire_stale_running_rows(tmp_path):
     from datetime import datetime,timedelta,timezone

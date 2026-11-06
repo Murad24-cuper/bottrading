@@ -144,9 +144,12 @@ db:
   backup_keep_days: 14           # Number of daily database backups to retain
   vacuum_weekday_utc: 6          # Sunday UTC, while the bot is idle
 supervisor:
+  hang_seconds: 90               # Restart a live child with a stale heartbeat
   restart_backoff_seconds: [10, 30, 60] # Delay before successive crash restarts
   max_restarts_per_hour: 5       # Stop after this many restarts in one hour
   restart_window_minutes: 60     # Sliding restart limit window
+mt5:
+  call_timeout_seconds: 20       # Maximum wait for one MT5 package call
 history:
   data_dir: data/history
   ranges_months: {M1: 3, M5: 12, M15: 36, H1: 36}

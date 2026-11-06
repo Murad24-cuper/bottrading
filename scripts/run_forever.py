@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 from src.config import load_settings
 from src.db import Database
 from src.logger import get_logger
-from src.supervisor import clear_stale_pid_lock, run_restart_supervisor
+from src.supervisor import clear_stale_pid_lock, run_restart_supervisor, heartbeat_is_stale, write_hang_report
 from scripts.run_bot import install_crash_handlers
 from src.paths import project_paths
 
@@ -88,7 +88,17 @@ def main() -> int:
             except OSError: child = subprocess.Popen([sys.executable, str(child_script)], creationflags=base_flags, **options)
         finally: output_handle.close()
         emit('INFO', f'Bot child started PID={child.pid}')
-        return int(child.wait())
+        hang_seconds=int(backoff['hang_seconds'])
+        while True:
+            try: return int(child.wait(timeout=1))
+            except subprocess.TimeoutExpired: pass
+            if heartbeat_is_stale(settings.db_path,hang_seconds):
+                reason=f'heartbeat older than {hang_seconds}s; child PID={child.pid}'
+                write_hang_report(settings.logs_dir,reason)
+                emit('CRITICAL',f'Hang watchdog: {reason}; terminating child for supervised restart')
+                try: child.terminate(); child.wait(timeout=5)
+                except subprocess.TimeoutExpired: child.kill(); child.wait()
+                return 124
 
     emit('INFO', f'Supervisor started PID={os.getpid()}')
     try:

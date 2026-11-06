@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.mt5_client import MT5Client
+from src.mt5_client import MT5CallProxy, MT5CallTimeoutError, MT5Client
 
 
 def client_settings(mode,allow_real):
@@ -20,5 +20,15 @@ def test_real_login_requires_both_real_mode_and_explicit_allow_real(monkeypatch)
 def test_real_login_allowed_only_with_both_explicit_guards(monkeypatch,caplog):
     module=fake_mt5(1); monkeypatch.setitem(sys.modules,'MetaTrader5',module)
     client=MT5Client(client_settings('real',True)).connect()
-    assert client.mt5 is module
+    assert client.mt5._module is module
     assert 'private-test-value' not in caplog.text
+
+def test_mt5_call_timeout_marks_connection_unhealthy():
+    import time
+    from types import SimpleNamespace
+    marked=[]
+    def slow(): time.sleep(.08); return True
+    proxy=MT5CallProxy(SimpleNamespace(slow=slow),.01,lambda name,timeout:marked.append((name,timeout)))
+    with pytest.raises(MT5CallTimeoutError,match='slow'):
+        proxy.slow()
+    assert marked==[('slow',.01)]

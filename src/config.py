@@ -72,10 +72,10 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     try: config=yaml.safe_load(path.read_text(encoding='utf-8'))
     except (OSError,yaml.YAMLError) as exc: raise ValueError(f'Cannot load config.yaml: {exc}') from exc
     if not isinstance(config,dict): raise ValueError('config.yaml must contain a YAML mapping')
-    required={'account','risk','universe','timeframes','magic_number','executor','strategies','loop','scanner','history','backtest','live','supervisor','db_path'}
+    required={'account','risk','universe','timeframes','magic_number','executor','strategies','loop','scanner','history','backtest','live','supervisor','mt5','db_path'}
     missing=required-config.keys()
     if missing: raise ValueError(f'config.yaml is missing keys: {", ".join(sorted(missing))}')
-    for section in ('account','risk','universe','loop','scanner','history','backtest','live','supervisor'):
+    for section in ('account','risk','universe','loop','scanner','history','backtest','live','supervisor','mt5'):
         if not isinstance(config[section],dict): raise ValueError(f'{section} must be a mapping')
     if config['account'].get('mode') not in {'demo','real'}: raise ValueError('account.mode must be demo or real')
     raw=config['risk']
@@ -152,6 +152,8 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     if not isinstance(delays,list) or not delays or any(type(value) is not int or value<=0 for value in delays): raise ValueError('supervisor.restart_backoff_seconds must be a non-empty list of positive integers')
     for key in ('max_restarts_per_hour','restart_window_minutes'):
         if type(supervisor.get(key)) is not int or supervisor[key]<=0: raise ValueError(f'supervisor.{key} must be a positive integer')
+    if type(supervisor.get('hang_seconds')) is not int or supervisor['hang_seconds']<=0: raise ValueError('supervisor.hang_seconds must be a positive integer')
+    if isinstance(config['mt5'].get('call_timeout_seconds'),bool) or not isinstance(config['mt5'].get('call_timeout_seconds'),(int,float)) or config['mt5']['call_timeout_seconds']<=0: raise ValueError('mt5.call_timeout_seconds must be positive')
     for section in ('health','notify','db'):
         if not isinstance(config.get(section),dict): raise ValueError(f'{section} must be a mapping')
     health=config['health']

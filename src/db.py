@@ -3,6 +3,25 @@ from __future__ import annotations
 from datetime import datetime,timezone,date,timedelta
 from pathlib import Path
 import sqlite3
+import time
+
+class _RetryConnection(sqlite3.Connection):
+    """Retry one transient SQLite lock once after the configured busy wait."""
+    @staticmethod
+    def _locked(exc):
+        return isinstance(exc, sqlite3.OperationalError) and 'locked' in str(exc).lower()
+    def execute(self, *args, **kwargs):
+        try: return super().execute(*args, **kwargs)
+        except sqlite3.OperationalError as exc:
+            if not self._locked(exc): raise
+            time.sleep(.05)
+            return super().execute(*args, **kwargs)
+    def executemany(self, *args, **kwargs):
+        try: return super().executemany(*args, **kwargs)
+        except sqlite3.OperationalError as exc:
+            if not self._locked(exc): raise
+            time.sleep(.05)
+            return super().executemany(*args, **kwargs)
 
 SCHEMA='''
 CREATE TABLE IF NOT EXISTS trades(
@@ -46,9 +65,9 @@ class Database:
     def __init__(self,path='data/bot.db'):
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True); self.init()
     def connect(self):
-        connection=sqlite3.connect(self.path,timeout=30)
+        connection=sqlite3.connect(self.path,timeout=5,factory=_RetryConnection)
         connection.row_factory=sqlite3.Row
-        connection.execute('PRAGMA busy_timeout=30000')
+        connection.execute('PRAGMA busy_timeout=5000')
         return connection
     def init(self):
         with self.connect() as connection:

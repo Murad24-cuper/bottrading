@@ -1,4 +1,4 @@
-from src.supervisor import clear_stale_pid_lock, run_restart_supervisor
+from src.supervisor import clear_stale_pid_lock, heartbeat_is_stale, run_restart_supervisor, write_hang_report
 import faulthandler
 import sys
 import threading
@@ -41,6 +41,21 @@ def test_supervisor_removes_only_confirmed_dead_bot_lock(tmp_path):
     assert clear_stale_pid_lock(lock,lambda pid:False) and not lock.exists()
     lock.write_text('damaged',encoding='utf-8')
     assert not clear_stale_pid_lock(lock,lambda pid:False) and lock.exists()
+
+def test_watchdog_detects_stale_running_heartbeat_and_writes_crash_report(tmp_path):
+    import sqlite3
+    from datetime import datetime,timezone,timedelta
+    db=tmp_path/'bot.db'
+    with sqlite3.connect(db) as con:
+        con.execute('CREATE TABLE bot_status(id INTEGER PRIMARY KEY,time TEXT,status TEXT)')
+        now=datetime.now(timezone.utc)
+        con.execute('INSERT INTO bot_status VALUES(1,?,?)',((now-timedelta(seconds=91)).isoformat(),'running'))
+    assert heartbeat_is_stale(db,90,now)
+    logdir=tmp_path/'logs'; logdir.mkdir(); (logdir/'bot.log').write_text('\n'.join(f'line {i}' for i in range(70)),encoding='utf-8')
+    write_hang_report(logdir,'heartbeat stale')
+    report=(logdir/'crash.log').read_text(encoding='utf-8')
+    assert 'line 69' in report and '\nline 20\n' in report and '\nline 19\n' not in report
+    assert 'heartbeat stale' in report and 'Current thread' in report
 
 
 def test_crash_handlers_capture_main_and_thread_tracebacks(tmp_path,monkeypatch):
