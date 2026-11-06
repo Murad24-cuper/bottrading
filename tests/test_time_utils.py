@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from src.time_utils import detect_server_utc_offset, mt5_epoch_to_utc
+from src.time_utils import detect_server_utc_offset, mt5_epoch_to_utc, server_clock_drift_seconds
 from src.market_data import get_candles
 import numpy as np
 import pandas as pd
@@ -34,6 +34,12 @@ def test_converts_mt5_server_epoch_to_utc():
     server_time = now + timedelta(hours=2)
 
     assert mt5_epoch_to_utc(server_time.timestamp(), offset=timedelta(hours=2)) == now
+
+def test_server_clock_drift_uses_rounded_hour_offset():
+    now=datetime(2026,11,5,19,0,tzinfo=timezone.utc)
+    server_time=now+timedelta(hours=3,seconds=45)
+    mt5=FakeMT5(SimpleNamespace(time=int(server_time.timestamp()),time_msc=int(server_time.timestamp()*1000)))
+    assert server_clock_drift_seconds(mt5,'EURUSD',now)==45
 
 def test_bot_normalizes_local_saturday_clock_to_utc_friday(tmp_path):
     from src.bot import TradingBot

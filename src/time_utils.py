@@ -50,3 +50,15 @@ def mt5_epoch_to_utc(value: float | int, mt5=None, offset: timedelta | None = No
     """Convert an MT5 broker-time epoch to an aware UTC datetime."""
     server_offset = offset if offset is not None else server_utc_offset(mt5) if mt5 is not None else timedelta(0)
     return datetime.fromtimestamp(float(value), timezone.utc) - server_offset
+
+
+def server_clock_drift_seconds(mt5, symbol: str, now_utc: datetime | None = None) -> float | None:
+    """Estimate PC UTC drift from a fresh broker tick and whole-hour server offset."""
+    now=now_utc or datetime.now(timezone.utc)
+    now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+    if not mt5.symbol_select(symbol,True): return None
+    tick=mt5.symbol_info_tick(symbol)
+    stamp=float(getattr(tick,'time_msc',0) or 0)/1000 if tick and getattr(tick,'time_msc',0) else float(getattr(tick,'time',0) or 0) if tick else 0
+    if stamp<=0: return None
+    delta=stamp-now.timestamp()
+    return abs(delta-round(delta/3600)*3600)

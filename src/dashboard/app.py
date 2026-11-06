@@ -14,26 +14,30 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
 from src.dashboard import queries
 from src.dashboard.readiness import readiness_checks, simulate_small_account
+from src.paths import project_paths
 from src.dashboard.presentation import (AZ_TZ, close_reason_label,
                                         direction_label, format_duration,
                                         format_money, local_time,
                                         strategy_label, translate_message)
 load_dotenv(ROOT/'.env',override=False)
-DB_PATH=Path(os.getenv('BOT_DB_PATH',ROOT/'data'/'bot.db'))
+DATA_DIR,LOG_DIR=project_paths(ROOT)
+_APP_CONFIG=yaml.safe_load((ROOT/'config.yaml').read_text(encoding='utf-8'))
+_configured_db=Path(_APP_CONFIG.get('db_path','data/bot.db'))
+DB_PATH=Path(os.getenv('BOT_DB_PATH','')) if os.getenv('BOT_DB_PATH') else (_configured_db if _configured_db.is_absolute() else ROOT/_configured_db)
 
 def _lock_pid():
-    try: return int((ROOT/'data'/'bot.lock').read_text(encoding='utf-8').split()[0])
+    try: return int((DATA_DIR/'bot.lock').read_text(encoding='utf-8').split()[0])
     except (OSError,ValueError,IndexError): return None
 
 def _supervisor_pid():
-    try: return int((ROOT/'data'/'supervisor.pid').read_text(encoding='utf-8').strip())
+    try: return int((DATA_DIR/'supervisor.pid').read_text(encoding='utf-8').strip())
     except (OSError,ValueError): return None
 
 def _supervisor_running():
     pid=_supervisor_pid()
     if pid and _pid_running(pid): return True
     if pid:
-        try: (ROOT/'data'/'supervisor.pid').unlink(missing_ok=True)
+        try: (DATA_DIR/'supervisor.pid').unlink(missing_ok=True)
         except OSError: pass
     return False
 
@@ -64,20 +68,20 @@ def _heartbeat_fresh(status,now=None):
 def _start_bot():
     """Start one detached bot process, with both UI and bot locks guarding races."""
     status=queries.get_bot_status(DB_PATH); pid=_lock_pid(); running=_pid_running(pid); supervisor_running=_supervisor_running()
-    lock_path=ROOT/'data'/'bot.lock'
+    lock_path=DATA_DIR/'bot.lock'
     if lock_path.exists() and not running:
         lock_path.unlink(missing_ok=True)
     if running or supervisor_running or _heartbeat_fresh(status): return False,'Bot already appears to be running.'
-    guard=ROOT/'data'/'dashboard-start.lock'; guard.parent.mkdir(parents=True,exist_ok=True)
+    guard=DATA_DIR/'dashboard-start.lock'; guard.parent.mkdir(parents=True,exist_ok=True)
     try: handle=guard.open('x',encoding='utf-8')
     except FileExistsError: return False,'A Start request is already in progress.'
     try:
         handle.write(f'{os.getpid()} {time.time_ns()}\n'); handle.close()
         stop=ROOT/'STOP'
         if stop.exists(): stop.unlink()
-        (ROOT/'data'/'supervisor.stop').unlink(missing_ok=True)
+        (DATA_DIR/'supervisor.stop').unlink(missing_ok=True)
         python=ROOT/'.venv'/'Scripts'/'python.exe'; script=ROOT/'scripts'/'run_forever.py'
-        log_path=ROOT/'logs'/'bot_stdout.log'; log_path.parent.mkdir(parents=True,exist_ok=True)
+        log_path=LOG_DIR/'bot_stdout.log'; log_path.parent.mkdir(parents=True,exist_ok=True)
         flags=getattr(subprocess,'DETACHED_PROCESS',0x00000008)|getattr(subprocess,'CREATE_NEW_PROCESS_GROUP',0x00000200)
         breakaway=getattr(subprocess,'CREATE_BREAKAWAY_FROM_JOB',0x01000000)
         with log_path.open('a',encoding='utf-8',buffering=1) as output:
@@ -241,7 +245,8 @@ def main():
             cards[0].metric('Əməliyyatlar',overall['trades']); cards[1].metric('Qazanma faizi',f"{overall['win_rate']:.1%}")
             cards[2].metric('Orta qazanc',format_money(overall['average_win'])); cards[3].metric('Orta zərər',format_money(overall['average_loss']))
             cards[4].metric('Gözlənilən nəticə',format_money(overall['expectancy'],signed=True)); cards[5].metric('Cəmi nəticə',format_money(overall['total_pnl'],signed=True))
-            st.caption(f"Maksimum azalma: {overall['max_drawdown_pct']:.2f}% · qeydə alınan komissiya xərcləri: {format_money(overall['estimated_costs'])}")
+            drawdown=f"{overall['max_drawdown_pct']:.2f}%" if overall['max_drawdown_pct'] is not None else 'Məlumat yoxdur'
+            st.caption(f"Maksimum azalma: {drawdown} · qeydə alınan komissiya xərcləri: {format_money(overall['estimated_costs'])}")
             for title,key in [('Strategiyaya görə','by_strategy'),('Aktiv qrupuna görə','by_asset_group'),('Bağlanma səbəbinə görə','by_close_reason')]:
                 rows=report[key]
                 if rows:

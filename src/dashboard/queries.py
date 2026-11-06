@@ -3,9 +3,15 @@ from __future__ import annotations
 from datetime import datetime,timezone,timedelta
 from pathlib import Path
 import sqlite3
+import yaml
+import os
+from ..paths import project_paths
 
 PROJECT_ROOT=Path(__file__).resolve().parents[2]
-DEFAULT_DB_PATH=PROJECT_ROOT/'data'/'bot.db'
+_data_dir,_log_dir=project_paths(PROJECT_ROOT)
+_config=yaml.safe_load((PROJECT_ROOT/'config.yaml').read_text(encoding='utf-8')) or {}
+_db_path=Path(_config.get('db_path','data/bot.db'))
+DEFAULT_DB_PATH=Path(os.getenv('BOT_DB_PATH')) if os.getenv('BOT_DB_PATH') else (_db_path if _db_path.is_absolute() else PROJECT_ROOT/_db_path)
 
 def _read(path):
     db=Path(path or DEFAULT_DB_PATH).resolve()
@@ -78,12 +84,13 @@ def get_performance_report(start_utc,end_utc,path=None):
     """Return trade metrics and breakdowns for a UTC interval."""
     trades=_rows(path,"SELECT id,ticket,symbol,asset_group,strategy,close_reason,close_time,profit,commission,swap FROM trades WHERE status='closed' AND close_time>=? AND close_time<? ORDER BY close_time",(start_utc,end_utc))
     partials=_rows(path,'SELECT ticket,profit,commission,swap FROM partial_closes WHERE time>=? AND time<?',(start_utc,end_utc))
-    partial_by_ticket={}
+    partial_by_ticket={}; partial_cost_by_ticket={}
     for row in partials:
         key=int(row['ticket']); partial_by_ticket[key]=partial_by_ticket.get(key,0.0)+sum(float(row.get(k) or 0) for k in ('profit','commission','swap'))
+        partial_cost_by_ticket[key]=partial_cost_by_ticket.get(key,0.0)+abs(float(row.get('commission') or 0))
     for row in trades:
         row['net']=sum(float(row.get(k) or 0) for k in ('profit','commission','swap'))+partial_by_ticket.get(int(row['ticket']),0.0)
-        row['costs']=sum(abs(float(row.get(k) or 0)) for k in ('commission',))
+        row['costs']=abs(float(row.get('commission') or 0))+partial_cost_by_ticket.get(int(row['ticket']),0.0)
     values=[float(row['net']) for row in trades]
     winners=[value for value in values if value>0]; losers=[value for value in values if value<0]
     snapshots=_rows(path,'SELECT time,equity FROM equity_snapshots WHERE time>=? AND time<? ORDER BY time',(start_utc,end_utc))
@@ -99,7 +106,7 @@ def get_performance_report(start_utc,end_utc,path=None):
         groups={}
         for row in trades: groups.setdefault(str(row.get(key) or 'unknown'),[]).append(row)
         return {name:metrics(rows) for name,rows in sorted(groups.items())}
-    overall=metrics(trades); overall['max_drawdown_pct']=max_dd
+    overall=metrics(trades); overall['max_drawdown_pct']=max_dd if snapshots else None; overall['equity_samples']=len(snapshots)
     return {'overall':overall,'by_strategy':breakdown('strategy'),'by_asset_group':breakdown('asset_group'),'by_close_reason':breakdown('close_reason')}
 
 def get_daily_report_rows(path=None,days=30):

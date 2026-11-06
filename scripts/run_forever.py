@@ -14,6 +14,7 @@ from src.db import Database
 from src.logger import get_logger
 from src.supervisor import clear_stale_pid_lock, run_restart_supervisor
 from scripts.run_bot import install_crash_handlers
+from src.paths import project_paths
 
 log = get_logger('bot.supervisor')
 
@@ -30,12 +31,12 @@ def _pid_alive(pid: int) -> bool:
 
 def main() -> int:
     if sys.stdout is None or sys.stderr is None:
-        output=(ROOT/'logs'/'bot_stdout.log'); output.parent.mkdir(parents=True,exist_ok=True)
+        _,log_dir=project_paths(ROOT); output=log_dir/'bot_stdout.log'; output.parent.mkdir(parents=True,exist_ok=True)
         stream=output.open('a',encoding='utf-8',buffering=1); sys.stdout=stream; sys.stderr=stream
     install_crash_handlers()
     settings = load_settings()
     db = Database(settings.db_path)
-    data_dir = settings.root / 'data'
+    data_dir = settings.data_dir
     data_dir.mkdir(parents=True, exist_ok=True)
     pid_path = data_dir / 'supervisor.pid'
     stop_path = data_dir / 'supervisor.stop'
@@ -76,14 +77,16 @@ def main() -> int:
             emit('CRITICAL',f'Bot child not launched; bot lock is malformed or PID {existing} is still active')
             stop_path.write_text('existing bot lock\n',encoding='utf-8')
             return 0
-        base_flags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0x00000200)
+        base_flags = getattr(subprocess, 'DETACHED_PROCESS',0x00000008) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0x00000200)
         breakaway = getattr(subprocess, 'CREATE_BREAKAWAY_FROM_JOB', 0x01000000)
+        output_path=settings.logs_dir/'bot_stdout.log'; output_path.parent.mkdir(parents=True,exist_ok=True)
+        output_handle=output_path.open('a',encoding='utf-8',buffering=1)
         options = {'cwd': settings.root, 'stdin': subprocess.DEVNULL,
-                   'stdout': None, 'stderr': subprocess.STDOUT, 'close_fds': True}
+                   'stdout': output_handle, 'stderr': subprocess.STDOUT, 'close_fds': True}
         try:
-            child = subprocess.Popen([sys.executable, str(child_script)], creationflags=base_flags | breakaway, **options)
-        except OSError:
-            child = subprocess.Popen([sys.executable, str(child_script)], creationflags=base_flags, **options)
+            try: child = subprocess.Popen([sys.executable, str(child_script)], creationflags=base_flags | breakaway, **options)
+            except OSError: child = subprocess.Popen([sys.executable, str(child_script)], creationflags=base_flags, **options)
+        finally: output_handle.close()
         emit('INFO', f'Bot child started PID={child.pid}')
         return int(child.wait())
 

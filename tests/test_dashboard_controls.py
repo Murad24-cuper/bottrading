@@ -6,6 +6,8 @@ from src.dashboard import app
 
 def test_start_control_launches_detached_supervisor_and_logs_output(tmp_path,monkeypatch):
     monkeypatch.setattr(app,'ROOT',tmp_path)
+    monkeypatch.setattr(app,'DATA_DIR',tmp_path/'data')
+    monkeypatch.setattr(app,'LOG_DIR',tmp_path/'logs')
     monkeypatch.setattr(app,'DB_PATH',tmp_path/'data'/'bot.db')
     monkeypatch.setattr(app.queries,'get_bot_status',lambda path:None)
     (tmp_path/'STOP').write_text('PAUSE\n',encoding='utf-8')

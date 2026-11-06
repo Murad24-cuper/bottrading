@@ -13,7 +13,7 @@ def readiness_checks(start_utc,end_utc,path=None):
         ('Ən azı 100 bağlanmış əməliyyat',report['trades']>=100),
         ('Xərclərdən sonrakı gözlənilən nəticə müsbətdir',report['expectancy']>0),
         ('Orta qazanc orta zərərdən az deyil',report['average_win']>=report['average_loss']),
-        ('Maksimum azalma 10%-dən aşağıdır',report['max_drawdown_pct']<10),
+        ('Maksimum azalma 10%-dən aşağıdır',report['equity_samples']>0 and report['max_drawdown_pct']<10),
         ('Gözlənilməz yenidən başlamalar yoxdur',restarts==0),
         ('Ciddi xəta qeydə alınmayıb',no_critical),
     ]
