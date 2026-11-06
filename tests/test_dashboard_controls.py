@@ -38,7 +38,16 @@ def test_start_control_refuses_a_fresh_heartbeat(tmp_path,monkeypatch):
     monkeypatch.setattr(app.queries,'get_bot_status',lambda path:{'time':datetime.now(timezone.utc).isoformat(),'status':'running'})
     monkeypatch.setattr(app.subprocess,'Popen',lambda *args,**kwargs:(_ for _ in ()).throw(AssertionError('must not launch')))
     ok,message=app._start_bot()
-    assert not ok and 'already appears' in message
+    assert not ok and 'artıq işləyir' in message
+
+def test_start_control_does_not_remove_lock_when_heartbeat_is_fresh(tmp_path,monkeypatch):
+    monkeypatch.setattr(app,'ROOT',tmp_path); monkeypatch.setattr(app,'DATA_DIR',tmp_path/'data')
+    monkeypatch.setattr(app,'DB_PATH',tmp_path/'data'/'bot.db')
+    monkeypatch.setattr(app.queries,'get_bot_status',lambda path:{'time':datetime.now(timezone.utc).isoformat(),'status':'running'})
+    lock=tmp_path/'data'/'bot.lock'; lock.parent.mkdir(parents=True); lock.write_text('999999 1')
+    monkeypatch.setattr(app,'_pid_running',lambda pid:False)
+    ok,_=app._start_bot()
+    assert not ok and lock.exists()
 
 def test_start_control_falls_back_when_breakaway_from_job_is_denied(tmp_path,monkeypatch):
     monkeypatch.setattr(app,'ROOT',tmp_path)

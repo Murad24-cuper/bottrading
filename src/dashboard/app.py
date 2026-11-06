@@ -69,9 +69,9 @@ def _start_bot():
     """Start one detached bot process, with both UI and bot locks guarding races."""
     status=queries.get_bot_status(DB_PATH); pid=_lock_pid(); running=_pid_running(pid); supervisor_running=_supervisor_running()
     lock_path=DATA_DIR/'bot.lock'
+    if running or supervisor_running or _heartbeat_fresh(status): return False,'Bot artıq işləyir kimi görünür.'
     if lock_path.exists() and not running:
         lock_path.unlink(missing_ok=True)
-    if running or supervisor_running or _heartbeat_fresh(status): return False,'Bot already appears to be running.'
     guard=DATA_DIR/'dashboard-start.lock'; guard.parent.mkdir(parents=True,exist_ok=True)
     try: handle=guard.open('x',encoding='utf-8')
     except FileExistsError: return False,'A Start request is already in progress.'

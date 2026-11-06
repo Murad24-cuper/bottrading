@@ -238,3 +238,8 @@ def test_bot_lock_refuses_second_instance(tmp_path):
         with pytest.raises(RuntimeError): second.acquire()
     finally: first.release()
     assert not path.exists()
+
+def test_bot_lock_release_tolerates_external_cleanup(tmp_path):
+    lock=BotLock(tmp_path/'data'/'bot.lock'); lock.acquire(); lock.path.unlink()
+    lock.release()
+    assert not lock.held

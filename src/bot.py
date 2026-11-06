@@ -33,7 +33,9 @@ class BotLock:
     def release(self):
         if not self.held: return
         try:
-            if self.path.read_text(encoding='utf-8').strip()==self.token: self.path.unlink(missing_ok=True)
+            try: current=self.path.read_text(encoding='utf-8').strip()
+            except FileNotFoundError: current=''
+            if current==self.token: self.path.unlink(missing_ok=True)
         finally: self.held=False
     def __enter__(self): self.acquire(); return self
     def __exit__(self,*args): self.release()
