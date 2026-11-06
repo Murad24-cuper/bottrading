@@ -79,6 +79,13 @@ def adverse_exit_score(frame: pd.DataFrame, direction: str, config: dict) -> tup
     return score, reasons
 
 
+def should_exit_early(current_r: float, score: int, config: dict) -> bool:
+    """Trigger within the configured adverse R band once enough evidence agrees."""
+    return (bool(config.get('early_exit_enabled', True)) and
+            float(config['early_exit_min_r']) <= float(current_r) <= float(config['early_exit_max_r']) and
+            int(score) >= int(config['early_exit_score_threshold']))
+
+
 def may_extend(in_profit: bool, scaled_out: bool, stop_protects_profit: bool, mtf_agrees: bool,
                momentum_rising: bool, continuation_score: float, minimum_score: float, age_minutes: float,
                max_minutes: float) -> bool:

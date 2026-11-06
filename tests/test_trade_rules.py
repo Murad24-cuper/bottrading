@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from src.trade_rules import confidence_allowed, mtf_direction_agrees, stop_target_from_atr, spread_within_median, may_extend
+from src.trade_rules import adverse_exit_score, confidence_allowed, mtf_direction_agrees, should_exit_early, stop_target_from_atr, spread_within_median, may_extend
 
 
 def _frame(direction='buy', bars=80):
@@ -42,3 +42,18 @@ def test_extension_requires_protected_profitable_trade_and_score():
     assert not may_extend(**{**args, 'in_profit': False})
     assert not may_extend(**{**args, 'stop_protects_profit': False})
     assert not may_extend(**{**args, 'age_minutes': 60})
+
+
+def test_early_exit_score_and_r_band():
+    cfg={'early_exit_ema_fast':5,'early_exit_ema_slow':13,'early_exit_swing_lookback':5,
+         'early_exit_rsi_period':14,'early_exit_roc_period':5,'early_exit_volume_lookback':20,
+         'early_exit_volume_spike_ratio':1.5,'early_exit_weights':{'ema_cross':1,'swing_break':1,'momentum':1,'volume_spike':1},
+         'early_exit_enabled':True,'early_exit_min_r':-.7,'early_exit_max_r':-.2,'early_exit_score_threshold':3}
+    close=np.r_[np.arange(60,0,-1,dtype=float)]
+    frame=pd.DataFrame({'open':close+0.2,'high':close+0.3,'low':close-0.3,'close':close,
+                        'tick_volume':np.r_[np.full(59,10.),100.]})
+    score,reasons=adverse_exit_score(frame,'buy',cfg)
+    assert score>=3 and len(reasons)>=3
+    assert should_exit_early(-.4,score,cfg)
+    assert not should_exit_early(-.1,score,cfg)
+    assert not should_exit_early(-.8,score,cfg)

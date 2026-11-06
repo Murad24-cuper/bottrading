@@ -195,7 +195,7 @@ class TradingBot:
     def _connected_cycle(self,now):
         self._cycle_reservations=[]
         self._components(); account=self._account_type(); state=get_account_state(self.client.mt5); self._startup(state)
-        self.executor.sync_positions(); self.executor.enforce_time_stop(self.settings); self.executor.enforce_session_close(self.settings,now)
+        self.executor.sync_positions(); getattr(self.executor,'enforce_adverse_move_exit',lambda *_:None)(self.settings); self.executor.enforce_time_stop(self.settings); self.executor.enforce_session_close(self.settings,now)
         self._process_commands()
         if self._stop_after_cycle:
             self._set_status('stopped',state.equity)

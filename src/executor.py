@@ -7,6 +7,7 @@ from .logger import get_logger
 from .time_utils import mt5_epoch_to_utc
 from . import market_data, indicators as ind
 from .risk import calc_volume
+from .trade_rules import adverse_exit_score, should_exit_early
 
 log=get_logger(__name__)
 
@@ -89,7 +90,7 @@ class Executor:
         return TradeResult(True,ticket,result.price,volume,result.retcode,str(result.comment))
     def close_position(self,ticket,reason):
         m=self.mt5
-        if reason not in {'tp','partial_tp','trail','momentum_lost','stagnant','sl','time','session_close','manual','kill'}: return self._failure(f'Refused close: unsupported reason {reason!r}',ticket=ticket)
+        if reason not in {'tp','partial_tp','trail','early_exit','momentum_lost','stagnant','sl','time','session_close','manual','kill'}: return self._failure(f'Refused close: unsupported reason {reason!r}',ticket=ticket)
         p=next((x for x in (m.positions_get() or []) if (int(x.ticket)==int(ticket) or int(getattr(x,'identifier',-1) or -1)==int(ticket)) and int(x.magic)==self.settings.magic_number),None)
         if p is None: return self._failure(f'Refused close: owned position {ticket} not found',ticket=ticket)
         tick=m.symbol_info_tick(p.symbol)
@@ -202,6 +203,31 @@ class Executor:
                     valid=trail<current if is_buy else trail>current
                     if math.isfinite(trail) and tighter and valid: self.modify_sl_tp(p.ticket,trail,float(p.tp or 0))
             if age>=config.stagnation_minutes and peak<float(config.stagnation_min_r): actions.append(self.close_position(p.ticket,'stagnant'))
+        return actions
+    def enforce_adverse_move_exit(self, settings=None):
+        """Close owned positions in the configured adverse R band when M1 evidence turns."""
+        cfg=(settings or self.settings).config['risk']; actions=[]
+        if not cfg.get('early_exit_enabled',True): return actions
+        rows={int(row['ticket']):row for row in self.db.get_open_trades()}
+        for position in (self.mt5.positions_get() or []):
+            if int(position.magic)!=self.settings.magic_number: continue
+            row=rows.get(int(position.ticket))
+            if row is None: continue
+            entry=float(position.price_open); is_buy=position.type==self.mt5.POSITION_TYPE_BUY
+            tick=self.mt5.symbol_info_tick(position.symbol)
+            if tick is None: continue
+            current=float(tick.bid if is_buy else tick.ask)
+            initial_risk=float(row.get('initial_risk') or abs(entry-float(row.get('sl') or position.sl)))
+            if initial_risk<=0: continue
+            current_r=((current-entry) if is_buy else (entry-current))/initial_risk
+            try: frame=market_data.get_closed_candles(self.mt5,position.symbol,'M1',max(60,int(cfg['early_exit_volume_lookback'])+5))
+            except Exception as exc:
+                self._event(f'Adverse exit data unavailable ticket={position.ticket}: {exc}','WARNING'); continue
+            score,reasons=adverse_exit_score(frame,'buy' if is_buy else 'sell',cfg)
+            if should_exit_early(current_r,score,cfg):
+                reason='; '.join(reasons) or 'adverse indicators aligned'
+                self._event(f'Early exit ticket={position.ticket} R={current_r:.3f} score={score} reasons={reason}','WARNING')
+                actions.append(self.close_position(position.ticket,'early_exit'))
         return actions
     def enforce_session_close(self,settings=None,now_utc=None):
         """Close only symbols approaching a broker-observed long session gap."""
