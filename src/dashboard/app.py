@@ -80,7 +80,7 @@ def _start_bot():
         stop=ROOT/'STOP'
         if stop.exists(): stop.unlink()
         (DATA_DIR/'supervisor.stop').unlink(missing_ok=True)
-        python=ROOT/'.venv'/'Scripts'/'python.exe'; script=ROOT/'scripts'/'run_forever.py'
+        python=ROOT/'.venv'/'Scripts'/'pythonw.exe'; script=ROOT/'scripts'/'run_forever.py'
         log_path=LOG_DIR/'bot_stdout.log'; log_path.parent.mkdir(parents=True,exist_ok=True)
         flags=getattr(subprocess,'DETACHED_PROCESS',0x00000008)|getattr(subprocess,'CREATE_NEW_PROCESS_GROUP',0x00000200)
         breakaway=getattr(subprocess,'CREATE_BREAKAWAY_FROM_JOB',0x01000000)

@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 from src.config import load_settings
 from src.db import Database
 from src.logger import get_logger
-from src.supervisor import clear_stale_pid_lock, run_restart_supervisor, heartbeat_is_stale, hang_watchdog_should_terminate, write_hang_report
+from src.supervisor import clear_stale_pid_lock, run_restart_supervisor, heartbeat_is_stale, hang_watchdog_should_terminate, write_hang_report, detached_python_executable
 from scripts.run_bot import install_crash_handlers
 from src.paths import project_paths
 
@@ -85,8 +85,9 @@ def main() -> int:
         options = {'cwd': settings.root, 'stdin': subprocess.DEVNULL,
                    'stdout': output_handle, 'stderr': subprocess.STDOUT, 'close_fds': True}
         try:
-            try: child = subprocess.Popen([sys.executable, str(child_script)], creationflags=base_flags | breakaway, **options)
-            except OSError: child = subprocess.Popen([sys.executable, str(child_script)], creationflags=base_flags, **options)
+            interpreter=detached_python_executable(sys.executable)
+            try: child = subprocess.Popen([interpreter, str(child_script)], creationflags=base_flags | breakaway, **options)
+            except OSError: child = subprocess.Popen([interpreter, str(child_script)], creationflags=base_flags, **options)
         finally: output_handle.close()
         emit('INFO', f'Bot child started PID={child.pid}')
         hang_seconds=int(backoff['hang_seconds'])

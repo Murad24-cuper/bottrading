@@ -18,7 +18,7 @@ def test_start_control_launches_detached_supervisor_and_logs_output(tmp_path,mon
     ok,message=app._start_bot()
     assert ok and not (tmp_path/'STOP').exists()
     args,kwargs=launched[0]
-    assert Path(args[0][0])==tmp_path/'.venv'/'Scripts'/'python.exe'
+    assert Path(args[0][0])==tmp_path/'.venv'/'Scripts'/'pythonw.exe'
     assert Path(args[0][1])==tmp_path/'scripts'/'run_forever.py'
     assert 'DETACHED_PROCESS' in dir(app.subprocess) or kwargs['creationflags'] & 0x8
     assert 'CREATE_NEW_PROCESS_GROUP' in dir(app.subprocess) or kwargs['creationflags'] & 0x200

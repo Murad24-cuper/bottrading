@@ -1,4 +1,4 @@
-from src.supervisor import clear_stale_pid_lock, heartbeat_is_stale, hang_watchdog_should_terminate, run_restart_supervisor, write_hang_report
+from src.supervisor import clear_stale_pid_lock, heartbeat_is_stale, hang_watchdog_should_terminate, run_restart_supervisor, write_hang_report, detached_python_executable
 import faulthandler
 import sys
 import threading
@@ -28,6 +28,12 @@ def test_watchdog_grants_new_child_a_startup_grace_before_reusing_old_heartbeat(
     assert not hang_watchdog_should_terminate(True,89.9,90)
     assert hang_watchdog_should_terminate(True,90,90)
     assert not hang_watchdog_should_terminate(False,120,90)
+
+def test_detached_supervisor_prefers_pythonw_and_falls_back(tmp_path):
+    python=tmp_path/'python.exe'; python.write_text('')
+    assert detached_python_executable(python)==str(python)
+    pythonw=tmp_path/'pythonw.exe'; pythonw.write_text('')
+    assert detached_python_executable(python)==str(pythonw)
 
 
 def test_supervisor_stops_after_restart_limit_and_logs_critical():

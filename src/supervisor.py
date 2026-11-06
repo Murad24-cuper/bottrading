@@ -12,6 +12,11 @@ from .notify import TelegramNotifier
 
 _notifier=None
 
+def detached_python_executable(current_executable: str|Path) -> str:
+    """Prefer pythonw beside a venv interpreter so detached jobs have no console to inherit."""
+    current=Path(current_executable); pythonw=current.with_name('pythonw.exe')
+    return str(pythonw if pythonw.is_file() else current)
+
 def heartbeat_is_stale(db_path: str | Path, hang_seconds: int, now: datetime | None = None) -> bool:
     """Return true when the persisted live bot heartbeat exceeds its limit."""
     try:
