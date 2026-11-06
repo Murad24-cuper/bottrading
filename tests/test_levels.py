@@ -15,3 +15,10 @@ def test_key_levels_ignore_forming_bar():
     frame=pd.DataFrame({'open':close,'high':close+.1,'low':close-.1,'close':close,'tick_volume':1},index=index)
     expected=key_levels(frame); frame.iloc[-1,frame.columns.get_loc('high')]=1e9
     assert key_levels(frame)==expected
+
+def test_key_levels_flags_stop_just_beyond_a_strong_level():
+    index=pd.date_range('2026-10-19',periods=100,freq='h',tz='UTC'); close=np.linspace(99,101,100)
+    frame=pd.DataFrame({'open':close,'high':close+.1,'low':close-.1,'close':close,'tick_volume':1},index=index)
+    base=key_levels(frame); price=float(frame.close.iloc[-2])
+    support=max(x['price'] for x in base['levels'] if x['strong'] and x['price']<price)
+    assert key_levels(frame,sl=support-.001)['sl_near_level'] is True

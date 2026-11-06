@@ -32,7 +32,9 @@ def key_levels(frame: pd.DataFrame, tp: float|None=None, sl: float|None=None, ro
     a=float(atr(d).iloc[-1]); above=min((x for x in levels if x['price']>price),key=lambda x:x['price'],default=None); below=max((x for x in levels if x['price']<price),key=lambda x:x['price'],default=None)
     for item in (above,below):
         if item is not None: item['distance_atr']=abs(item['price']-price)/a if a>0 else None
-    near=max(a*.15,0.0)
+    near=max(a*.25,0.0)
     blocked=bool(tp is not None and any(x['strong'] and price<x['price']<=float(tp) for x in levels) or tp is not None and any(x['strong'] and float(tp)<=x['price']<price for x in levels))
-    sl_near=bool(sl is not None and any(x['strong'] and abs(float(sl)-x['price'])<=near for x in levels))
+    if sl is None: sl_near=False
+    elif float(sl)<price: sl_near=any(x['strong'] and float(sl)<=x['price']<price and price-x['price']<=near for x in levels)
+    else: sl_near=any(x['strong'] and price<x['price']<=float(sl) and x['price']-price<=near for x in levels)
     return {'levels':levels,'above':above,'below':below,'tp_blocked':blocked,'sl_near_level':sl_near,'atr':a}
