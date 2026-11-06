@@ -73,8 +73,21 @@ def test_session_close_is_inferred_in_utc_from_repeated_hourly_gaps():
     now=datetime(2026,10,30,20,30,tzinfo=timezone.utc)
     upcoming=next_session_close(frame,now,6)
     assert upcoming is not None
-    assert upcoming[0]==datetime(2026,10,30,21,0,tzinfo=timezone.utc)
-    assert upcoming[1]>6
+
+def test_market_open_check_uses_recurring_weekend_closures():
+    import pandas as pd
+    from datetime import timedelta
+    service=make_service(['EURUSD'])
+    stamps=[]; start=datetime(2026,10,19,tzinfo=timezone.utc)
+    for day in range(15):
+        current=start+timedelta(days=day)
+        if current.weekday()>=5: continue
+        last_hour=20 if current.weekday()==4 else 23
+        stamps.extend(current.replace(hour=hour) for hour in range(last_hour+1))
+    frame=pd.DataFrame({'close':range(len(stamps))},index=pd.DatetimeIndex(stamps))
+    service._session_frame=lambda symbol:frame
+    assert service.market_should_be_open('EURUSD',datetime(2026,10,30,20,30,tzinfo=timezone.utc))
+    assert not service.market_should_be_open('EURUSD',datetime(2026,10,30,22,00,tzinfo=timezone.utc))
 
 def test_session_close_is_inferred_in_utc_from_repeated_hourly_gaps():
     import pandas as pd

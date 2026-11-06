@@ -113,7 +113,11 @@ class TradingBot:
                     mt5.symbol_select(position.symbol,True)
                     tick=mt5.symbol_info_tick(position.symbol)
                     stamp=getattr(tick,'time_msc',0)/1000 if tick and getattr(tick,'time_msc',0) else getattr(tick,'time',0) if tick else 0
-                    if not stamp or (now-mt5_epoch_to_utc(stamp,mt5)).total_seconds()>stale_limit: stale.append(position.symbol)
+                    tick_age=(now-mt5_epoch_to_utc(stamp,mt5)).total_seconds() if stamp else float('inf')
+                    if tick_age>stale_limit:
+                        service=getattr(self.scanner,'symbols',None)
+                        market_open=service.market_should_be_open(position.symbol,now) if service and hasattr(service,'market_should_be_open') else True
+                        if market_open: stale.append(position.symbol)
                 except Exception: stale.append(position.symbol)
         if connected and stale:
             self._health_failures+=1

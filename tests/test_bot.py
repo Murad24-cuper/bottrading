@@ -204,6 +204,17 @@ def test_stale_open_symbol_ticks_block_entries_after_three_reconnect_attempts(tm
     with db.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM bot_events WHERE level='CRITICAL' AND message LIKE '%bərpa cəhdi uğursuz oldu%' ").fetchone()[0]==1
 
+def test_closed_market_does_not_trigger_stale_tick_reconnect(tmp_path):
+    bot,_,mt5,client,_,_,_=make_bot(tmp_path,candidate=False)
+    mt5.terminal_info=lambda:SimpleNamespace(connected=True,trade_allowed=True)
+    mt5.symbol_select=lambda *args:True
+    old_stamp=datetime(2026,1,1,tzinfo=timezone.utc).timestamp()
+    mt5.symbol_info_tick=lambda symbol:SimpleNamespace(time=int(old_stamp),time_msc=int(old_stamp*1000))
+    mt5.positions=[SimpleNamespace(magic=bot.settings.magic_number,symbol='EURUSD')]
+    bot.scanner.symbols.market_should_be_open=lambda symbol,now:False
+    assert bot._health(datetime.now(timezone.utc)) is True
+    assert not client.closed and bot._health_failures==0
+
 def test_weekly_drawdown_closes_and_stops_bot(tmp_path):
     from datetime import timedelta
     bot,db,mt5,_,_,executor,_=make_bot(tmp_path,'trade',['breakout'],candidate=False)

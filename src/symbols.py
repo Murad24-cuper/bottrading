@@ -38,6 +38,28 @@ class SymbolService:
   """Require a week of H1 bars before treating inferred sessions as known."""
   frame=self._session_frame(symbol)
   return frame is not None and len(frame)>=24*7
+ def market_should_be_open(self,symbol,now_utc=None):
+  """Infer whether the current UTC instant falls inside a recurring broker closure."""
+  from collections import Counter
+  import statistics
+  from datetime import timedelta
+  from .sessions import session_closures
+  now=now_utc or datetime.now(timezone.utc)
+  now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+  frame=self._session_frame(symbol)
+  if frame is None or len(frame)<24*7: return True
+  gaps=session_closures(frame)
+  counts=Counter((weekday,minute) for weekday,minute,_ in gaps)
+  for key,count in counts.items():
+   if count<2: continue
+   durations=[gap for weekday,minute,gap in gaps if (weekday,minute)==key]
+   gap_hours=statistics.median(durations); weekday,minute=key
+   days_since=(now.weekday()-weekday)%7
+   for offset in (days_since,days_since+7):
+    day=(now-timedelta(days=offset)).date()
+    closed_at=datetime(day.year,day.month,day.day,minute//60,minute%60,tzinfo=timezone.utc)
+    if closed_at<=now<closed_at+timedelta(hours=gap_hours): return False
+  return True
  def next_session_close(self,symbol,now_utc=None,min_gap_hours=0.0):
   """Infer the next close from recurring gaps in the broker's H1 history."""
   from .sessions import next_session_close
