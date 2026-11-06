@@ -1,4 +1,5 @@
 from datetime import date
+import sqlite3
 from src.db import Database
 import pytest
 
@@ -72,3 +73,16 @@ def test_profitable_sl_close_migration_is_one_time_and_preserves_losing_sl(tmp_p
         conn.execute("UPDATE trades SET close_reason='sl' WHERE ticket=21")
     Database(path)
     assert Database(path).get_trade(21)['close_reason']=='sl'
+
+def test_daily_report_is_append_only_and_readable(tmp_path):
+    db=Database(tmp_path/'report.db')
+    db.save_daily_report('2026-11-05',{'pnl':1.25},'2026-11-06T00:00:00+00:00')
+    db.save_daily_report('2026-11-05',{'pnl':99},'2026-11-07T00:00:00+00:00')
+    assert db.get_daily_reports(1)[0]['payload']=='{"pnl": 1.25}'
+
+def test_database_backup_contains_committed_wal_data(tmp_path):
+    db=Database(tmp_path/'live.db')
+    db.log_event('WARNING','test','preserve me')
+    target=db.backup(tmp_path/'backups'/'copy.db')
+    with sqlite3.connect(target) as conn:
+        assert conn.execute('SELECT message FROM bot_events').fetchone()[0]=='preserve me'

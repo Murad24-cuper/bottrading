@@ -75,6 +75,9 @@ def test_check_trade_allowed_symbol_cooldown(tmp_path):
 def test_check_trade_allowed_max_trades_per_symbol_per_day(tmp_path):
     _,_,_,_,_,check=make_context(tmp_path)
     assert check(symbol_trades_today=5)[1]=='maximum trades for symbol today reached'
+def test_check_trade_allowed_global_daily_trade_cap(tmp_path):
+    _,_,_,_,_,check=make_context(tmp_path)
+    assert check(trades_today=150)[1]=='maximum trades today reached'
 def test_currency_exposure_blocks_net_direction_over_limit(tmp_path):
     _,_,signal,_,_,check=make_context(tmp_path)
     signal.symbol='GBPAUD'

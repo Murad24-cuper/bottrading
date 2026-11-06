@@ -170,6 +170,37 @@ def test_cycle_reservations_enforce_max_open_when_terminal_positions_lag(tmp_pat
         rows=conn.execute("SELECT skip_reason FROM signals WHERE symbol='US30' ORDER BY id DESC LIMIT 1").fetchone()
     assert rows[0]=='maximum open positions reached'
 
+def test_terminal_trade_permission_blocks_new_entries(tmp_path):
+    bot,db,mt5,_,_,executor,item=make_bot(tmp_path,'trade',['breakout'])
+    mt5.terminal_info=lambda:SimpleNamespace(connected=True,trade_allowed=False)
+    bot.cycle()
+    assert executor.opened==[]
+    assert db.get_trade(77) is None
+    with db.connect() as conn:
+        assert conn.execute('SELECT skip_reason FROM signals ORDER BY id DESC LIMIT 1').fetchone()[0]=='MT5 health or algorithmic trading permission blocks new entries'
+    assert db.get_bot_status()['trade_allowed']==0
+
+def test_stale_open_symbol_ticks_block_entries_after_three_reconnect_attempts(tmp_path):
+    bot,db,mt5,client,_,_,_=make_bot(tmp_path,candidate=False)
+    mt5.terminal_info=lambda:SimpleNamespace(connected=True,trade_allowed=True)
+    mt5.positions=[SimpleNamespace(magic=bot.settings.magic_number,symbol='EURUSD')]
+    now=datetime.now(timezone.utc)
+    for _ in range(3): assert bot._health(now) is False
+    assert bot._entries_health_blocked
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM bot_events WHERE level='CRITICAL' AND message LIKE '%bərpa cəhdi uğursuz oldu%' ").fetchone()[0]==1
+
+def test_weekly_drawdown_closes_and_stops_bot(tmp_path):
+    from datetime import timedelta
+    bot,db,mt5,_,_,executor,_=make_bot(tmp_path,'trade',['breakout'],candidate=False)
+    mt5.account_info=lambda:SimpleNamespace(balance=1000,equity=900,margin=0,margin_free=1000,margin_level=None,currency='USD',leverage=100,trade_mode=0,margin_mode=2,login=123456)
+    now=datetime.now(timezone.utc); monday=(now-timedelta(days=now.weekday())).date().isoformat()
+    db.get_or_create_week_start(monday,1000)
+    result=bot.cycle()
+    assert not result.continue_running and executor.closed_all==1
+    assert 'weekly drawdown stop' in (tmp_path/'data'/'supervisor.stop').read_text(encoding='utf-8')
+    assert db.get_or_create_week_start(monday,1000)['stopped']==1
+
 def test_run_forever_releases_lock_and_shuts_down_client(tmp_path):
     bot,_,_,client,_,_,_=make_bot(tmp_path,candidate=False)
     bot.run_forever(max_cycles=1)

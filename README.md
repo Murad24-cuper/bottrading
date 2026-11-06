@@ -98,6 +98,10 @@ Open the dashboard at **http://127.0.0.1:8501**. Start launches a detached super
 
 The bot uses `data/bot.lock` to refuse a second instance. The supervisor PID is recorded separately in `data/supervisor.pid`. If a process was force-terminated, confirm it is no longer running before removing stale lock files. Repeated cycle errors at `live.max_cycle_errors` exit the child so the supervisor can restart it. Detached stdout/stderr are written to `logs/bot_stdout.log`; uncaught main/thread exceptions and faulthandler tracebacks go to `logs/crash.log`, while regular bot logs remain in `logs/bot.log`.
 
+### Telegram bildirişləri
+
+Bildirişləri qoşmaq üçün Telegram-da **@BotFather** hesabına `/newbot` göndərin və yaratdığı bot tokenini `.env` faylındakı `TELEGRAM_BOT_TOKEN` sətrinə yazın. Öz chat ID-nizi öyrənmək üçün yeni botla söhbətə `/start` göndərin, sonra Telegram Bot API-nin `getUpdates` nəticəsində `message.chat.id` dəyərini tapıb `.env`-də `TELEGRAM_CHAT_ID` kimi yazın. Tokeni heç kimlə paylaşmayın. Hər iki dəyər boşdursa, bildirişlər bağlı qalır. Bağlantını yoxlamaq üçün `python scripts/test_telegram.py` işlədin.
+
 Close reasons in the trades table are `tp`, `partial_tp`, `trail`, `momentum_lost`, `stagnant`, `sl`, `time`, `session_close`, `manual`, and `kill`. Each scale-out is separately recorded in `partial_closes` and shown in the dashboard.
 
 For a VPS, use Windows Task Scheduler to start `start_bot.bat` at system startup, with **Start in** set to this project directory and the same Windows account/environment that can access MT5 and the credentials. Create a separate startup task for `start_dashboard.bat` only if the local dashboard is needed. Keep the dashboard bound to localhost; do not expose its port directly to the internet.

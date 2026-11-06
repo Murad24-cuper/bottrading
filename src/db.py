@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS signals(
 CREATE TABLE IF NOT EXISTS daily_stats(
  date TEXT PRIMARY KEY, start_balance REAL, end_balance REAL, pnl REAL, trades_count INTEGER,
  wins INTEGER, losses INTEGER, max_drawdown REAL, invested_margin_peak REAL);
+CREATE TABLE IF NOT EXISTS daily_report(date TEXT PRIMARY KEY, created_at TEXT NOT NULL, payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS weekly_limits(week_start TEXT PRIMARY KEY, start_balance REAL NOT NULL, stopped INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS equity_snapshots(
  time TEXT, balance REAL, equity REAL, margin REAL, free_margin REAL, open_positions INTEGER);
 CREATE TABLE IF NOT EXISTS bot_events(time TEXT, level TEXT, source TEXT, message TEXT);
@@ -29,7 +31,7 @@ CREATE TABLE IF NOT EXISTS bot_status(
  id INTEGER PRIMARY KEY CHECK(id=1), time TEXT, cycle INTEGER, mode TEXT, status TEXT,
  account_type TEXT, equity REAL, last_error TEXT, mt5_connected INTEGER DEFAULT 0, scan_total INTEGER,
  scan_scanned INTEGER, scan_complete INTEGER, scan_stage1_passed INTEGER, scan_top_n INTEGER, scan_signals INTEGER,
- scan_seconds REAL, scan_rejections TEXT, strategy_diagnostics TEXT);
+ scan_seconds REAL, scan_rejections TEXT, strategy_diagnostics TEXT, trade_allowed INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS commands(
  id INTEGER PRIMARY KEY, time TEXT, created_at TEXT, expires_at TEXT, command TEXT, status TEXT, message TEXT, processed_time TEXT);
 CREATE TABLE IF NOT EXISTS schema_migrations(name TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -58,7 +60,7 @@ class Database:
             if 'deal_ticket' not in partial_columns: connection.execute('ALTER TABLE partial_closes ADD COLUMN deal_ticket INTEGER')
             connection.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_partial_deal_ticket ON partial_closes(deal_ticket) WHERE deal_ticket IS NOT NULL')
             status_columns={row['name'] for row in connection.execute('PRAGMA table_info(bot_status)')}
-            for name, sql_type in {'mt5_connected':'INTEGER DEFAULT 0','scan_total':'INTEGER','scan_scanned':'INTEGER','scan_complete':'INTEGER','scan_stage1_passed':'INTEGER','scan_top_n':'INTEGER','scan_signals':'INTEGER','scan_seconds':'REAL','scan_rejections':'TEXT','strategy_diagnostics':'TEXT'}.items():
+            for name, sql_type in {'mt5_connected':'INTEGER DEFAULT 0','scan_total':'INTEGER','scan_scanned':'INTEGER','scan_complete':'INTEGER','scan_stage1_passed':'INTEGER','scan_top_n':'INTEGER','scan_signals':'INTEGER','scan_seconds':'REAL','scan_rejections':'TEXT','strategy_diagnostics':'TEXT','trade_allowed':'INTEGER DEFAULT 0'}.items():
                 if name not in status_columns: connection.execute(f'ALTER TABLE bot_status ADD COLUMN {name} {sql_type}')
             columns={row['name'] for row in connection.execute('PRAGMA table_info(signals)')}
             if 'score' not in columns: connection.execute('ALTER TABLE signals ADD COLUMN score REAL DEFAULT 0')
@@ -106,6 +108,12 @@ class Database:
             if magic is None: row=connection.execute("SELECT COUNT(*) FROM trades WHERE symbol=? AND open_time>=?",(symbol,stamp)).fetchone()
             else: row=connection.execute("SELECT COUNT(*) FROM trades WHERE symbol=? AND magic=? AND open_time>=?",(symbol,int(magic),stamp)).fetchone()
             return int(row[0])
+    def count_trades_since(self,since,magic=None):
+        stamp=since.isoformat() if hasattr(since,'isoformat') else str(since)
+        with self.connect() as connection:
+            if magic is None: row=connection.execute('SELECT COUNT(*) FROM trades WHERE open_time>=?',(stamp,)).fetchone()
+            else: row=connection.execute('SELECT COUNT(*) FROM trades WHERE open_time>=? AND magic=?',(stamp,int(magic))).fetchone()
+            return int(row[0])
     def symbol_closed_since(self,symbol,since,magic=None):
         stamp=since.isoformat() if hasattr(since,'isoformat') else str(since)
         with self.connect() as connection:
@@ -116,6 +124,11 @@ class Database:
         with self.connect() as connection:
             row=connection.execute('SELECT * FROM trades WHERE ticket=?',(ticket,)).fetchone()
             return dict(row) if row else None
+    def latest_trade_id(self):
+        with self.connect() as connection: return int(connection.execute('SELECT COALESCE(MAX(id),0) FROM trades').fetchone()[0])
+    def get_closed_trades_after_id(self,last_id):
+        with self.connect() as connection:
+            return [dict(row) for row in connection.execute("SELECT id,ticket,symbol,direction,strategy,profit,commission,swap,close_reason FROM trades WHERE status='closed' AND id>? ORDER BY id",(int(last_id),))]
     def get_trades_for_day(self,day=None):
         if day is None: day=datetime.now(timezone.utc).date()
         if isinstance(day,datetime): day=day.astimezone(timezone.utc).date()
@@ -129,6 +142,39 @@ class Database:
         with self.connect() as connection:
             row=connection.execute('SELECT * FROM daily_stats WHERE date=?',(day,)).fetchone()
             return dict(row) if row else None
+    def save_daily_report(self,day,payload,created_at=None):
+        import json
+        stamp=created_at or datetime.now(timezone.utc).isoformat()
+        data=json.dumps(payload,ensure_ascii=False,sort_keys=True)
+        with self.connect() as connection:
+            connection.execute('INSERT INTO daily_report(date,created_at,payload) VALUES (?,?,?) ON CONFLICT(date) DO NOTHING',(str(day),stamp,data))
+    def get_daily_reports(self,days=7):
+        with self.connect() as connection:
+            return [dict(row) for row in connection.execute('SELECT * FROM daily_report ORDER BY date DESC LIMIT ?',(int(days),))]
+    def get_or_create_week_start(self,week_start,balance):
+        with self.connect() as connection:
+            connection.execute('INSERT OR IGNORE INTO weekly_limits(week_start,start_balance) VALUES (?,?)',(str(week_start),float(balance)))
+            return dict(connection.execute('SELECT * FROM weekly_limits WHERE week_start=?',(str(week_start),)).fetchone())
+    def mark_week_stopped(self,week_start):
+        with self.connect() as connection: connection.execute('UPDATE weekly_limits SET stopped=1 WHERE week_start=?',(str(week_start),))
+    def maintain(self,now=None,signals_days=7,events_days=30,equity_days=30,equity_step_minutes=5):
+        """Prune old signals/events and thin older equity points."""
+        now=now or datetime.now(timezone.utc)
+        if now.tzinfo is None: now=now.replace(tzinfo=timezone.utc)
+        now=now.astimezone(timezone.utc)
+        with self.connect() as connection:
+            connection.execute('DELETE FROM signals WHERE time < ?',((now-timedelta(days=signals_days)).isoformat(),))
+            connection.execute('DELETE FROM bot_events WHERE time < ?',((now-timedelta(days=events_days)).isoformat(),))
+            cutoff=(now-timedelta(days=equity_days)).isoformat()
+            connection.execute('''DELETE FROM equity_snapshots WHERE time < ? AND rowid NOT IN (
+                SELECT MIN(rowid) FROM equity_snapshots WHERE time < ?
+                GROUP BY strftime('%Y-%m-%dT%H',time), CAST(strftime('%M',time) AS INTEGER) / ?
+            )''',(cutoff,cutoff,max(1,int(equity_step_minutes))))
+    def backup(self,destination):
+        """Create a consistent online SQLite backup, including committed WAL data."""
+        target=Path(destination); target.parent.mkdir(parents=True,exist_ok=True)
+        with self.connect() as source, sqlite3.connect(target) as dest: source.backup(dest)
+        return target
     def insert_signal(self,**values):
         values.setdefault('time',datetime.now(timezone.utc).isoformat())
         values.setdefault('score',0.0)

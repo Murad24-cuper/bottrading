@@ -33,7 +33,11 @@ class MT5Client:
         log.info('Connected to account ***%s; margin mode=%s',str(account.login)[-3:],mode)
         return self
     def ensure_connected(self):
-        if self.mt5 is None or self.mt5.terminal_info() is None:
+        terminal=None
+        if self.mt5 is not None:
+            try: terminal=self.mt5.terminal_info()
+            except Exception: terminal=None
+        if self.mt5 is None or terminal is None or not bool(getattr(terminal,'connected',True)):
             self.close(); self.connect()
         return True
     def close(self):

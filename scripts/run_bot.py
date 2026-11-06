@@ -9,6 +9,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from src.config import load_settings
 from src.bot import TradingBot
 from src.db import Database
+from src.notify import TelegramNotifier
 
 ROOT=Path(__file__).resolve().parents[1]
 _crash_file=None
@@ -26,12 +27,14 @@ def install_crash_handlers():
         logging.getLogger('bot.crash').critical('Uncaught main-thread exception',exc_info=(exc_type,exc_value,exc_traceback))
         _crash_file.write(f'Uncaught main-thread exception: {exc_type.__name__}: {exc_value}\n')
         traceback.print_exception(exc_type,exc_value,exc_traceback,file=_crash_file)
+        TelegramNotifier().send('crash',f'💥 Botda gözlənilməz xəta baş verdi: {exc_type.__name__}: {exc_value}')
         return old_sys_hook(exc_type,exc_value,exc_traceback)
     sys.excepthook=handle_exception
     def handle_thread_exception(args):
         logging.getLogger('bot.crash').critical('Uncaught thread exception',exc_info=(args.exc_type,args.exc_value,args.exc_traceback))
         _crash_file.write(f'Uncaught thread exception in {args.thread.name}: {args.exc_type.__name__}: {args.exc_value}\n')
         traceback.print_exception(args.exc_type,args.exc_value,args.exc_traceback,file=_crash_file)
+        TelegramNotifier().send('crash',f'💥 Bot axınında gözlənilməz xəta: {args.exc_type.__name__}: {args.exc_value}')
     threading.excepthook=handle_thread_exception
 
 

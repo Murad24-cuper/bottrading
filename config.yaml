@@ -7,6 +7,7 @@ risk:
   risk_per_trade_pct: 0.25       # Equity risk at the stop per entry
   daily_loss_limit_pct: 3.0      # Stop new trades after this daily equity loss
   weekly_loss_limit_pct: 8.0     # Stop new trades after this weekly equity loss
+  max_trades_per_day: 150        # Global cap on new trades per UTC day
   max_open_positions: 10         # Total concurrent positions
   max_positions_per_group: 4     # Correlation guard per asset group
   max_positions_per_currency: 2  # Net directional positions per FX/metals currency
@@ -121,6 +122,20 @@ live:
   equity_snapshot_seconds: 30
   heartbeat_seconds: 10
   command_ttl_seconds: 60        # Dashboard commands expire after this many seconds
+health:
+  stale_ticks_seconds: 120       # Reconnect if all open-market symbols have stale ticks
+  reconnect_failures_before_pause: 3 # Disable entries after repeated MT5 health failures
+notify:
+  big_loss_usd: 5.0              # Notify on a single larger net loss
+  daily_summary_utc: "21:00"     # Daily summary time in UTC
+  rate_limit_minutes: 5          # Per-event notification cooldown
+db:
+  signals_retention_days: 7      # Keep recent signals for detailed dashboard views
+  events_retention_days: 30      # Keep operational events for 30 days
+  equity_retention_days: 30      # Retain full resolution snapshots for 30 days
+  equity_downsample_minutes: 5   # Older snapshots are reduced to one per interval
+  backup_keep_days: 14           # Number of daily database backups to retain
+  vacuum_weekday_utc: 6          # Sunday UTC, while the bot is idle
 supervisor:
   restart_backoff_seconds: [10, 30, 60] # Delay before successive crash restarts
   max_restarts_per_hour: 5       # Stop after this many restarts in one hour

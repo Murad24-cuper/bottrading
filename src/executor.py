@@ -90,7 +90,7 @@ class Executor:
         return TradeResult(True,ticket,result.price,volume,result.retcode,str(result.comment))
     def close_position(self,ticket,reason):
         m=self.mt5
-        if reason not in {'tp','partial_tp','trail','early_exit','momentum_lost','stagnant','sl','time','session_close','manual','kill'}: return self._failure(f'Refused close: unsupported reason {reason!r}',ticket=ticket)
+        if reason not in {'tp','partial_tp','trail','early_exit','momentum_lost','stagnant','sl','time','session_close','manual','kill','weekly_stop'}: return self._failure(f'Refused close: unsupported reason {reason!r}',ticket=ticket)
         p=next((x for x in (m.positions_get() or []) if (int(x.ticket)==int(ticket) or int(getattr(x,'identifier',-1) or -1)==int(ticket)) and int(x.magic)==self.settings.magic_number),None)
         if p is None: return self._failure(f'Refused close: owned position {ticket} not found',ticket=ticket)
         tick=m.symbol_info_tick(p.symbol)

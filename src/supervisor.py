@@ -5,6 +5,9 @@ from collections import deque
 from collections.abc import Callable, Sequence
 from pathlib import Path
 import time
+from .notify import TelegramNotifier
+
+_notifier=None
 
 
 def clear_stale_pid_lock(path: str | Path, pid_is_alive: Callable[[int], bool]) -> bool:
@@ -52,5 +55,9 @@ def run_restart_supervisor(
             return 1
         delay = int(backoff_seconds[min(len(restarts), len(backoff_seconds) - 1)])
         restarts.append(now)
-        log_event('WARNING', f'Restarting bot after exit code {return_code}; restart {len(restarts)}/{max_restarts} in window, delay={delay}s')
+        message=f'Restarting bot after exit code {return_code}; restart {len(restarts)}/{max_restarts} in window, delay={delay}s'
+        log_event('WARNING', message)
+        global _notifier
+        if _notifier is None: _notifier=TelegramNotifier()
+        _notifier.send('supervisor_restart',f'🔄 Nəzarətçi botu yenidən başladır · cəhd {len(restarts)}/{max_restarts}.')
         sleep(delay)

@@ -76,7 +76,7 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
         value=raw.get(key)
         if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<=low or (high is not None and value>high):
             raise ValueError(f'risk.{key} must be > {low}' + (f' and <= {high}' if high else ''))
-    for key in ('max_open_positions','max_positions_per_group','max_positions_per_currency','max_positions_per_underlying_group','max_trades_per_symbol_per_day','max_hold_minutes','max_hold_extended_minutes','extend_step_minutes','gating_window','gating_disable_hours','momentum_lookback_bars','stagnation_minutes','no_entry_before_close_minutes','early_exit_score_threshold','early_exit_ema_fast','early_exit_ema_slow','early_exit_swing_lookback','early_exit_rsi_period','early_exit_roc_period','early_exit_volume_lookback'):
+    for key in ('max_open_positions','max_positions_per_group','max_positions_per_currency','max_positions_per_underlying_group','max_trades_per_symbol_per_day','max_trades_per_day','max_hold_minutes','max_hold_extended_minutes','extend_step_minutes','gating_window','gating_disable_hours','momentum_lookback_bars','stagnation_minutes','no_entry_before_close_minutes','early_exit_score_threshold','early_exit_ema_fast','early_exit_ema_slow','early_exit_swing_lookback','early_exit_rsi_period','early_exit_roc_period','early_exit_volume_lookback'):
         if type(raw.get(key)) is not int or raw[key]<=0: raise ValueError(f'risk.{key} must be a positive integer')
     if isinstance(raw.get('max_session_gap_hours'),bool) or not isinstance(raw.get('max_session_gap_hours'),(int,float)) or raw['max_session_gap_hours']<=0: raise ValueError('risk.max_session_gap_hours must be positive')
     for key in ('first_target_r','trail_atr_mult','stagnation_min_r','breakeven_cost_multiplier','sl_move_mult','tp_move_mult','early_exit_volume_spike_ratio'):
@@ -144,4 +144,17 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     if not isinstance(delays,list) or not delays or any(type(value) is not int or value<=0 for value in delays): raise ValueError('supervisor.restart_backoff_seconds must be a non-empty list of positive integers')
     for key in ('max_restarts_per_hour','restart_window_minutes'):
         if type(supervisor.get(key)) is not int or supervisor[key]<=0: raise ValueError(f'supervisor.{key} must be a positive integer')
+    for section in ('health','notify','db'):
+        if not isinstance(config.get(section),dict): raise ValueError(f'{section} must be a mapping')
+    health=config['health']
+    for key in ('stale_ticks_seconds','reconnect_failures_before_pause'):
+        if type(health.get(key)) is not int or health[key]<=0: raise ValueError(f'health.{key} must be a positive integer')
+    notify=config['notify']
+    if not isinstance(notify.get('big_loss_usd'),(int,float)) or notify['big_loss_usd']<=0: raise ValueError('notify.big_loss_usd must be positive')
+    _clock(notify.get('daily_summary_utc'),'daily_summary_utc')
+    if type(notify.get('rate_limit_minutes')) is not int or notify['rate_limit_minutes']<=0: raise ValueError('notify.rate_limit_minutes must be positive')
+    db=config['db']
+    for key in ('signals_retention_days','events_retention_days','equity_retention_days','equity_downsample_minutes','backup_keep_days'):
+        if type(db.get(key)) is not int or db[key]<=0: raise ValueError(f'db.{key} must be a positive integer')
+    if type(db.get('vacuum_weekday_utc')) is not int or not 0<=db['vacuum_weekday_utc']<=6: raise ValueError('db.vacuum_weekday_utc must be between 0 and 6')
     return Settings(config,int(login) if login else None,credentials['MT5_PASSWORD'],credentials['MT5_SERVER'],os.getenv('MT5_PATH') or None,os.getenv('ALLOW_REAL','false').lower()=='true',path.parent,risk)

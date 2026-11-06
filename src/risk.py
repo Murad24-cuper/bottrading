@@ -55,7 +55,7 @@ def _currency_exposure(positions,extra=None):
         base,quote=pair; totals[base]=totals.get(base,0)+sign; totals[quote]=totals.get(quote,0)-sign
     return totals
 
-def check_trade_allowed(signal, account, open_positions, pnl_today, pnl_week, settings, cost_estimate, symbol_group, now_utc: datetime, required_margin, volume: float | None = None, symbol_spec: dict | None = None, symbol_cooldown: bool = False, symbol_trades_today: int = 0, session_closing: bool = False):
+def check_trade_allowed(signal, account, open_positions, pnl_today, pnl_week, settings, cost_estimate, symbol_group, now_utc: datetime, required_margin, volume: float | None = None, symbol_spec: dict | None = None, symbol_cooldown: bool = False, symbol_trades_today: int = 0, session_closing: bool = False, trades_today: int = 0):
     """Apply all configured risk gates in the fixed order defined by the brief."""
     config=settings.config if hasattr(settings,'config') else settings
     risk=config['risk']; root=Path(getattr(settings,'root',Path.cwd()))
@@ -71,6 +71,7 @@ def check_trade_allowed(signal, account, open_positions, pnl_today, pnl_week, se
     if any(_value(p,'symbol')==signal.symbol for p in open_positions): return False,'symbol already has open position'
     if symbol_cooldown: return False,'symbol cooldown active'
     if int(symbol_trades_today)>=risk['max_trades_per_symbol_per_day']: return False,'maximum trades for symbol today reached'
+    if int(trades_today)>=int(risk.get('max_trades_per_day',150)): return False,'maximum trades today reached'
     candidate_underlying=underlying_key(signal.symbol); candidate_group=underlying_group(signal.symbol,symbol_group)
     for position in open_positions:
         group=_value(position,'exposure_group') or underlying_group(_value(position,'symbol',''),_value(position,'asset_group') or _group(position))
