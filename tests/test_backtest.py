@@ -39,14 +39,14 @@ def test_time_stop_closes_at_max_hold():
     result=Backtester(settings(max_hold=1),specs(),1000,[OneBuy()]).run({'EURUSD':{'M1':bars([100.5,100.6,100.6,100.6],[99.5,99.5,99.5,99.5])}})
     assert len(result.trades)==1 and result.trades[0]['close_reason']=='time'
 
-def test_default_ten_minute_horizon_closes_unprotected_trade():
-    risk_settings=settings(max_hold=10)
-    idx=pd.date_range('2026-01-05T00:00:00Z',periods=15,freq='min')
-    frame=pd.DataFrame({'open':[100]*15,'high':[100.5]*15,'low':[99.5]*15,'close':[100]*15,
-                        'tick_volume':[100]*15,'spread':[2]*15},index=idx)
+def test_default_twenty_minute_horizon_closes_unprotected_trade():
+    risk_settings=settings(max_hold=20)
+    idx=pd.date_range('2026-01-05T00:00:00Z',periods=25,freq='min')
+    frame=pd.DataFrame({'open':[100]*25,'high':[100.5]*25,'low':[99.5]*25,'close':[100]*25,
+                        'tick_volume':[100]*25,'spread':[2]*25},index=idx)
     result=Backtester(risk_settings,specs(),1000,[OneBuy()]).run({'EURUSD':{'M1':frame}})
     assert len(result.trades)==1 and result.trades[0]['close_reason']=='time'
-    assert result.trades[0]['holding_minutes']==10
+    assert result.trades[0]['holding_minutes']==20
 
 def test_ten_dollar_equity_skips_trade_when_min_lot_exceeds_risk():
     result=Backtester(settings(),specs(),10,[OneBuy(entry=100,sl=90,tp=120)]).run({'EURUSD':{'M1':bars([100.5]*4,[99.5]*4)}})

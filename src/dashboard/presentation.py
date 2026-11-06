@@ -24,7 +24,7 @@ CLOSE_REASON_LABELS = {
     'sl': 'Zərər həddi',
     'momentum_lost': 'Hərəkət zəiflədi',
     'stagnant': 'Yerində sayırdı',
-    'time': '10 dəqiqə bitdi',
+    'time': 'Vaxt bitdi (20 dəq)',
     'session_close': 'Bazar bağlanır',
     'manual': 'Əl ilə bağlandı',
     'kill': 'Təcili dayandırma',

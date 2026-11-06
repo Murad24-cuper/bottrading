@@ -14,13 +14,13 @@ risk:
   symbol_cooldown_minutes: 5     # No re-entry for a symbol after a close
   max_trades_per_symbol_per_day: 20 # Maximum daily opens per symbol (UTC day)
   max_margin_usage_pct: 40       # Maximum projected margin / equity
-  max_hold_minutes: 10           # Default hard holding limit
+  max_hold_minutes: 20           # Default hard holding limit; protected winners may extend
   max_hold_extended_minutes: 60  # Hard ceiling including protected-profit extensions
   extend_step_minutes: 10        # Recheck continuation after each extension step
   first_target_r: 0.8            # Take partial profit after this favorable R multiple
   scale_out_pct: 50                # Percent to close at first target
   trail_atr_mult: 1.0             # ATR(M1) distance for trailing stop
-  stagnation_minutes: 4          # Close if price has not progressed enough by this age
+  stagnation_minutes: 6          # Close if price has not progressed enough by this age
   stagnation_min_r: 0.2           # Minimum favorable R progress by stagnation_minutes
   momentum_lookback_bars: 5       # Closed bars used to detect momentum reversal
   breakeven_cost_multiplier: 1.0  # Include this multiple of estimated round-trip costs
@@ -85,7 +85,7 @@ strategies:
     timeframes: [M1, M5, M15]
     params: {bb_period: 20, bb_std: 2.0, rsi_period: 14, rsi_low: 35, rsi_high: 65, near_level_atr: 1.0, allow_quiet_regime: true, stop_atr: 1.2}
   breakout:
-    enabled: true
+    enabled: false               # Disabled: recent demo expectancy was negative
     groups: [forex, metals, indices, energy, crypto, stocks]
     timeframes: [M1, M5, M15]
     params: {range_bars: 20, atr_expansion: 1.0, volume_ratio: 1.0, reward_range: 1.5}
