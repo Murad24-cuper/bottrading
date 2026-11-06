@@ -246,7 +246,7 @@ class Backtester:
                     if sig is None or symbol in positions: continue
                     scanner_cfg=self.settings.config.get('scanner',{}); risk_cfg=self.settings.config['risk']
                     if float(sig.confidence)<float(scanner_cfg.get('min_confidence',0.0)): continue
-                    if scanner_cfg.get('require_mtf_agreement',False) and not mtf_direction_agrees(supplied,sig.direction,fast=int(scanner_cfg.get('mtf_ema_fast',5)),slow=int(scanner_cfg.get('mtf_ema_slow',13))): continue
+                    if scanner_cfg.get('require_mtf_agreement',False) and not mtf_direction_agrees(supplied,sig.direction,fast=int(scanner_cfg.get('mtf_ema_fast',5)),slow=int(scanner_cfg.get('mtf_ema_slow',13)),min_agree=int(scanner_cfg.get('mtf_min_agree',3))): continue
                     m1=data[symbol].get('M1')
                     if 'sl_move_mult' in risk_cfg and 'tp_move_mult' in risk_cfg:
                         if m1 is None or 'M1' not in supplied: continue
@@ -261,7 +261,12 @@ class Backtester:
                         spreads=m1_known.spread.tail(median_bars+1) if 'spread' in m1_known else pd.Series(dtype=float)
                         spread_median=float(spreads.iloc[:-1].median()) if len(spreads)>1 else 0.0
                         current_spread=float(spreads.iloc[-1]) if len(spreads) else self._spread_points(row)
-                        if not spread_within_median(current_spread,spread_median,float(scanner_cfg['max_spread_vs_median'])): continue
+                        if spread_median>0 and not spread_within_median(current_spread,spread_median,float(scanner_cfg['max_spread_vs_median'])): continue
+                        if spread_median<=0:
+                            m1_closed=supplied.get('M1')
+                            atr_fallback=float(ind.atr(m1_closed).iloc[-1]) if m1_closed is not None and len(m1_closed) else 0.0
+                            point=self._point(symbol,self.specs.get(symbol,{}))
+                            if atr_fallback<=0 or current_spread*point/atr_fallback>float(scanner_cfg.get('max_spread_volatility_ratio',1.0)): continue
                     indices=data[symbol][tf].index; next_pos=indices.searchsorted(open_time,side='right')
                     if next_pos>=len(indices): continue
                     next_idx=indices[next_pos]

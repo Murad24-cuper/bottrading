@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from src.db import Database
 from src.models import Signal
-from src.scanner import Candidate,MarketScanner,expected_value_score,rank_candidates
+from src.scanner import Candidate,MarketScanner,adaptive_top_movers,expected_value_score,rank_candidates
 
 def candidate(symbol,score):
     signal=Signal(symbol,'buy','M1',10,9,12,.8,'test')
@@ -14,6 +14,12 @@ def test_score_and_rank_discard_nonpositive_and_choose_best_per_symbol():
     assert expected_value_score(.8,10,5,1)==6
     ranked=rank_candidates([candidate('EURUSD',2),candidate('EURUSD',3),candidate('GBPUSD',-1)])
     assert [(item.symbol,item.score) for item in ranked]==[('EURUSD',3)]
+
+def test_scan_breadth_expands_below_target_without_forcing_orders():
+    assert adaptive_top_movers(40,15,0)==100
+    assert adaptive_top_movers(40,15,10)==60
+    assert adaptive_top_movers(40,15,15)==40
+    assert adaptive_top_movers(40,15,20)==40
 
 class FakeStrategy:
     name='fake'; required_timeframes=['M1']; allowed_groups=['forex']
@@ -36,6 +42,7 @@ def test_scanner_mocked_market_data_logs_negative_and_ranks_positive(tmp_path,mo
     config={'risk':{'sl_move_mult':.8,'tp_move_mult':1.2,'move_horizon_minutes':10},'scanner':{'max_seconds_per_cycle':5,'max_candidates':10,'candle_count':100,'min_score':0,'min_confidence':.6,'require_mtf_agreement':True,'spread_median_lookback_hours':24,'spread_median_cache_seconds':300,'max_spread_vs_median':1.5,'movement_timeframe_minutes':30,'max_spread_volatility_ratio':0.35,'top_movers':40,'timeframe_point_sizes':{}},'strategies':{}}
     settings=SimpleNamespace(config=config,risk=risk,root=tmp_path)
     db=Database(tmp_path/'scan.db'); scanner=MarketScanner(MT5(),settings,db,FakeSymbols())
+    scanner._spread_cache={symbol:{'median_points':0.0,'time':datetime.now(timezone.utc)} for symbol in ('EURUSD','GBPUSD')}
     bars=pd.DataFrame({'open':np.arange(100)+1,'high':np.arange(100)+2,'low':np.arange(100),'close':np.arange(100)+1,'tick_volume':100,'spread':1},index=pd.date_range('2026-01-01',periods=100,freq='min',tz='UTC'))
     scanner._bars=lambda symbol,tf,count:bars
     from src import market_data
@@ -43,6 +50,7 @@ def test_scanner_mocked_market_data_logs_negative_and_ranks_positive(tmp_path,mo
     monkeypatch.setattr(market_data,'price_distance_to_money',lambda mt5,symbol,distance,volume:abs(distance)*volume)
     result=scanner.scan_once()
     assert [item.symbol for item in result]==['EURUSD']
+    assert result[0].signal.entry_hint==1.0001
     with db.connect() as connection:
         rows=[dict(r) for r in connection.execute('SELECT symbol,taken,skip_reason FROM signals ORDER BY id')]
     assert len(rows)==2 and all(r['taken']==0 for r in rows)

@@ -6,22 +6,21 @@ import pandas as pd
 from . import indicators as ind
 
 
-def mtf_direction_agrees(candles: dict[str, pd.DataFrame], direction: str, timeframes=('M1', 'M5', 'M15'), fast=5, slow=13) -> bool:
-    """Require price and fast/slow EMA structure to agree on each timeframe."""
+def mtf_direction_agrees(candles: dict[str, pd.DataFrame], direction: str, timeframes=('M1', 'M5', 'M15'), fast=5, slow=13, min_agree=None) -> bool:
+    """Require closed-bar EMA direction to agree on the configured count of frames."""
+    required=len(timeframes) if min_agree is None else int(min_agree)
+    if required<1 or required>len(timeframes): return False
+    agreed=0
     for timeframe in timeframes:
         frame = candles.get(timeframe)
-        if frame is None or len(frame) < slow + 2:
-            return False
+        if frame is None or len(frame) < slow + 2: continue
         fast_ema = ind.ema(frame.close, fast).iloc[-1]
         slow_ema = ind.ema(frame.close, slow).iloc[-1]
         close = float(frame.close.iloc[-1])
-        if not all(math.isfinite(float(x)) for x in (fast_ema, slow_ema, close)):
-            return False
-        if direction == 'buy' and not (close > fast_ema > slow_ema):
-            return False
-        if direction == 'sell' and not (close < fast_ema < slow_ema):
-            return False
-    return True
+        if not all(math.isfinite(float(x)) for x in (fast_ema, slow_ema, close)): continue
+        if direction == 'buy' and close > fast_ema > slow_ema: agreed+=1
+        elif direction == 'sell' and close < fast_ema < slow_ema: agreed+=1
+    return agreed>=required
 
 
 def stop_target_from_atr(entry: float, direction: str, atr: float, spread: float, sl_mult: float, tp_mult: float, horizon_minutes: float) -> tuple[float, float]:

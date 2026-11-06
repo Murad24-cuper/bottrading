@@ -42,6 +42,12 @@ def rank_candidates(candidates):
         if prior is None or item.score>prior.score: best[item.symbol]=item
     return sorted(best.values(),key=lambda item:item.score,reverse=True)
 
+def adaptive_top_movers(base: int, target: int, open_count: int) -> int:
+    """Expand analysis breadth toward 100 while owned positions are below target."""
+    target=max(1,int(target)); base=max(1,min(100,int(base)))
+    vacancies=max(0,target-int(open_count))
+    return min(100,base+math.ceil((min(vacancies,target)/target)*(100-base))) if vacancies else base
+
 class MarketScanner:
     def __init__(self,mt5,settings,db,symbol_service=None):
         self.mt5,self.settings,self.db=mt5,settings,db
@@ -100,7 +106,8 @@ class MarketScanner:
                     median_cache={'median_points':median,'time':datetime.now(timezone.utc)}
                     self._spread_cache[symbol]=median_cache
                 current_points=spread_price/point
-                if not spread_within_median(current_points,median_cache['median_points'],float(spread_cfg.get('max_spread_vs_median',1.5))):
+                median_points=float(median_cache['median_points'])
+                if median_points>0 and not spread_within_median(current_points,median_points,float(spread_cfg.get('max_spread_vs_median',1.8))):
                     rejection['spread above 24h median limit']+=1; continue
             cached=self._volatility_cache.get(symbol); max_ratio=float(cfg['max_spread_volatility_ratio'])
             if not force and cached and (datetime.now(timezone.utc)-cached['time']).total_seconds()<=int(cfg['movement_timeframe_minutes'])*60 and cached['atr']>0 and spread_price/cached['atr']>max_ratio:
@@ -130,7 +137,7 @@ class MarketScanner:
             score=expected_move/max(spread_price,snapshots.get(symbol,{}).get('point',0.0),1e-12)
             movement.append((score,symbol))
         self._cursor=(start+visited)%max(1,len(universe))
-        top_n=int(cfg['top_movers'])
+        top_n=adaptive_top_movers(int(cfg['top_movers']),int(cfg.get('target_open_positions',15)),len(owned))
         ranked=sorted(movement,key=lambda item:item[0],reverse=True)
         top_symbols=[symbol for _,symbol in ranked[:top_n]]
         top_symbols.extend(symbol for symbol in sorted(open_symbols) if symbol not in top_symbols)
@@ -167,7 +174,7 @@ class MarketScanner:
                     strategy_diagnostics[strategy.name][getattr(strategy,'last_skip_reason','conditions_not_met')]+=1; continue
                 if not confidence_allowed(signal.confidence,float(cfg.get('min_confidence',0.0))):
                     reason='confidence below scanner.min_confidence'; self._write_signal(signal,0,reason); strategy_diagnostics[strategy.name]['confidence_below_minimum']+=1; continue
-                if cfg.get('require_mtf_agreement',True) and not mtf_direction_agrees(candles,signal.direction,fast=int(cfg.get('mtf_ema_fast',5)),slow=int(cfg.get('mtf_ema_slow',13))):
+                if cfg.get('require_mtf_agreement',True) and not mtf_direction_agrees(candles,signal.direction,fast=int(cfg.get('mtf_ema_fast',5)),slow=int(cfg.get('mtf_ema_slow',13)),min_agree=int(cfg.get('mtf_min_agree',3))):
                     reason='M1/M5/M15 direction disagreement'; self._write_signal(signal,0,reason); strategy_diagnostics[strategy.name]['mtf_disagreement']+=1; continue
                 if 'M1' not in candles:
                     horizon=int(self.settings.config['risk']['move_horizon_minutes'])
@@ -175,7 +182,12 @@ class MarketScanner:
                 m1_atr=float(ind.atr(candles['M1']).iloc[-1])
                 if not math.isfinite(m1_atr) or m1_atr<=0:
                     self._write_signal(signal,0,'M1 ATR unavailable'); continue
-                tick=self.mt5.symbol_info_tick(symbol); spread=max(0.0,float(tick.ask)-float(tick.bid)) if tick else 0.0
+                tick=self.mt5.symbol_info_tick(symbol)
+                if tick is None:
+                    self._write_signal(signal,0,'tick unavailable at entry sizing'); continue
+                # Size from the executable side used by order_send, not a prior candle close.
+                signal.entry_hint=float(tick.ask if signal.direction=='buy' else tick.bid)
+                spread=max(0.0,float(tick.ask)-float(tick.bid))
                 risk_cfg=self.settings.config['risk']
                 signal.sl_price,signal.tp_price=stop_target_from_atr(float(signal.entry_hint),signal.direction,m1_atr,spread,float(risk_cfg['sl_move_mult']),float(risk_cfg['tp_move_mult']),float(risk_cfg['move_horizon_minutes']))
                 if signal.sl_price is None or signal.tp_price is None or signal.entry_hint is None:

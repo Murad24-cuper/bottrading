@@ -16,6 +16,12 @@ def test_mtf_agreement_requires_all_three_directions():
     candles['M5'] = _frame('sell')
     assert not mtf_direction_agrees(candles, 'buy')
 
+def test_mtf_two_of_three_agreement_accepts_one_disagreement():
+    candles={tf:_frame() for tf in ('M1','M5','M15')}; candles['M5']=_frame('sell')
+    assert mtf_direction_agrees(candles,'buy',min_agree=2)
+    assert not mtf_direction_agrees(candles,'buy',min_agree=3)
+    assert not mtf_direction_agrees({'M1':candles['M1']},'buy',min_agree=2)
+
 
 def test_stop_target_from_atr_uses_configured_horizon():
     from pathlib import Path

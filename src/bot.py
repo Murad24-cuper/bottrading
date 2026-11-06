@@ -273,7 +273,9 @@ class TradingBot:
             if reservation['position']['symbol'] not in visible_symbols:
                 open_positions.append(reservation['position']); reserved_margin+=reservation['margin']
         pnl_today,pnl_week=self._pnl_periods(now)
-        cooldown=self.settings.risk.symbol_cooldown_minutes
+        scan_config=self.settings.config.get('scanner',{})
+        target=max(1,int(scan_config.get('target_open_positions',15)))
+        cooldown=2 if len(open_positions)<target else self.settings.risk.symbol_cooldown_minutes
         cooldown_active=cooldown>0 and self.db.symbol_closed_since(candidate.symbol,now-timedelta(minutes=cooldown),self.settings.magic_number)
         day_start=now.replace(hour=0,minute=0,second=0,microsecond=0)
         symbol_trades_today=self.db.count_symbol_trades_since(candidate.symbol,day_start,self.settings.magic_number)

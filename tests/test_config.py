@@ -12,12 +12,16 @@ def test_default_config_loads_for_offline_work(monkeypatch):
     assert settings.risk.first_target_r==0.8
     assert settings.risk.scale_out_pct==50
     assert settings.risk.risk_per_trade_pct==0.25
-    assert settings.config['scanner']['min_confidence']==0.6
+    assert settings.config['scanner']['min_confidence']==0.55
     assert settings.config['scanner']['require_mtf_agreement'] is True
-    assert settings.config['risk']['min_risk_reward']==1.3
+    assert settings.config['risk']['min_risk_reward']==1.2
     assert settings.risk.no_entry_before_close_minutes==60
     assert settings.risk.max_session_gap_hours==6
     assert settings.config['scanner']['top_movers']==40
+    assert settings.config['scanner']['mtf_min_agree']==2
+    assert settings.config['scanner']['target_open_positions']==15
+    assert settings.risk.max_open_positions==20
+    assert settings.risk.max_margin_usage_pct==50
     assert settings.config['scanner']['max_seconds_per_cycle']>0
     assert settings.config['history']['ranges_months']['M1']==3
 

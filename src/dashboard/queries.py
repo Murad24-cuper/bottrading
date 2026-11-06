@@ -60,6 +60,10 @@ def get_latest_signals(path=None,limit=50):
     for row in rows: row.setdefault('score',0.0)
     return rows
 
+def get_top_skip_reasons_since(since_utc,path=None,limit=5):
+    """Aggregate the most common recent signal rejection reasons."""
+    return _rows(path,"SELECT skip_reason,COUNT(*) AS count FROM signals WHERE time>=? AND taken=0 AND COALESCE(skip_reason,'')<>'' GROUP BY skip_reason ORDER BY count DESC,skip_reason LIMIT ?",(since_utc,int(limit)))
+
 def get_signals_period(start_utc,end_utc,path=None,limit=5000):
     rows=_rows(path,'SELECT time,symbol,direction,entry,sl,tp,strategy,confidence,taken FROM signals WHERE time>=? AND time<? ORDER BY time DESC LIMIT ?',(start_utc,end_utc,int(limit)))
     return rows

@@ -8,13 +8,13 @@ risk:
   daily_loss_limit_pct: 3.0      # Stop new trades after this daily equity loss
   weekly_loss_limit_pct: 8.0     # Stop new trades after this weekly equity loss
   max_trades_per_day: 150        # Global cap on new trades per UTC day
-  max_open_positions: 10         # Total concurrent positions
-  max_positions_per_group: 4     # Correlation guard per asset group
-  max_positions_per_currency: 2  # Net directional positions per FX/metals currency
-  max_positions_per_underlying_group: 2 # Concurrent positions per underlying group
+  max_open_positions: 20         # Total concurrent positions
+  max_positions_per_group: 6     # Correlation guard per asset group
+  max_positions_per_currency: 3  # Net directional positions per FX/metals currency
+  max_positions_per_underlying_group: 3 # Concurrent positions per underlying group
   symbol_cooldown_minutes: 5     # No re-entry for a symbol after a close
   max_trades_per_symbol_per_day: 20 # Maximum daily opens per symbol (UTC day)
-  max_margin_usage_pct: 40       # Maximum projected margin / equity
+  max_margin_usage_pct: 50       # Maximum projected margin / equity
   max_hold_minutes: 20           # Default hard holding limit; protected winners may extend
   max_hold_extended_minutes: 60  # Hard ceiling including protected-profit extensions
   extend_step_minutes: 10        # Recheck continuation after each extension step
@@ -26,8 +26,8 @@ risk:
   stagnation_min_r: 0.2           # Minimum favorable R progress by stagnation_minutes
   momentum_lookback_bars: 5       # Closed bars used to detect momentum reversal
   breakeven_cost_multiplier: 1.0  # Include this multiple of estimated round-trip costs
-  min_risk_reward: 1.3           # Minimum net TP / SL reward ratio after costs
-  max_cost_to_target_ratio: 0.25  # Maximum estimated round-trip cost / TP value
+  min_risk_reward: 1.2           # Minimum net TP / SL reward ratio after costs
+  max_cost_to_target_ratio: 0.3  # Maximum estimated round-trip cost / TP value
   max_spread_points: {}          # Optional per-symbol spread caps
   no_entry_before_close_minutes: 60 # Skip a symbol shortly before its next broker session close
   max_session_gap_hours: 6       # Close owned positions before longer broker session breaks
@@ -103,11 +103,13 @@ scanner:
   max_candidates: 10
   candle_count: 250
   min_score: 0.0
-  min_confidence: 0.6
+  min_confidence: 0.55
+  target_open_positions: 15     # Scanner work adapts below this target; no forced trades
   require_mtf_agreement: true
+  mtf_min_agree: 2               # Require this many agreeing closed-bar timeframes
   mtf_ema_fast: 5               # Fast EMA for M1/M5/M15 direction agreement
   mtf_ema_slow: 13              # Slow EMA for M1/M5/M15 direction agreement
-  max_spread_vs_median: 1.5
+  max_spread_vs_median: 1.8
   spread_median_lookback_hours: 24
   spread_median_cache_seconds: 300
   extend_min_score: 0.7          # Continuation score required to extend a protected winner

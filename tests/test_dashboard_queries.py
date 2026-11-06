@@ -20,6 +20,8 @@ def test_dashboard_queries_return_database_only_views_and_queue_commands(tmp_pat
     assert queries.get_closed_trades(start,end,path)[0]['net_profit']==1.8
     assert queries.get_closed_trades(start,end,path)[0]['sl']==1.09
     assert queries.get_latest_signals(path)[0]['score']==1.5
+    db.insert_signal(time='2026-11-05T10:11:00+00:00',symbol='GBPUSD',strategy='trend_pullback',direction='sell',timeframe='M5',confidence=.7,entry=1.2,sl=1.21,tp=1.18,expected_cost=.1,taken=0,skip_reason='spread too wide')
+    assert queries.get_top_skip_reasons_since('2026-11-05T10:00:00+00:00',path)[0]['skip_reason']=='spread too wide'
     assert queries.get_recent_events(path)[0]['level']=='WARNING'
     with db.connect() as conn:
         conn.execute("INSERT INTO bot_events(time,level,source,message) VALUES (?,?,?,?)",('2026-11-05T12:00:00+00:00','WARNING','supervisor','Restarting bot after exit code 1; restart 1/5 in window, delay=10s'))

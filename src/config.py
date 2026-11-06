@@ -117,14 +117,21 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
         if not isinstance(scanner.get(key),(int,float)) or scanner[key]<=0: raise ValueError(f'scanner.{key} must be > 0')
     for key in ('top_movers','movement_timeframe_minutes'):
         if type(scanner.get(key)) is not int or scanner[key]<=0: raise ValueError(f'scanner.{key} must be a positive integer')
+    if scanner['top_movers']>100: raise ValueError('scanner.top_movers must not exceed 100')
     if not isinstance(scanner.get('max_spread_volatility_ratio'),(int,float)) or scanner['max_spread_volatility_ratio']<=0: raise ValueError('scanner.max_spread_volatility_ratio must be positive')
     if not isinstance(scanner.get('min_score'),(int,float)): raise ValueError('scanner.min_score must be numeric')
     if not isinstance(scanner.get('min_confidence'),(int,float)) or not 0<=scanner['min_confidence']<=1: raise ValueError('scanner.min_confidence must be between 0 and 1')
+    if scanner['min_confidence']<0.55: raise ValueError('scanner.min_confidence cannot be below the safety floor 0.55')
     if type(scanner.get('require_mtf_agreement')) is not bool: raise ValueError('scanner.require_mtf_agreement must be boolean')
+    if type(scanner.get('mtf_min_agree')) is not int or not 2<=scanner['mtf_min_agree']<=3: raise ValueError('scanner.mtf_min_agree must be 2 or 3')
+    if type(scanner.get('target_open_positions')) is not int or scanner['target_open_positions']<1: raise ValueError('scanner.target_open_positions must be a positive integer')
     for key in ('mtf_ema_fast','mtf_ema_slow'):
         if type(scanner.get(key)) is not int or scanner[key]<=0: raise ValueError(f'scanner.{key} must be a positive integer')
     for key in ('max_spread_vs_median','spread_median_lookback_hours','spread_median_cache_seconds','extend_min_score'):
         if not isinstance(scanner.get(key),(int,float)) or scanner[key]<=0: raise ValueError(f'scanner.{key} must be positive')
+    if scanner['max_spread_vs_median']>1.8: raise ValueError('scanner.max_spread_vs_median cannot exceed 1.8')
+    if raw['min_risk_reward']<1.2: raise ValueError('risk.min_risk_reward cannot be below the safety floor 1.2')
+    if raw['max_cost_to_target_ratio']>0.3: raise ValueError('risk.max_cost_to_target_ratio cannot exceed 0.3')
     point_sizes=scanner.get('timeframe_point_sizes',{})
     if not isinstance(point_sizes,dict) or any(not isinstance(value,(int,float)) or value<=0 for value in point_sizes.values()): raise ValueError('scanner.timeframe_point_sizes must map symbols to positive point sizes')
     if not isinstance(config['loop'].get('interval_seconds'),(int,float)) or config['loop']['interval_seconds']<=0: raise ValueError('loop.interval_seconds must be > 0')
