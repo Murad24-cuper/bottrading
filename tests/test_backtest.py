@@ -14,7 +14,7 @@ class OneBuy:
         return Signal(symbol,'buy','M1',self.entry,self.sl,self.tp,.8,self.name,'test')
 
 def settings(max_hold=120,commission=1):
-    risk={'risk_per_trade_pct':.5,'daily_loss_limit_pct':3,'weekly_loss_limit_pct':8,'max_open_positions':10,'max_positions_per_group':4,'max_positions_per_currency':2,'max_positions_per_underlying_group':2,'symbol_cooldown_minutes':30,'max_trades_per_symbol_per_day':5,'max_margin_usage_pct':40,'max_hold_minutes':max_hold,'min_risk_reward':1,'max_cost_to_target_ratio':.3,'no_new_trades_friday_after_utc':'20:00','close_all_friday_utc':'21:30'}
+    risk={'risk_per_trade_pct':.5,'daily_loss_limit_pct':3,'weekly_loss_limit_pct':8,'max_open_positions':10,'max_positions_per_group':4,'max_positions_per_currency':2,'max_positions_per_underlying_group':2,'symbol_cooldown_minutes':30,'max_trades_per_symbol_per_day':5,'max_margin_usage_pct':40,'max_hold_minutes':max_hold,'first_target_r':.7,'scale_out_pct':50,'trail_atr_mult':1.5,'stagnation_minutes':45,'stagnation_min_r':.3,'momentum_lookback_bars':5,'breakeven_cost_multiplier':1.0,'min_risk_reward':1,'max_cost_to_target_ratio':.3,'no_new_trades_friday_after_utc':'20:00','close_all_friday_utc':'21:30'}
     return SimpleNamespace(config={'risk':risk,'backtest':{'start_equity':1000,'commission_per_lot_per_side':commission,'slippage_points':1,'fallback_spread_points':2}},risk=SimpleNamespace(**risk),root=Path(__file__).parent)
 
 def bars(highs=None,lows=None):
@@ -27,21 +27,28 @@ def specs(): return {'EURUSD':{'asset_group':'forex','point_size':.01,'trade_tic
 
 def test_next_bar_buy_fills_at_ask_and_both_hits_use_sl_first():
     result=Backtester(settings(),specs(),1000,[OneBuy()]).run({'EURUSD':{'M1':bars()}})
-    assert len(result.trades)==1
-    trade=result.trades[0]
+    assert len(result.trades)==2
+    trade=next(item for item in result.trades if item['close_reason']=='sl')
     assert trade['open_price']==100.03
-    assert trade['close_reason']=='sl'
     assert trade['close_price']<trade['tp']
     assert trade['net_profit']==trade['profit']+trade['commission']
     assert trade['commission']<0 and trade['costs']>0
+    assert any(item['close_reason']=='partial_tp' for item in result.trades)
 
 def test_time_stop_closes_at_max_hold():
-    result=Backtester(settings(max_hold=1),specs(),1000,[OneBuy()]).run({'EURUSD':{'M1':bars([100.5,100.8,101,101],[99.5,99.5,99.5,99.5])}})
+    result=Backtester(settings(max_hold=1),specs(),1000,[OneBuy()]).run({'EURUSD':{'M1':bars([100.5,100.6,100.6,100.6],[99.5,99.5,99.5,99.5])}})
     assert len(result.trades)==1 and result.trades[0]['close_reason']=='time'
 
 def test_ten_dollar_equity_skips_trade_when_min_lot_exceeds_risk():
     result=Backtester(settings(),specs(),10,[OneBuy(entry=100,sl=90,tp=120)]).run({'EURUSD':{'M1':bars([100.5]*4,[99.5]*4)}})
     assert result.trades==[]
+
+def test_scale_out_records_partial_take_profit():
+    frame=bars([100.5,100.8,101,101],[99.5,99.5,99.5,99.5])
+    result=Backtester(settings(),specs(),1000,[OneBuy()]).run({'EURUSD':{'M1':frame}})
+    partials=[trade for trade in result.trades if trade['close_reason']=='partial_tp']
+    assert len(partials)==1
+    assert 0<partials[0]['volume']<sum(trade['volume'] for trade in result.trades)
 
 def test_future_bar_changes_cannot_change_earlier_signal_fill():
     original=bars(); changed=original.copy(); changed.loc[changed.index[2]:,'close']=10000; changed.loc[changed.index[2]:,'high']=10001

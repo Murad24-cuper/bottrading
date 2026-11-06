@@ -103,6 +103,13 @@ def main():
         st.dataframe(pd.DataFrame(closed)[['close_time_local','symbol','direction','volume','open_price','close_price','net_profit','close_reason','strategy']],use_container_width=True,hide_index=True)
     else: st.caption('No closed trades for the selected day.')
 
+    st.subheader('Partial closes')
+    partials=queries.get_partial_closes(start_utc,end_utc,DB_PATH)
+    if partials:
+        for row in partials: row['time_local']=_local(row['time'],local_tz)
+        st.dataframe(pd.DataFrame(partials)[['time_local','symbol','ticket','volume','price','profit','commission','swap','reason']],use_container_width=True,hide_index=True)
+    else: st.caption('No partial closes for the selected day.')
+
     st.subheader('Latest signals')
     signals=queries.get_latest_signals(DB_PATH,50)
     if signals:

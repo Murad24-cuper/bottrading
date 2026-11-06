@@ -36,3 +36,9 @@ def test_commands_have_utc_expiry_and_expire_stale_running_rows(tmp_path):
         conn.execute("UPDATE commands SET status='running' WHERE id=?",(command,))
     assert db.get_pending_commands(bot_started_at=datetime.now(timezone.utc)+timedelta(seconds=1))==[]
     with db.connect() as conn: assert conn.execute('SELECT status FROM commands WHERE id=?',(command,)).fetchone()[0]=='expired'
+
+def test_partial_closes_are_persisted_by_ticket(tmp_path):
+    db=Database(tmp_path/'partial.db')
+    db.insert_partial_close(ticket=42,symbol='EURUSD',volume=.01,price=1.1,profit=.2,commission=-.01,swap=0,reason='partial_tp')
+    rows=db.get_partial_closes(42)
+    assert len(rows)==1 and rows[0]['reason']=='partial_tp' and rows[0]['volume']==.01

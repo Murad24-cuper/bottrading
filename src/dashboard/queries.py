@@ -45,6 +45,9 @@ def get_closed_trades(start_utc,end_utc,path=None):
     for row in rows: row['net_profit']=float(row.get('profit') or 0)+float(row.get('commission') or 0)+float(row.get('swap') or 0)
     return rows
 
+def get_partial_closes(start_utc,end_utc,path=None):
+    return _rows(path,'SELECT time,symbol,ticket,volume,price,profit,commission,swap,reason FROM partial_closes WHERE time>=? AND time<? ORDER BY time DESC',(start_utc,end_utc))
+
 def get_latest_signals(path=None,limit=50):
     rows=_rows(path,'SELECT * FROM signals ORDER BY time DESC,id DESC LIMIT ?',(int(limit),))
     for row in rows: row.setdefault('score',0.0)

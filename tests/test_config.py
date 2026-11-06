@@ -6,7 +6,7 @@ def test_default_config_loads_for_offline_work(monkeypatch):
     root=Path(__file__).resolve().parents[1]
     settings=config_module.load_settings(root/'config.yaml',env_path='deliberately-not-loaded.env',require_credentials=False)
     assert settings.config['account']['mode']=='demo'
-    assert settings.risk.max_hold_minutes==120
+    assert settings.risk.max_hold_minutes==720
     assert settings.config['scanner']['max_seconds_per_cycle']>0
     assert settings.config['history']['ranges_months']['M1']==3
 

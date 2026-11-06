@@ -9,7 +9,11 @@ CREATE TABLE IF NOT EXISTS trades(
  id INTEGER PRIMARY KEY, ticket INTEGER UNIQUE, symbol TEXT, asset_group TEXT, direction TEXT,
  volume REAL, open_time TEXT, close_time TEXT, open_price REAL, close_price REAL,
  sl REAL, tp REAL, profit REAL, commission REAL, swap REAL, margin_used REAL,
- strategy TEXT, reason TEXT, magic INTEGER, status TEXT, close_reason TEXT);
+ strategy TEXT, reason TEXT, magic INTEGER, status TEXT, close_reason TEXT,
+ timeframe TEXT, initial_risk REAL, scale_out_done INTEGER DEFAULT 0, peak_favorable_r REAL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS partial_closes(
+ id INTEGER PRIMARY KEY, ticket INTEGER, symbol TEXT, time TEXT, volume REAL,
+ price REAL, profit REAL, commission REAL, swap REAL, reason TEXT);
 CREATE TABLE IF NOT EXISTS signals(
  id INTEGER PRIMARY KEY, time TEXT, symbol TEXT, strategy TEXT, direction TEXT,
  timeframe TEXT, confidence REAL, entry REAL, sl REAL, tp REAL, expected_cost REAL, score REAL DEFAULT 0,
@@ -41,6 +45,9 @@ class Database:
         with self.connect() as connection:
             connection.execute('PRAGMA journal_mode=WAL')
             connection.executescript(SCHEMA)
+            trade_columns={row['name'] for row in connection.execute('PRAGMA table_info(trades)')}
+            for name, sql_type in {'timeframe':'TEXT','initial_risk':'REAL','scale_out_done':'INTEGER DEFAULT 0','peak_favorable_r':'REAL DEFAULT 0'}.items():
+                if name not in trade_columns: connection.execute(f'ALTER TABLE trades ADD COLUMN {name} {sql_type}')
             status_columns={row['name'] for row in connection.execute('PRAGMA table_info(bot_status)')}
             for name, sql_type in {'scan_total':'INTEGER','scan_scanned':'INTEGER','scan_complete':'INTEGER','scan_stage1_passed':'INTEGER','scan_top_n':'INTEGER','scan_signals':'INTEGER','scan_seconds':'REAL','scan_rejections':'TEXT','strategy_diagnostics':'TEXT'}.items():
                 if name not in status_columns: connection.execute(f'ALTER TABLE bot_status ADD COLUMN {name} {sql_type}')
@@ -114,6 +121,11 @@ class Database:
         with self.connect() as connection:
             self._insert(connection,'signals',values)
             return connection.execute('SELECT last_insert_rowid()').fetchone()[0]
+    def insert_partial_close(self,**values):
+        values.setdefault('time',datetime.now(timezone.utc).isoformat())
+        with self.connect() as connection: self._insert(connection,'partial_closes',values)
+    def get_partial_closes(self,ticket):
+        with self.connect() as connection: return [dict(row) for row in connection.execute('SELECT * FROM partial_closes WHERE ticket=? ORDER BY time,id',(int(ticket),))]
     def update_signal(self,signal_id,**values):
         if not values: return
         columns=list(values)

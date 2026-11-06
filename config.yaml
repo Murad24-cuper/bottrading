@@ -14,7 +14,14 @@ risk:
   symbol_cooldown_minutes: 30    # No re-entry for a symbol after a close
   max_trades_per_symbol_per_day: 5 # Maximum daily opens per symbol (UTC day)
   max_margin_usage_pct: 40       # Maximum projected margin / equity
-  max_hold_minutes: 120          # Close our positions after this duration
+  max_hold_minutes: 720          # High safety ceiling; normal exits manage positions sooner
+  first_target_r: 0.7            # Take partial profit after this favorable R multiple
+  scale_out_pct: 50               # Percent to close at first target
+  trail_atr_mult: 1.5             # ATR distance for the remaining position's trailing stop
+  stagnation_minutes: 45          # Close if price has not progressed enough by this age
+  stagnation_min_r: 0.3           # Minimum favorable R progress by stagnation_minutes
+  momentum_lookback_bars: 5       # Closed bars used to detect momentum reversal
+  breakeven_cost_multiplier: 1.0  # Include this multiple of estimated round-trip costs
   min_risk_reward: 1.0           # Minimum TP distance / SL distance
   max_cost_to_target_ratio: 0.3  # Maximum estimated round-trip cost / TP value
   max_spread_points: {}          # Optional per-symbol spread caps

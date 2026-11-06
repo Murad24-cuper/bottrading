@@ -1,9 +1,11 @@
 """MT5 order execution limited to positions carrying the configured magic."""
 from __future__ import annotations
 from datetime import datetime,timezone,timedelta
+import math
 from .models import TradeResult
 from .logger import get_logger
 from .time_utils import mt5_epoch_to_utc
+from . import market_data, indicators as ind
 
 log=get_logger(__name__)
 
@@ -62,7 +64,7 @@ class Executor:
         ticket=int(getattr(result,'position',0) or getattr(result,'order',0) or getattr(result,'deal',0))
         now=datetime.now(timezone.utc).isoformat()
         try:
-            self.db.insert_trade(ticket=ticket,symbol=signal.symbol,asset_group=self._asset_group(signal.symbol),direction=signal.direction,volume=volume,open_time=now,open_price=result.price,sl=signal.sl_price,tp=signal.tp_price,profit=0,commission=0,swap=0,strategy=signal.strategy_name,reason=signal.reason,magic=self.settings.magic_number,status='open')
+            self.db.insert_trade(ticket=ticket,symbol=signal.symbol,asset_group=self._asset_group(signal.symbol),direction=signal.direction,volume=volume,open_time=now,open_price=result.price,sl=signal.sl_price,tp=signal.tp_price,profit=0,commission=0,swap=0,strategy=signal.strategy_name,reason=signal.reason,magic=self.settings.magic_number,status='open',timeframe=signal.timeframe,initial_risk=abs(float(result.price)-float(signal.sl_price)),scale_out_done=0,peak_favorable_r=0)
         except Exception as exc:
             # The broker position is open; surface the persistence failure loudly for reconciliation.
             self._event(f'CRITICAL: opened ticket {ticket} but could not write trade row: {exc}','ERROR')
@@ -70,7 +72,7 @@ class Executor:
         return TradeResult(True,ticket,result.price,volume,result.retcode,str(result.comment))
     def close_position(self,ticket,reason):
         m=self.mt5
-        if reason not in {'tp','sl','time','manual','kill','weekend','error'}: return self._failure(f'Refused close: unsupported reason {reason!r}',ticket=ticket)
+        if reason not in {'tp','partial_tp','trail','momentum_lost','stagnant','sl','time','session_close','manual','kill','weekend','error'}: return self._failure(f'Refused close: unsupported reason {reason!r}',ticket=ticket)
         p=next((x for x in (m.positions_get() or []) if (int(x.ticket)==int(ticket) or int(getattr(x,'identifier',-1) or -1)==int(ticket)) and int(x.magic)==self.settings.magic_number),None)
         if p is None: return self._failure(f'Refused close: owned position {ticket} not found',ticket=ticket)
         tick=m.symbol_info_tick(p.symbol)
@@ -90,6 +92,20 @@ class Executor:
         results=[self.close_position(p.ticket,reason) for p in (self.mt5.positions_get() or []) if int(p.magic)==self.settings.magic_number]
         self._event(f'Close-all requested reason={reason}; positions={len(results)}')
         return results
+    def _close_partial(self,p,volume,reason='partial_tp'):
+        m=self.mt5; tick=m.symbol_info_tick(p.symbol); info=m.symbol_info(p.symbol)
+        if tick is None or info is None: return self._failure(f'Partial close quote unavailable: {m.last_error()}',volume,int(p.ticket))
+        buy=p.type==m.POSITION_TYPE_BUY; order_type=m.ORDER_TYPE_SELL if buy else m.ORDER_TYPE_BUY; price=tick.bid if buy else tick.ask
+        filling=self._filling_mode(info)
+        if filling is None: return self._failure('Refused partial close: unsupported filling mode',volume,int(p.ticket))
+        req={'action':m.TRADE_ACTION_DEAL,'symbol':p.symbol,'position':p.ticket,'volume':float(volume),'type':order_type,'price':price,'deviation':self.settings.config['executor']['deviation_points'],'magic':self.settings.magic_number,'comment':reason[:31],'type_time':m.ORDER_TIME_GTC,'type_filling':filling}
+        result=m.order_send(req)
+        if result is None or result.retcode!=m.TRADE_RETCODE_DONE: return self._failure(f'Partial close ticket {p.ticket} failed: {getattr(result,"comment",m.last_error())}',volume,int(p.ticket),getattr(result,'retcode',None))
+        deals=self._history(int(getattr(p,'identifier',p.ticket) or p.ticket)); deal=next((d for d in reversed(deals) if int(getattr(d,'ticket',0))==int(getattr(result,'deal',-1))),None)
+        self.db.insert_partial_close(ticket=int(p.ticket),symbol=p.symbol,time=datetime.now(timezone.utc).isoformat(),volume=float(volume),price=float(result.price),profit=float(getattr(deal,'profit',float(p.profit)*volume/max(float(p.volume),volume))),commission=float(getattr(deal,'commission',0) or 0),swap=float(getattr(deal,'swap',0) or 0),reason=reason)
+        self.db.update_open_trade(int(p.ticket),scale_out_done=1,volume=max(0.0,float(p.volume)-float(volume)))
+        self._event(f'Partial close ticket={p.ticket} volume={volume} reason={reason}')
+        return TradeResult(True,int(p.ticket),float(result.price),float(volume),result.retcode,str(result.comment))
     def modify_sl_tp(self,ticket,sl,tp):
         m=self.mt5; p=next((x for x in (m.positions_get() or []) if (int(x.ticket)==int(ticket) or int(getattr(x,'identifier',-1) or -1)==int(ticket)) and int(x.magic)==self.settings.magic_number),None)
         if p is None:
@@ -99,10 +115,61 @@ class Executor:
         self._event(f'Modify SL/TP ticket={ticket} success={ok}'+('' if ok else f' error={getattr(result,"comment",m.last_error())}'), 'INFO' if ok else 'WARNING')
         return ok
     def enforce_time_stop(self,settings=None):
-        limit=(settings or self.settings).risk.max_hold_minutes; now=datetime.now(timezone.utc); closed=[]
+        """Manage scale-outs, protective stops, momentum exits and the safety ceiling."""
+        config=(settings or self.settings).risk; now=datetime.now(timezone.utc); actions=[]
         for p in (self.mt5.positions_get() or []):
-            if int(p.magic)==self.settings.magic_number and now-mt5_epoch_to_utc(p.time,self.mt5)>timedelta(minutes=limit): closed.append(self.close_position(p.ticket,'time'))
-        return closed
+            if int(p.magic)!=self.settings.magic_number: continue
+            row=next((item for item in self.db.get_open_trades() if int(item['ticket']) in {int(p.ticket),int(getattr(p,'identifier',p.ticket) or p.ticket)}),None)
+            if row is None: continue
+            opened=mt5_epoch_to_utc(p.time,self.mt5); age=(now-opened).total_seconds()/60
+            if age>=config.max_hold_minutes: actions.append(self.close_position(p.ticket,'time')); continue
+            info=self.mt5.symbol_info(p.symbol); tick=self.mt5.symbol_info_tick(p.symbol)
+            if info is None or tick is None: continue
+            is_buy=p.type==self.mt5.POSITION_TYPE_BUY; current=float(tick.bid if is_buy else tick.ask); entry=float(p.price_open)
+            initial_risk=float(row.get('initial_risk') or abs(entry-float(row.get('sl') or p.sl)))
+            if initial_risk<=0: continue
+            favorable=(current-entry) if is_buy else (entry-current); current_r=favorable/initial_risk
+            peak=max(float(row.get('peak_favorable_r') or 0),current_r)
+            self.db.update_open_trade(row['ticket'],peak_favorable_r=peak)
+            if not int(row.get('scale_out_done') or 0) and current_r>=config.first_target_r:
+                step=float(info.volume_step); minimum=float(info.volume_min)
+                desired=float(p.volume)*float(config.scale_out_pct)/100
+                partial=math.floor(desired/step+1e-10)*step
+                if partial<minimum-1e-9 or float(p.volume)-partial<minimum-1e-9:
+                    actions.append(self.close_position(p.ticket,'partial_tp')); continue
+                actions.append(self._close_partial(p,partial))
+                # Refresh the position after the partial fill before managing its stop.
+                refreshed=next((x for x in (self.mt5.positions_get() or []) if int(x.ticket)==int(p.ticket)),None)
+                if refreshed: p=refreshed
+                row=self.db.get_trade(int(row['ticket'])) or row
+            if int(row.get('scale_out_done') or 0):
+                protective_sl=float(p.sl or 0)
+                try:
+                    cost=market_data.get_cost_estimate(self.mt5,p.symbol,float(p.volume))['cost']
+                    tick_value=float(info.trade_tick_value or 0); tick_size=float(info.trade_tick_size or 0)
+                    cost_distance=(cost*float(config.breakeven_cost_multiplier)/max(float(p.volume),1e-12))*tick_size/tick_value if tick_size>0 and tick_value>0 else 0.0
+                    breakeven=entry+cost_distance if is_buy else entry-cost_distance
+                    tighter=breakeven>protective_sl if is_buy else (protective_sl==0 or breakeven<protective_sl)
+                    stop_ok=breakeven<current if is_buy else breakeven>current
+                    if tighter and stop_ok and self.modify_sl_tp(p.ticket,breakeven,float(p.tp or 0)): protective_sl=breakeven
+                except Exception as exc:
+                    self._event(f'Could not estimate breakeven costs ticket={p.ticket}: {exc}','WARNING')
+                try: frame=market_data.get_closed_candles(self.mt5,p.symbol,row.get('timeframe') or 'M5',max(30,int(config.momentum_lookback_bars)+2))
+                except Exception as exc:
+                    self._event(f'Could not read management candles ticket={p.ticket}: {exc}','WARNING'); frame=None
+                if frame is not None and len(frame)>=int(config.momentum_lookback_bars)+1:
+                    momentum=float(frame.close.iloc[-1])-float(frame.close.iloc[-1-int(config.momentum_lookback_bars)])
+                    if (is_buy and momentum<0) or (not is_buy and momentum>0):
+                        actions.append(self.close_position(p.ticket,'momentum_lost')); continue
+                atr_frame=frame
+                if atr_frame is not None and not atr_frame.empty:
+                    atr=float(ind.atr(atr_frame).iloc[-1]); trail_distance=atr*float(config.trail_atr_mult)
+                    trail=current-trail_distance if is_buy else current+trail_distance
+                    tighter=trail>protective_sl if is_buy else (protective_sl==0 or trail<protective_sl)
+                    valid=trail<current if is_buy else trail>current
+                    if math.isfinite(trail) and tighter and valid: self.modify_sl_tp(p.ticket,trail,float(p.tp or 0))
+            if age>=config.stagnation_minutes and peak<float(config.stagnation_min_r): actions.append(self.close_position(p.ticket,'stagnant'))
+        return actions
     def enforce_weekend_close(self,settings=None,now_utc=None):
         risk=(settings or self.settings).risk; now=now_utc or datetime.now(timezone.utc)
         if now.weekday()==4 and now.strftime('%H:%M')>=risk.close_all_friday_utc: return self.close_all('weekend')

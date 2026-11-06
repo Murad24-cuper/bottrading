@@ -52,7 +52,7 @@ class Backtester:
         balance=self.start_equity; positions={}; pending={}; trades=[]; curve=[]; last_prices={}; last_signal_bar={}; daily_pnl={}; weekly_pnl={}; symbol_trade_counts={}; symbol_last_close={}; commission=float(self.settings.config['backtest']['commission_per_lot_per_side']); slippage=float(self.settings.config['backtest']['slippage_points'])
         account_currency='USD'
         def floating_total(): return sum(float(p.get('profit',0)) for p in positions.values())
-        def close_position(symbol,pos,when,price,reason,spread_price):
+        def close_position(symbol,pos,when,price,reason,spread_price,partial=False):
             nonlocal balance
             spec=self.specs.get(symbol,{})
             exit_slip=slippage*self._point(symbol,spec)
@@ -66,7 +66,7 @@ class Backtester:
             net=gross-pos['entry_commission']-exit_commission
             cost=pos['spread_cost']+pos['entry_commission']+exit_commission+pos['slippage_cost']+abs(exit_price-price)*factor*pos['volume']
             trades.append({'symbol':symbol,'asset_group':pos['asset_group'],'strategy':pos['strategy'],'direction':pos['direction'],'volume':pos['volume'],'open_time':pos['open_time'].isoformat(),'close_time':when.isoformat(),'open_price':pos['entry_price'],'close_price':exit_price,'sl':pos['sl'],'tp':pos['tp'],'profit':gross,'commission':-(pos['entry_commission']+exit_commission),'swap':0.0,'net_profit':net,'costs':cost,'close_reason':reason,'holding_minutes':(when-pos['open_time']).total_seconds()/60,'hour':pos['open_time'].hour})
-            symbol_last_close[symbol]=when
+            if not partial: symbol_last_close[symbol]=when
             return net
         for open_time in timeline:
             event_positions=[]
@@ -104,7 +104,7 @@ class Backtester:
                     if not allowed or target_money<=0 or expected_value_score(signal.confidence,target_money,risk_money,cost_est['cost'])<=0: continue
                     entry_commission=commission*volume; balance-=entry_commission
                     cost_tick_value=float(spec.get('trade_tick_value',tick_value_loss))
-                    positions[symbol]={'entry_price':entry,'entry_base':entry_base,'open_time':open_time,'direction':signal.direction,'volume':volume,'sl':signal.sl_price,'tp':signal.tp_price,'strategy':signal.strategy_name,'asset_group':queued['group'],'entry_commission':entry_commission,'spread_cost':spread_cost,'slippage_cost':slippage*point/tick_size*cost_tick_value*volume,'margin':margin,'profit':0.0}
+                    positions[symbol]={'entry_price':entry,'entry_base':entry_base,'open_time':open_time,'direction':signal.direction,'volume':volume,'initial_volume':volume,'initial_risk':abs(entry-signal.sl_price),'peak_favorable_r':0.0,'scale_out_done':False,'sl':signal.sl_price,'tp':signal.tp_price,'timeframe':signal.timeframe,'strategy':signal.strategy_name,'asset_group':queued['group'],'entry_commission':entry_commission,'spread_cost':spread_cost,'slippage_cost':slippage*point/tick_size*cost_tick_value*volume,'margin':margin,'profit':0.0}
                     symbol_trade_counts[(symbol,now.date())]=trades_today+1
                 # Intrabar exits use bid OHLC and ask OHLC. If stop and target both hit, stop wins.
                 pos=positions.get(symbol)
@@ -117,12 +117,50 @@ class Backtester:
                         fill_reference=level if pos['direction']=='buy' else level-spread_price
                         net=close_position(symbol,pos,bar_end,fill_reference,reason,spread_price); daily_pnl[bar_end.date()]=daily_pnl.get(bar_end.date(),0)+net; monday=(bar_end-timedelta(days=bar_end.weekday())).date(); weekly_pnl[monday]=weekly_pnl.get(monday,0)+net; positions.pop(symbol)
                     else:
-                        max_hold=self.settings.risk.max_hold_minutes
-                        weekend=bar_end.weekday()==4 and bar_end.strftime('%H:%M')>=self.settings.risk.close_all_friday_utc
-                        timed=(bar_end-pos['open_time']).total_seconds()>=max_hold*60
-                        if weekend or timed:
-                            reason='weekend' if weekend else 'time'; net=close_position(symbol,pos,bar_end,close,reason,spread_price)
-                            daily_pnl[bar_end.date()]=daily_pnl.get(bar_end.date(),0)+net; monday=(bar_end-timedelta(days=bar_end.weekday())).date(); weekly_pnl[monday]=weekly_pnl.get(monday,0)+net; positions.pop(symbol)
+                        is_buy=pos['direction']=='buy'; initial_risk=pos['initial_risk']
+                        favorable=(high-pos['entry_price']) if is_buy else (pos['entry_price']-(low+spread_price))
+                        current_r=favorable/initial_risk if initial_risk else 0.0
+                        pos['peak_favorable_r']=max(pos['peak_favorable_r'],current_r)
+                        risk=self.settings.config['risk']
+                        target_level=pos['entry_price']+(1 if is_buy else -1)*initial_risk*float(risk['first_target_r'])
+                        reached=(high>=target_level) if is_buy else (low+spread_price<=target_level)
+                        if reached and not pos['scale_out_done']:
+                            step=float(spec.get('volume_step',0.01)); minimum=float(spec.get('volume_min',step)); desired=pos['volume']*float(risk['scale_out_pct'])/100
+                            partial=math.floor(desired/step+1e-10)*step
+                            if partial<minimum-1e-9 or pos['volume']-partial<minimum-1e-9: partial=pos['volume']
+                            closing={**pos,'volume':partial,'entry_commission':pos['entry_commission']*partial/pos['volume'],'spread_cost':pos['spread_cost']*partial/pos['volume'],'slippage_cost':pos['slippage_cost']*partial/pos['volume']}
+                            fill=target_level if is_buy else target_level-spread_price
+                            net=close_position(symbol,closing,bar_end,fill,'partial_tp',spread_price,partial=partial<pos['volume'])
+                            daily_pnl[bar_end.date()]=daily_pnl.get(bar_end.date(),0)+net; monday=(bar_end-timedelta(days=bar_end.weekday())).date(); weekly_pnl[monday]=weekly_pnl.get(monday,0)+net
+                            if partial>=pos['volume']: positions.pop(symbol); pos=None
+                            else:
+                                remain=pos['volume']-partial; fraction=remain/pos['volume']; pos['volume']=remain; pos['entry_commission']*=fraction; pos['spread_cost']*=fraction; pos['slippage_cost']*=fraction; pos['scale_out_done']=True
+                        if pos is not None and pos['scale_out_done']:
+                            tick_value=float(spec.get('trade_tick_value',spec.get('tick_value',spec.get('trade_tick_value_loss',0))) or 0); tick_size=float(spec.get('trade_tick_size',spec.get('tick_size',0)) or 0)
+                            factor=tick_value/tick_size if tick_size>0 and tick_value>0 else 0
+                            estimated_cost=pos['spread_cost']+pos['entry_commission']+2*commission*pos['volume']+pos['slippage_cost']
+                            be_distance=(estimated_cost*float(risk['breakeven_cost_multiplier'])/(factor*pos['volume'])) if factor>0 and pos['volume']>0 else 0
+                            be=pos['entry_price']+(be_distance if is_buy else -be_distance)
+                            if (is_buy and be<close and be>pos['sl']) or (not is_buy and be>close and (pos['sl']==0 or be<pos['sl'])): pos['sl']=be
+                            tf=pos.get('timeframe') if pos.get('timeframe') in data[symbol] else tf
+                            history_frame=data[symbol].get(tf)
+                            if history_frame is not None:
+                                known=history_frame.loc[history_frame.index<=open_time]
+                                lookback=int(risk['momentum_lookback_bars'])
+                                if len(known)>lookback:
+                                    momentum=float(known.close.iloc[-1])-float(known.close.iloc[-1-lookback])
+                                    if (is_buy and momentum<0) or (not is_buy and momentum>0):
+                                        net=close_position(symbol,pos,bar_end,close,'momentum_lost',spread_price); daily_pnl[bar_end.date()]=daily_pnl.get(bar_end.date(),0)+net; positions.pop(symbol); pos=None
+                                if pos is not None and len(known)>=14:
+                                    atr=float(ind.atr(known).iloc[-1]); trail=close-atr*float(risk['trail_atr_mult']) if is_buy else close+atr*float(risk['trail_atr_mult'])
+                                    if math.isfinite(trail) and ((is_buy and pos['sl']<trail<close) or (not is_buy and (pos['sl']==0 or close<trail<pos['sl']))): pos['sl']=trail
+                        if pos is not None:
+                            age=(bar_end-pos['open_time']).total_seconds()/60
+                            if age>=float(risk['stagnation_minutes']) and pos['peak_favorable_r']<float(risk['stagnation_min_r']): reason='stagnant'
+                            elif age>=self.settings.risk.max_hold_minutes: reason='time'
+                            else: reason=''
+                            if reason:
+                                net=close_position(symbol,pos,bar_end,close,reason,spread_price); daily_pnl[bar_end.date()]=daily_pnl.get(bar_end.date(),0)+net; monday=(bar_end-timedelta(days=bar_end.weekday())).date(); weekly_pnl[monday]=weekly_pnl.get(monday,0)+net; positions.pop(symbol)
                 # Generate at the close. Each strategy runs only when its own trigger bar advances.
                 for strategy in self.strategies:
                     group=self.specs.get(symbol,{}).get('asset_group','other')
