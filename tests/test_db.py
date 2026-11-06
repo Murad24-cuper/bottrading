@@ -16,6 +16,16 @@ def test_create_insert_update_and_query_trades(tmp_path):
         assert "features" in {r['name'] for r in conn.execute('PRAGMA table_info(trades)')}
         assert "features" in {r['name'] for r in conn.execute('PRAGMA table_info(signals)')}
 
+def test_recent_brain_outcomes_include_costs_and_partial_closes(tmp_path):
+    import json
+    db=Database(tmp_path/'brain-outcomes.db')
+    db.insert_trade(ticket=909,symbol='EURUSD',asset_group='forex',direction='buy',volume=.1,open_time='2026-11-05T10:00:00+00:00',open_price=1.1,sl=1.09,tp=1.12,profit=0,commission=0,swap=0,magic=20260001,status='open',features=json.dumps({'brain':{'memory':{'probability':.7},'risk_money':2}}))
+    db.update_trade_close(909,close_time='2026-11-05T10:05:00+00:00',close_price=1.12,profit=1.0,commission=-.1,swap=0,close_reason='tp')
+    db.insert_partial_close(ticket=909,symbol='EURUSD',volume=.05,price=1.11,profit=.7,commission=-.05,swap=0,reason='partial_tp')
+    rows=db.get_recent_brain_outcomes(100,20260001)
+    assert rows[0]['probability']==.7 and rows[0]['win'] is True
+    assert abs(rows[0]['net_r']-.775)<1e-12
+
 def test_signal_stats_snapshot_event_and_wal(tmp_path):
     db=Database(tmp_path/'dashboard.db')
     db.insert_signal(symbol='XAUUSD',strategy='test',direction='buy',timeframe='M5',confidence=.8,entry=2000,sl=1990,tp=2020,expected_cost=.1,taken=0,skip_reason='test')

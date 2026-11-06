@@ -60,6 +60,7 @@ class TradingBot:
         notify_cfg=cfg.get('notify',{})
         self.notifier=TelegramNotifier(rate_limit_minutes=notify_cfg.get('rate_limit_minutes',5))
         self._health_failures=0; self._entries_health_blocked=False; self._trade_allowed=False; self._last_daily_summary=''; self._last_maintenance_day=''
+        self._data_dir=data_dir; self._brain_drift_checked=0.0
         self._last_notified_trade_id=self.db.latest_trade_id() if hasattr(self.db,'latest_trade_id') else 0
         self._observed_utc_day=self._now().date()-timedelta(days=1)
         self._daily_limit_alert_day=''; self._weekly_limit_alert_week=''
@@ -78,6 +79,19 @@ class TradingBot:
     def _notify(self,event_type,message):
         try: self.notifier.send(event_type,message)
         except Exception as exc: log.warning('Telegram notification queue failed: %s',exc)
+    def _check_brain_drift(self):
+        brain=self.settings.config.get('brain',{})
+        if not brain.get('enabled',False) or self.monotonic()-self._brain_drift_checked<60: return
+        self._brain_drift_checked=self.monotonic()
+        from .brain.drift import assess_live_drift
+        rows=self.db.get_recent_brain_outcomes(int(brain.get('live_drift_window',100)),self.settings.magic_number)
+        result=assess_live_drift(rows,int(brain.get('live_drift_window',100)),float(brain.get('live_max_calibration_error',.1)),float(brain.get('live_min_expectancy_r',0)))
+        if not result['trigger']: return
+        brain['enabled']=False; brain['shadow']=True
+        path=self._data_dir/'brain'/'live_gate.json'; path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text(json.dumps({'mode':'shadow','checked_at':self._now().isoformat(),'result':result},ensure_ascii=False,indent=2),encoding='utf-8')
+        message='Brain live rejimindən müşahidə rejiminə keçirildi: '+', '.join(result['reasons'])
+        self._event('CRITICAL',message); self._notify('brain_drift',message)
     def _health(self,now):
         """Check terminal permissions and stale ticks before evaluating entries."""
         mt5=self.client.mt5
@@ -372,6 +386,7 @@ class TradingBot:
         if pnl_week+floating<=-float(state.balance)*float(self.settings.config['risk']['weekly_loss_limit_pct'])/100 and self._weekly_limit_alert_week!=week_key:
             self._notify('weekly_loss','🛑 Həftəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.'); self._weekly_limit_alert_week=week_key
         risk_cfg=self.settings.config['risk']
+        self._check_brain_drift()
         if hasattr(self.db,'refresh_adaptive_gates'):
             disabled=self.db.refresh_adaptive_gates(risk_cfg.get('gating_window',20),risk_cfg.get('gating_disable_hours',24),self.settings.magic_number,now)
             for gate in disabled: self._notify(f'adaptive_{gate["scope"]}_{gate["name"]}',f'⚠️ {gate["scope"]}: {gate["name"]} strategiyası/qrupu mənfi nəticəyə görə 24 saat söndürüldü.')

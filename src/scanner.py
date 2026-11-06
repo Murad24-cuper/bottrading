@@ -285,6 +285,7 @@ class MarketScanner:
                 cost=market_data.get_cost_estimate(self.mt5,symbol,volume)
                 risk_money=market_data.price_distance_to_money(self.mt5,symbol,abs(signal.entry_hint-signal.sl_price),volume)
                 reward_money=market_data.price_distance_to_money(self.mt5,symbol,abs(signal.tp_price-signal.entry_hint),volume)
+                feature_snapshot['brain']['risk_money']=risk_money
                 from .brain.sizing import fractional_kelly_risk_pct
                 feature_snapshot['brain']['decision']=decide_brain(brain_checklist,brain_memory,brain_cfg,float(cost.get('cost',0))/max(risk_money,1e-12))
                 feature_snapshot['brain']['suggested_risk_pct']=fractional_kelly_risk_pct(float(brain_memory['probability']),float(brain_memory['avg_win_r']),float(brain_cfg.get('kelly_fraction',.25))) if brain_memory['probability'] is not None else 0.0

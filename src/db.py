@@ -170,6 +170,24 @@ class Database:
     def get_closed_trades_after_id(self,last_id):
         with self.connect() as connection:
             return [dict(row) for row in connection.execute("SELECT id,ticket,symbol,direction,strategy,profit,commission,swap,close_reason FROM trades WHERE status='closed' AND id>? ORDER BY id",(int(last_id),))]
+    def get_recent_brain_outcomes(self,limit=100,magic=None):
+        import json
+        query="SELECT ticket,profit,commission,swap,features FROM trades WHERE status='closed' AND features IS NOT NULL"
+        params=[]
+        if magic is not None: query+=' AND magic=?'; params.append(int(magic))
+        query+=' ORDER BY close_time DESC LIMIT ?'; params.append(max(int(limit),int(limit)*10))
+        with self.connect() as connection:
+            trades=[dict(row) for row in connection.execute(query,params)]
+            partial={int(row['ticket']):float(row['pnl'] or 0) for row in connection.execute('SELECT ticket,SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)) pnl FROM partial_closes GROUP BY ticket')}
+        outcomes=[]
+        for trade in trades:
+            try: brain=json.loads(trade.get('features') or '{}').get('brain',{}); memory=brain.get('memory',{})
+            except (TypeError,ValueError): continue
+            probability=memory.get('probability'); risk_money=float(brain.get('risk_money') or 0)
+            if probability is None or risk_money<=0: continue
+            net=float(trade.get('profit') or 0)+float(trade.get('commission') or 0)+float(trade.get('swap') or 0)+partial.get(int(trade['ticket']),0)
+            outcomes.append({'probability':float(probability),'win':net>0,'net_r':net/risk_money})
+        return outcomes
     def get_trades_for_day(self,day=None):
         if day is None: day=datetime.now(timezone.utc).date()
         if isinstance(day,datetime): day=day.astimezone(timezone.utc).date()

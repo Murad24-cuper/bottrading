@@ -382,12 +382,16 @@ def main():
         brain_cfg=_APP_CONFIG.get('brain',{}); gate_path=DATA_DIR/'brain'/'gate.json'
         try: gate=json.loads(gate_path.read_text(encoding='utf-8'))
         except (OSError,ValueError): gate={'status':'FAIL','reasons':['Yekun test qiymətləndirməsi hələ aparılmayıb.']}
-        active=bool(brain_cfg.get('enabled',False) and gate.get('status')=='PASS')
+        live_gate_path=DATA_DIR/'brain'/'live_gate.json'
+        try: live_gate=json.loads(live_gate_path.read_text(encoding='utf-8'))
+        except (OSError,ValueError): live_gate={}
+        active=bool(brain_cfg.get('enabled',False) and gate.get('status')=='PASS' and live_gate.get('mode')!='shadow')
         if active: st.success('Beyin aktivdir · qəbul yoxlamasından keçib')
         elif gate.get('status')=='PASS': st.info('Müşahidə rejimindədir · qəbul yoxlaması keçib, lakin config-də aktiv edilməyib')
         else:
             st.warning('Müşahidə rejimindədir · yoxlamadan keçməyib')
             for reason in gate.get('reasons',[]): st.caption('• '+translate_message(reason))
+        if live_gate.get('mode')=='shadow': st.error('Canlı sapma qoruyucusu beyni müşahidə rejiminə qaytardı.')
         if gate.get('evaluated_at'): st.caption('Son qiymətləndirmə: '+local_time(gate['evaluated_at']))
         calibration=gate.get('metrics',{}).get('calibration',[])
         st.subheader('Ehtimal kalibrlənməsi')
