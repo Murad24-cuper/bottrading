@@ -66,9 +66,15 @@ def get_day_stats(day,path=None):
     return _rows(path,'SELECT * FROM daily_stats WHERE date=?',(day.isoformat() if hasattr(day,'isoformat') else str(day),))
 
 def enqueue_command(command,path=None,ttl_seconds=60):
-    if command not in {'close_all','pause','resume'}: raise ValueError('Unsupported dashboard command')
+    if command not in {'close_all','pause','resume','stop','close_all_stop'}: raise ValueError('Unsupported dashboard command')
     db=Path(path or DEFAULT_DB_PATH).resolve()
     now=datetime.now(timezone.utc); created=now.isoformat(); expires=(now+timedelta(seconds=int(ttl_seconds))).isoformat()
-    with sqlite3.connect(db,timeout=10) as connection:
+    with sqlite3.connect(db,timeout=10,isolation_level=None) as connection:
+        connection.execute('BEGIN IMMEDIATE')
+        active=connection.execute("SELECT id FROM commands WHERE command=? AND status IN ('pending','running') ORDER BY id LIMIT 1",(command,)).fetchone()
+        if active: raise ValueError(f'A {command} command is already pending or running')
         cursor=connection.execute('INSERT INTO commands(time,created_at,expires_at,command,status,message) VALUES (?,?,?,?,?,?)',(created,created,expires,command,'pending',''))
         return cursor.lastrowid
+
+def get_recent_commands(path=None,limit=20):
+    return _rows(path,'SELECT id,created_at,expires_at,command,status,message,processed_time FROM commands ORDER BY id DESC LIMIT ?',(int(limit),))

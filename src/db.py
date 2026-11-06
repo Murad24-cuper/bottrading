@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS equity_snapshots(
 CREATE TABLE IF NOT EXISTS bot_events(time TEXT, level TEXT, source TEXT, message TEXT);
 CREATE TABLE IF NOT EXISTS bot_status(
  id INTEGER PRIMARY KEY CHECK(id=1), time TEXT, cycle INTEGER, mode TEXT, status TEXT,
- account_type TEXT, equity REAL, last_error TEXT, scan_total INTEGER,
+ account_type TEXT, equity REAL, last_error TEXT, mt5_connected INTEGER DEFAULT 0, scan_total INTEGER,
  scan_scanned INTEGER, scan_complete INTEGER, scan_stage1_passed INTEGER, scan_top_n INTEGER, scan_signals INTEGER,
  scan_seconds REAL, scan_rejections TEXT, strategy_diagnostics TEXT);
 CREATE TABLE IF NOT EXISTS commands(
@@ -49,7 +49,7 @@ class Database:
             for name, sql_type in {'timeframe':'TEXT','initial_risk':'REAL','scale_out_done':'INTEGER DEFAULT 0','peak_favorable_r':'REAL DEFAULT 0'}.items():
                 if name not in trade_columns: connection.execute(f'ALTER TABLE trades ADD COLUMN {name} {sql_type}')
             status_columns={row['name'] for row in connection.execute('PRAGMA table_info(bot_status)')}
-            for name, sql_type in {'scan_total':'INTEGER','scan_scanned':'INTEGER','scan_complete':'INTEGER','scan_stage1_passed':'INTEGER','scan_top_n':'INTEGER','scan_signals':'INTEGER','scan_seconds':'REAL','scan_rejections':'TEXT','strategy_diagnostics':'TEXT'}.items():
+            for name, sql_type in {'mt5_connected':'INTEGER DEFAULT 0','scan_total':'INTEGER','scan_scanned':'INTEGER','scan_complete':'INTEGER','scan_stage1_passed':'INTEGER','scan_top_n':'INTEGER','scan_signals':'INTEGER','scan_seconds':'REAL','scan_rejections':'TEXT','strategy_diagnostics':'TEXT'}.items():
                 if name not in status_columns: connection.execute(f'ALTER TABLE bot_status ADD COLUMN {name} {sql_type}')
             columns={row['name'] for row in connection.execute('PRAGMA table_info(signals)')}
             if 'score' not in columns: connection.execute('ALTER TABLE signals ADD COLUMN score REAL DEFAULT 0')
@@ -153,9 +153,15 @@ class Database:
             return dict(row) if row else None
     def insert_command(self,command,ttl_seconds=60):
         created=datetime.now(timezone.utc); expires=created+timedelta(seconds=int(ttl_seconds))
+        if command not in {'close_all','pause','resume','stop','close_all_stop'}: raise ValueError('Unsupported bot command')
         with self.connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            active=connection.execute("SELECT id FROM commands WHERE command=? AND status IN ('pending','running') ORDER BY id LIMIT 1",(str(command),)).fetchone()
+            if active: raise ValueError(f'A {command} command is already pending or running')
             cursor=connection.execute('INSERT INTO commands(time,created_at,expires_at,command,status,message) VALUES (?,?,?,?,?,?)',(created.isoformat(),created.isoformat(),expires.isoformat(),str(command),'pending',''))
             return cursor.lastrowid
+    def get_recent_commands(self,limit=20):
+        with self.connect() as connection: return [dict(row) for row in connection.execute('SELECT id,created_at,expires_at,command,status,message,processed_time FROM commands ORDER BY id DESC LIMIT ?',(int(limit),))]
     def get_pending_commands(self,now=None,bot_started_at=None):
         now=now or datetime.now(timezone.utc)
         now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)

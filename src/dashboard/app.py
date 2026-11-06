@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime,timezone,time as dt_time,timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
-import hmac,os
+import hmac,os,subprocess,time,json
 import sys
 import pandas as pd
 import streamlit as st
@@ -13,8 +13,52 @@ from dotenv import load_dotenv
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
 from src.dashboard import queries
-DB_PATH=Path(os.getenv('BOT_DB_PATH',ROOT/'data'/'bot.db'))
 load_dotenv(ROOT/'.env',override=False)
+DB_PATH=Path(os.getenv('BOT_DB_PATH',ROOT/'data'/'bot.db'))
+
+def _lock_pid():
+    try: return int((ROOT/'data'/'bot.lock').read_text(encoding='utf-8').split()[0])
+    except (OSError,ValueError,IndexError): return None
+
+def _pid_running(pid):
+    if not pid: return False
+    try: os.kill(int(pid),0); return True
+    except (OSError,ValueError,ProcessLookupError): return False
+
+def _heartbeat_fresh(status,now=None):
+    try: return bool(status and status.get('time') and (now or datetime.now(timezone.utc))-_as_utc(status['time'])<=timedelta(seconds=30))
+    except (ValueError,TypeError): return False
+
+def _start_bot():
+    """Start one detached bot process, with both UI and bot locks guarding races."""
+    status=queries.get_bot_status(DB_PATH); pid=_lock_pid(); running=_pid_running(pid)
+    lock_path=ROOT/'data'/'bot.lock'
+    if lock_path.exists() and not running:
+        lock_path.unlink(missing_ok=True)
+    if running or _heartbeat_fresh(status): return False,'Bot already appears to be running.'
+    guard=ROOT/'data'/'dashboard-start.lock'; guard.parent.mkdir(parents=True,exist_ok=True)
+    try: handle=guard.open('x',encoding='utf-8')
+    except FileExistsError: return False,'A Start request is already in progress.'
+    try:
+        handle.write(f'{os.getpid()} {time.time_ns()}\n'); handle.close()
+        stop=ROOT/'STOP'
+        if stop.exists(): stop.unlink()
+        python=ROOT/'.venv'/'Scripts'/'python.exe'; script=ROOT/'scripts'/'run_bot.py'
+        flags=getattr(subprocess,'DETACHED_PROCESS',0x00000008)|getattr(subprocess,'CREATE_NEW_PROCESS_GROUP',0x00000200)
+        subprocess.Popen([str(python),str(script)],cwd=ROOT,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,close_fds=True,creationflags=flags)
+        return True,'Bot start requested.'
+    except Exception as exc:
+        (ROOT/'STOP').write_text('PAUSE\n',encoding='utf-8')
+        return False,f'Could not start bot: {exc}'
+    finally:
+        try: handle.close()
+        except Exception: pass
+        guard.unlink(missing_ok=True)
+
+def _command_ttl():
+    import yaml
+    config=yaml.safe_load((ROOT/'config.yaml').read_text(encoding='utf-8'))
+    return int(config['live']['command_ttl_seconds'])
 
 def _authenticated():
     password=os.getenv('DASHBOARD_PASSWORD','')
@@ -46,15 +90,19 @@ def main():
     start_utc=start_local.astimezone(timezone.utc).isoformat(); end_utc=end_local.astimezone(timezone.utc).isoformat()
     status=queries.get_bot_status(DB_PATH); snapshot=queries.get_latest_snapshot(DB_PATH)
     summary=queries.get_day_summary(start_utc,end_utc,DB_PATH)
-    stale=True
-    if status and status.get('time'):
-        try: stale=(datetime.now(timezone.utc)-_as_utc(status['time'])).total_seconds()>30
-        except (ValueError,TypeError): stale=True
+    stale=not _heartbeat_fresh(status)
+    pid=_lock_pid(); process_running=_pid_running(pid)
     mode=(status or {}).get('mode','UNKNOWN').upper(); account=(status or {}).get('account_type','UNKNOWN').upper()
-    state=(status or {}).get('status','stopped')
-    if stale: st.error(f'Bot status: no heartbeat > 30 s · mode {mode} · account {account}')
-    elif state in {'running','managing_only'}: st.success(f'Bot status: {state.replace("_"," ")} · mode {mode} · account {account}')
-    else: st.error(f'Bot status: {state} · mode {mode} · account {account}')
+    paused=(ROOT/'STOP').exists()
+    state='active' if process_running and not paused else 'paused' if process_running and paused else 'stopped'
+    mt5_connected=bool((status or {}).get('mt5_connected',0)) and not stale
+    if process_running and not stale: st.success(f'Bot state: {state} · mode {mode} · account {account}')
+    elif process_running: st.warning(f'Bot process is running but heartbeat is stale · mode {mode} · account {account}')
+    else: st.info(f'Bot state: stopped · mode {mode} · account {account}')
+    heartbeat_age=(datetime.now(timezone.utc)-_as_utc(status['time'])).total_seconds() if status and status.get('time') else None
+    st.caption(f'Process running: {"yes" if process_running else "no"} · MT5 connected: {"yes" if mt5_connected else "no"} · heartbeat age: {f"{heartbeat_age:.0f}s" if heartbeat_age is not None else "unknown"}')
+    stats=status or {}
+    st.caption(f'Scan: total {stats.get("scan_total",0)} · scanned {stats.get("scan_scanned",0)} · tradable {stats.get("scan_stage1_passed",0)} · movers analysed {stats.get("scan_top_n",0)} · signals {stats.get("scan_signals",0)} · {stats.get("scan_seconds",0)}s')
     st.caption(f'Selected day shown in local time ({now_local.tzname() or "local"}): {selected.isoformat()}')
 
     cols=st.columns(5)
@@ -75,16 +123,20 @@ def main():
     cols[3].metric('Lost today',f'{summary["lost"]:,.2f}')
 
     st.sidebar.header('Controls')
-    if st.sidebar.button('Pause new trades',use_container_width=True):
-        try: queries.enqueue_command('pause',DB_PATH); st.sidebar.success('Pause command queued')
-        except Exception as exc: st.sidebar.error(f'Could not queue pause: {exc}')
-    if st.sidebar.button('Resume trades',use_container_width=True):
-        try: queries.enqueue_command('resume',DB_PATH); st.sidebar.success('Resume command queued')
-        except Exception as exc: st.sidebar.error(f'Could not queue resume: {exc}')
-    confirm=st.sidebar.checkbox('I confirm: close all bot positions')
-    if st.sidebar.button('Close all positions',disabled=not confirm,use_container_width=True):
-        try: queries.enqueue_command('close_all',DB_PATH); st.sidebar.warning('Close-all command queued for the bot')
-        except Exception as exc: st.sidebar.error(f'Could not queue close-all: {exc}')
+    if st.sidebar.button('Start bot',disabled=process_running,use_container_width=True):
+        ok,message=_start_bot(); (st.sidebar.success if ok else st.sidebar.warning)(message)
+    for label,command in [('Pause','pause'),('Resume','resume'),('Stop bot','stop')]:
+        if st.sidebar.button(label,disabled=not process_running,use_container_width=True):
+            try: queries.enqueue_command(command,DB_PATH,ttl_seconds=_command_ttl()); st.sidebar.success(f'{label} command queued')
+            except Exception as exc: st.sidebar.warning(f'Could not queue {label.lower()}: {exc}')
+    confirm=st.sidebar.checkbox('I confirm: close all bot positions and stop')
+    if st.sidebar.button('Close all & stop',disabled=not (confirm and process_running),use_container_width=True):
+        try: queries.enqueue_command('close_all_stop',DB_PATH,ttl_seconds=_command_ttl()); st.sidebar.warning('Close-all-and-stop command queued')
+        except Exception as exc: st.sidebar.warning(f'Could not queue close-all-and-stop: {exc}')
+    commands=queries.get_recent_commands(DB_PATH,10)
+    if commands:
+        st.sidebar.caption('Recent commands')
+        st.sidebar.dataframe(pd.DataFrame(commands)[['id','command','status','message']],use_container_width=True,hide_index=True)
 
     st.subheader('Open positions')
     opened=queries.get_open_positions(DB_PATH)

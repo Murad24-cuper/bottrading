@@ -23,3 +23,7 @@ def test_dashboard_queries_return_database_only_views_and_queue_commands(tmp_pat
     assert queries.get_bot_status(path)['status']=='running'
     command_id=queries.enqueue_command('close_all',path)
     assert db.get_pending_commands()[0]['id']==command_id
+    assert queries.get_recent_commands(path)[0]['command']=='close_all'
+    import pytest
+    with pytest.raises(ValueError,match='already pending or running'):
+        queries.enqueue_command('close_all',path)
