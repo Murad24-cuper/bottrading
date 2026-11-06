@@ -152,6 +152,9 @@ supervisor:
   restart_window_minutes: 60     # Sliding restart limit window
 mt5:
   call_timeout_seconds: 20       # Maximum wait for one MT5 package call
+confluence:
+  enabled: false                 # Observation only until evidence supports activation
+  rules: []                       # Optional entry filters; disabled by default
 history:
   data_dir: data/history
   ranges_months: {M1: 3, M5: 12, M15: 36, H1: 36}

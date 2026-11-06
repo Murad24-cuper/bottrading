@@ -251,8 +251,17 @@ class TradingBot:
         else: reason=''
         if reason:
             self._signal_update(candidate,False,reason); return False
+        from .confluence import apply_confluence
+        signal=candidate.signal
+        allowed,confluence_reason,adjusted_confidence=apply_confluence(getattr(candidate,'features',{}),signal.direction,signal.confidence,self.settings.config.get('confluence',{}))
+        if not allowed:
+            self._signal_update(candidate,False,confluence_reason); return False
+        if adjusted_confidence!=signal.confidence:
+            signal.confidence=adjusted_confidence; candidate.confidence=adjusted_confidence
+            if candidate.signal_row_id is not None:
+                with self.db.connect() as connection: connection.execute('UPDATE signals SET confidence=? WHERE id=?',(adjusted_confidence,candidate.signal_row_id))
         state=get_account_state(self.client.mt5); positions=self._owned_positions()
-        spec=candidate.symbol_spec; signal=candidate.signal
+        spec=candidate.symbol_spec
         volume,volume_reason=calc_volume(state.equity,self.settings.risk.risk_per_trade_pct,signal.entry_hint,signal.sl_price,spec)
         if volume<=0:
             self._signal_update(candidate,False,volume_reason); return False
@@ -289,7 +298,7 @@ class TradingBot:
             if why=='daily loss limit reached': self._notify('daily_loss','🛑 Gündəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.')
             if why=='weekly loss limit reached': self._notify('weekly_loss','🛑 Həftəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.')
             self._signal_update(candidate,False,why); return False
-        result=self.executor.open_trade(signal,volume,expected_cost=candidate.cost,features=candidate.features)
+        result=self.executor.open_trade(signal,volume,expected_cost=candidate.cost,features=getattr(candidate,'features',{}))
         if not result.success:
             self._signal_update(candidate,False,result.message); return False
         self._cycle_reservations.append({'position':{'symbol':candidate.symbol,'asset_group':candidate.asset_group,'exposure_group':underlying_group(candidate.symbol,candidate.asset_group),'underlying':underlying_key(candidate.symbol),'direction':signal.direction,'currency_base':spec.get('currency_base',''),'currency_profit':spec.get('currency_profit',''),'profit':0.0},'margin':float(margin)})

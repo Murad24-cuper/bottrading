@@ -35,7 +35,7 @@ class FakeExecutor:
     def sync_positions(self): self.synced+=1
     def enforce_time_stop(self,*args): pass
     def enforce_session_close(self,*args): pass
-    def open_trade(self,signal,volume,expected_cost=None):
+    def open_trade(self,signal,volume,expected_cost=None,features=None):
         self.opened.append((signal,volume)); return TradeResult(True,77,signal.entry_hint,volume,10009,'done')
     def close_all(self,reason): self.closed_all+=1; return []
 
