@@ -49,7 +49,7 @@ class Backtester:
             if choices: base_tf[symbol]=choices[0]; timeline.update(frames[choices[0]].index.to_pydatetime())
         timeline=sorted(timeline)
         signal_lookback=int(self.settings.config['backtest'].get('signal_lookback_bars',300))
-        balance=self.start_equity; positions={}; pending={}; trades=[]; curve=[]; last_prices={}; last_signal_bar={}; daily_pnl={}; weekly_pnl={}; commission=float(self.settings.config['backtest']['commission_per_lot_per_side']); slippage=float(self.settings.config['backtest']['slippage_points'])
+        balance=self.start_equity; positions={}; pending={}; trades=[]; curve=[]; last_prices={}; last_signal_bar={}; daily_pnl={}; weekly_pnl={}; symbol_trade_counts={}; symbol_last_close={}; commission=float(self.settings.config['backtest']['commission_per_lot_per_side']); slippage=float(self.settings.config['backtest']['slippage_points'])
         account_currency='USD'
         def floating_total(): return sum(float(p.get('profit',0)) for p in positions.values())
         def close_position(symbol,pos,when,price,reason,spread_price):
@@ -66,6 +66,7 @@ class Backtester:
             net=gross-pos['entry_commission']-exit_commission
             cost=pos['spread_cost']+pos['entry_commission']+exit_commission+pos['slippage_cost']+abs(exit_price-price)*factor*pos['volume']
             trades.append({'symbol':symbol,'asset_group':pos['asset_group'],'strategy':pos['strategy'],'direction':pos['direction'],'volume':pos['volume'],'open_time':pos['open_time'].isoformat(),'close_time':when.isoformat(),'open_price':pos['entry_price'],'close_price':exit_price,'sl':pos['sl'],'tp':pos['tp'],'profit':gross,'commission':-(pos['entry_commission']+exit_commission),'swap':0.0,'net_profit':net,'costs':cost,'close_reason':reason,'holding_minutes':(when-pos['open_time']).total_seconds()/60,'hour':pos['open_time'].hour})
+            symbol_last_close[symbol]=when
             return net
         for open_time in timeline:
             event_positions=[]
@@ -96,11 +97,15 @@ class Backtester:
                     margin=float(spec.get('margin_per_lot',0))*volume
                     eq=balance+floating_total(); account=SimpleNamespace(balance=balance,equity=eq,margin=sum(float(p.get('margin',0)) for p in positions.values()))
                     now=bar_end
-                    allowed,_=check_trade_allowed(adjusted,account,open_dicts,daily_pnl.get(now.date(),0),weekly_pnl.get((now-isoweekday_delta(now)).date(),0),self.settings,cost_est,queued['group'],now,margin,volume,spec)
+                    cooldown=int(getattr(self.settings.risk,'symbol_cooldown_minutes',0)); last_close=symbol_last_close.get(symbol)
+                    cooldown_active=bool(cooldown and last_close and now-last_close<timedelta(minutes=cooldown))
+                    trades_today=symbol_trade_counts.get((symbol,now.date()),0)
+                    allowed,_=check_trade_allowed(adjusted,account,open_dicts,daily_pnl.get(now.date(),0),weekly_pnl.get((now-isoweekday_delta(now)).date(),0),self.settings,cost_est,queued['group'],now,margin,volume,spec,cooldown_active,trades_today)
                     if not allowed or target_money<=0 or expected_value_score(signal.confidence,target_money,risk_money,cost_est['cost'])<=0: continue
                     entry_commission=commission*volume; balance-=entry_commission
                     cost_tick_value=float(spec.get('trade_tick_value',tick_value_loss))
                     positions[symbol]={'entry_price':entry,'entry_base':entry_base,'open_time':open_time,'direction':signal.direction,'volume':volume,'sl':signal.sl_price,'tp':signal.tp_price,'strategy':signal.strategy_name,'asset_group':queued['group'],'entry_commission':entry_commission,'spread_cost':spread_cost,'slippage_cost':slippage*point/tick_size*cost_tick_value*volume,'margin':margin,'profit':0.0}
+                    symbol_trade_counts[(symbol,now.date())]=trades_today+1
                 # Intrabar exits use bid OHLC and ask OHLC. If stop and target both hit, stop wins.
                 pos=positions.get(symbol)
                 if pos:

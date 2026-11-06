@@ -30,9 +30,10 @@ def test_scanner_mocked_market_data_logs_negative_and_ranks_positive(tmp_path,mo
     class MT5:
         def symbol_info(self,symbol):
             return SimpleNamespace(point=.0001,_asdict=lambda:{'trade_tick_value':1,'trade_tick_size':1,'volume_min':.01,'volume_step':.01,'volume_max':5})
+        def symbol_info_tick(self,symbol): return SimpleNamespace(bid=1.0,ask=1.0001)
         def account_info(self): return SimpleNamespace(equity=1000)
     risk=SimpleNamespace(risk_per_trade_pct=.5)
-    config={'risk':{},'scanner':{'max_seconds_per_cycle':5,'max_candidates':10,'candle_count':100,'min_score':0},'strategies':{}}
+    config={'risk':{},'scanner':{'max_seconds_per_cycle':5,'max_candidates':10,'candle_count':100,'min_score':0,'movement_timeframe_minutes':30,'max_spread_volatility_ratio':0.35,'top_movers':40,'timeframe_point_sizes':{}},'strategies':{}}
     settings=SimpleNamespace(config=config,risk=risk,root=tmp_path)
     db=Database(tmp_path/'scan.db'); scanner=MarketScanner(MT5(),settings,db,FakeSymbols())
     bars=pd.DataFrame({'open':np.arange(100)+1,'high':np.arange(100)+2,'low':np.arange(100),'close':np.arange(100)+1,'tick_volume':100,'spread':1},index=pd.date_range('2026-01-01',periods=100,freq='min',tz='UTC'))
@@ -46,3 +47,7 @@ def test_scanner_mocked_market_data_logs_negative_and_ranks_positive(tmp_path,mo
         rows=[dict(r) for r in connection.execute('SELECT symbol,taken,skip_reason FROM signals ORDER BY id')]
     assert len(rows)==2 and all(r['taken']==0 for r in rows)
     assert rows[0]['skip_reason']=='' and 'non-positive' in rows[1]['skip_reason']
+    assert scanner.last_scan_stats['total_symbols']==2
+    assert scanner.last_scan_stats['symbols_scanned']==2
+    assert scanner.last_scan_stats['scan_complete'] is True
+    assert scanner.last_scan_stats['top_movers']==2

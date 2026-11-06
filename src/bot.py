@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime,timezone,timedelta
 from pathlib import Path
-import logging,os,signal,time,re
+import logging,os,signal,time,re,json
 from .config import Settings
 from .db import Database
 from .executor import Executor
@@ -55,7 +55,8 @@ class TradingBot:
         value=self.clock()
         return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
     def _set_status(self,status='running',equity=None):
-        self.db.upsert_bot_status(time=self._now().isoformat(),cycle=self.cycle_number,mode=self.live['mode'],status=status,account_type=self._last_account_type,equity=equity,last_error=self.last_error)
+        stats=getattr(self.scanner,'last_scan_stats',{}) if self.scanner else {}
+        self.db.upsert_bot_status(time=self._now().isoformat(),cycle=self.cycle_number,mode=self.live['mode'],status=status,account_type=self._last_account_type,equity=equity,last_error=self.last_error,scan_total=stats.get('total_symbols',0),scan_scanned=stats.get('symbols_scanned',0),scan_complete=int(bool(stats.get('scan_complete',False))),scan_stage1_passed=stats.get('stage1_passed',0),scan_top_n=stats.get('top_movers',0),scan_signals=stats.get('signals',0),scan_seconds=stats.get('scan_seconds',0),scan_rejections=json.dumps(stats.get('stage1_rejections',{}),sort_keys=True),strategy_diagnostics=json.dumps(stats.get('strategy_diagnostics',{}),sort_keys=True))
     def _event(self,level,message):
         log.log(getattr(logging,level.upper(),logging.INFO),message)
         self.db.log_event(level.upper(),'bot',message)
@@ -143,7 +144,11 @@ class TradingBot:
             info=self.client.mt5.symbol_info(p.symbol); group=service.get_asset_group(p.symbol) if service else candidate.asset_group
             open_positions.append({'symbol':p.symbol,'asset_group':group,'exposure_group':underlying_group(p.symbol,group),'underlying':underlying_key(p.symbol),'direction':'buy' if p.type==self.client.mt5.POSITION_TYPE_BUY else 'sell','currency_base':getattr(info,'currency_base','') if info else '','currency_profit':getattr(info,'currency_profit','') if info else '','profit':float(p.profit)+float(getattr(p,'swap',0) or 0)})
         pnl_today,pnl_week=self._pnl_periods(now)
-        allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,self.settings,candidate.cost,candidate.asset_group,now,margin,volume,spec)
+        cooldown=self.settings.risk.symbol_cooldown_minutes
+        cooldown_active=cooldown>0 and self.db.symbol_closed_since(candidate.symbol,now-timedelta(minutes=cooldown),self.settings.magic_number)
+        day_start=now.replace(hour=0,minute=0,second=0,microsecond=0)
+        symbol_trades_today=self.db.count_symbol_trades_since(candidate.symbol,day_start,self.settings.magic_number)
+        allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,self.settings,candidate.cost,candidate.asset_group,now,margin,volume,spec,cooldown_active,symbol_trades_today)
         if not allowed:
             self._signal_update(candidate,False,why); return False
         result=self.executor.open_trade(signal,volume)
@@ -169,7 +174,8 @@ class TradingBot:
         self._process_commands()
         scan=getattr(self.scanner,'scan',None) or getattr(self.scanner,'scan_once')
         candidates=scan()
-        market_closed=getattr(self.scanner,'last_universe_size',None)==0
+        scan_stats=getattr(self.scanner,'last_scan_stats',{})
+        market_closed=bool(scan_stats.get('scan_complete',False)) and int(scan_stats.get('stage1_passed',0))==0
         if market_closed and not self._market_closed_logged:
             self._event('INFO','No tradable symbols: markets appear closed; scan interval extended')
             self._market_closed_logged=True

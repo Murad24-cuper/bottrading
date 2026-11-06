@@ -14,7 +14,7 @@ class OneBuy:
         return Signal(symbol,'buy','M1',self.entry,self.sl,self.tp,.8,self.name,'test')
 
 def settings(max_hold=120,commission=1):
-    risk={'risk_per_trade_pct':.5,'daily_loss_limit_pct':3,'weekly_loss_limit_pct':8,'max_open_positions':10,'max_positions_per_group':4,'max_margin_usage_pct':40,'max_hold_minutes':max_hold,'min_risk_reward':1,'max_cost_to_target_ratio':.3,'no_new_trades_friday_after_utc':'20:00','close_all_friday_utc':'21:30'}
+    risk={'risk_per_trade_pct':.5,'daily_loss_limit_pct':3,'weekly_loss_limit_pct':8,'max_open_positions':10,'max_positions_per_group':4,'max_positions_per_currency':2,'max_positions_per_underlying_group':2,'symbol_cooldown_minutes':30,'max_trades_per_symbol_per_day':5,'max_margin_usage_pct':40,'max_hold_minutes':max_hold,'min_risk_reward':1,'max_cost_to_target_ratio':.3,'no_new_trades_friday_after_utc':'20:00','close_all_friday_utc':'21:30'}
     return SimpleNamespace(config={'risk':risk,'backtest':{'start_equity':1000,'commission_per_lot_per_side':commission,'slippage_points':1,'fallback_spread_points':2}},risk=SimpleNamespace(**risk),root=Path(__file__).parent)
 
 def bars(highs=None,lows=None):

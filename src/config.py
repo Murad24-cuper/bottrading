@@ -17,6 +17,8 @@ class RiskSettings:
     max_positions_per_group: int
     max_positions_per_currency: int
     max_positions_per_underlying_group: int
+    symbol_cooldown_minutes: int
+    max_trades_per_symbol_per_day: int
     max_margin_usage_pct: float
     max_hold_minutes: int
     min_risk_reward: float
@@ -67,11 +69,12 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
         value=raw.get(key)
         if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<=low or (high is not None and value>high):
             raise ValueError(f'risk.{key} must be > {low}' + (f' and <= {high}' if high else ''))
-    for key in ('max_open_positions','max_positions_per_group','max_positions_per_currency','max_positions_per_underlying_group','max_hold_minutes'):
+    for key in ('max_open_positions','max_positions_per_group','max_positions_per_currency','max_positions_per_underlying_group','max_trades_per_symbol_per_day','max_hold_minutes'):
         if type(raw.get(key)) is not int or raw[key]<=0: raise ValueError(f'risk.{key} must be a positive integer')
+    if type(raw['symbol_cooldown_minutes']) is not int or raw['symbol_cooldown_minutes']<0: raise ValueError('risk.symbol_cooldown_minutes must be a non-negative integer')
     spreads=raw.get('max_spread_points')
     if not isinstance(spreads,dict) or any(not isinstance(v,(int,float)) or v<0 for v in spreads.values()): raise ValueError('risk.max_spread_points must map symbols to non-negative numbers')
-    risk=RiskSettings(float(raw['risk_per_trade_pct']),float(raw['daily_loss_limit_pct']),float(raw['weekly_loss_limit_pct']),raw['max_open_positions'],raw['max_positions_per_group'],raw['max_positions_per_currency'],raw['max_positions_per_underlying_group'],float(raw['max_margin_usage_pct']),raw['max_hold_minutes'],float(raw['min_risk_reward']),float(raw['max_cost_to_target_ratio']),spreads,_clock(raw.get('no_new_trades_friday_after_utc'),'no_new_trades_friday_after_utc'),_clock(raw.get('close_all_friday_utc'),'close_all_friday_utc'))
+    risk=RiskSettings(float(raw['risk_per_trade_pct']),float(raw['daily_loss_limit_pct']),float(raw['weekly_loss_limit_pct']),raw['max_open_positions'],raw['max_positions_per_group'],raw['max_positions_per_currency'],raw['max_positions_per_underlying_group'],raw['symbol_cooldown_minutes'],raw['max_trades_per_symbol_per_day'],float(raw['max_margin_usage_pct']),raw['max_hold_minutes'],float(raw['min_risk_reward']),float(raw['max_cost_to_target_ratio']),spreads,_clock(raw.get('no_new_trades_friday_after_utc'),'no_new_trades_friday_after_utc'),_clock(raw.get('close_all_friday_utc'),'close_all_friday_utc'))
     credentials={key:os.getenv(key,'').strip() for key in ('MT5_LOGIN','MT5_PASSWORD','MT5_SERVER')}
     if require_credentials:
         for key,value in credentials.items():
@@ -87,6 +90,9 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     scanner=config['scanner']
     for key in ('max_seconds_per_cycle','max_candidates','candle_count'):
         if not isinstance(scanner.get(key),(int,float)) or scanner[key]<=0: raise ValueError(f'scanner.{key} must be > 0')
+    for key in ('top_movers','movement_timeframe_minutes'):
+        if type(scanner.get(key)) is not int or scanner[key]<=0: raise ValueError(f'scanner.{key} must be a positive integer')
+    if not isinstance(scanner.get('max_spread_volatility_ratio'),(int,float)) or scanner['max_spread_volatility_ratio']<=0: raise ValueError('scanner.max_spread_volatility_ratio must be positive')
     if not isinstance(scanner.get('min_score'),(int,float)): raise ValueError('scanner.min_score must be numeric')
     point_sizes=scanner.get('timeframe_point_sizes',{})
     if not isinstance(point_sizes,dict) or any(not isinstance(value,(int,float)) or value<=0 for value in point_sizes.values()): raise ValueError('scanner.timeframe_point_sizes must map symbols to positive point sizes')

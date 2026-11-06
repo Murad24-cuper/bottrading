@@ -76,14 +76,19 @@ class SymbolService:
   spread=(t.ask-t.bid)/i.point
   if lim is not None and spread>lim: return False,'spread exceeds limit'
   return True,'tradable'
- def get_universe(self):
+ def get_candidates(self,select=True):
+  """Return all included broker names, selecting each into Market Watch."""
   self.select_liquid_symbols()
   u=self.settings.config['universe']; out=[]
-  for s in self.list_all_symbols():
-   if s.name in u['exclude_symbols'] or self.get_asset_group(s.name) not in u['include_groups']: continue
-   if u.get('exclude_dated_futures',True) and is_dated_future(s.name): continue
-   if self.is_tradable(s.name)[0]: out.append(s.name)
+  for item in self.list_all_symbols():
+   name=item.name
+   if name in u['exclude_symbols'] or self.get_asset_group(name) not in u['include_groups']: continue
+   if u.get('exclude_dated_futures',True) and is_dated_future(name): continue
+   if select and not self.mt5.symbol_select(name,True): continue
+   out.append(name)
   return out
+ def get_universe(self):
+  return [name for name in self.get_candidates() if self.is_tradable(name)[0]]
 
 def get_universe(settings,mt5=None):
  """Return tradable configured symbols; may use an explicit connected MT5 API."""

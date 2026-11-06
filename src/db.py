@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS equity_snapshots(
 CREATE TABLE IF NOT EXISTS bot_events(time TEXT, level TEXT, source TEXT, message TEXT);
 CREATE TABLE IF NOT EXISTS bot_status(
  id INTEGER PRIMARY KEY CHECK(id=1), time TEXT, cycle INTEGER, mode TEXT, status TEXT,
- account_type TEXT, equity REAL, last_error TEXT);
+ account_type TEXT, equity REAL, last_error TEXT, scan_total INTEGER,
+ scan_scanned INTEGER, scan_complete INTEGER, scan_stage1_passed INTEGER, scan_top_n INTEGER, scan_signals INTEGER,
+ scan_seconds REAL, scan_rejections TEXT, strategy_diagnostics TEXT);
 CREATE TABLE IF NOT EXISTS commands(
  id INTEGER PRIMARY KEY, time TEXT, created_at TEXT, expires_at TEXT, command TEXT, status TEXT, message TEXT, processed_time TEXT);
 '''
@@ -39,6 +41,9 @@ class Database:
         with self.connect() as connection:
             connection.execute('PRAGMA journal_mode=WAL')
             connection.executescript(SCHEMA)
+            status_columns={row['name'] for row in connection.execute('PRAGMA table_info(bot_status)')}
+            for name, sql_type in {'scan_total':'INTEGER','scan_scanned':'INTEGER','scan_complete':'INTEGER','scan_stage1_passed':'INTEGER','scan_top_n':'INTEGER','scan_signals':'INTEGER','scan_seconds':'REAL','scan_rejections':'TEXT','strategy_diagnostics':'TEXT'}.items():
+                if name not in status_columns: connection.execute(f'ALTER TABLE bot_status ADD COLUMN {name} {sql_type}')
             columns={row['name'] for row in connection.execute('PRAGMA table_info(signals)')}
             if 'score' not in columns: connection.execute('ALTER TABLE signals ADD COLUMN score REAL DEFAULT 0')
             command_columns={row['name'] for row in connection.execute('PRAGMA table_info(commands)')}
@@ -74,6 +79,18 @@ class Database:
             return result.rowcount
     def get_open_trades(self):
         with self.connect() as connection: return [dict(row) for row in connection.execute("SELECT * FROM trades WHERE status='open' ORDER BY open_time")]
+    def count_symbol_trades_since(self,symbol,since,magic=None):
+        stamp=since.isoformat() if hasattr(since,'isoformat') else str(since)
+        with self.connect() as connection:
+            if magic is None: row=connection.execute("SELECT COUNT(*) FROM trades WHERE symbol=? AND open_time>=?",(symbol,stamp)).fetchone()
+            else: row=connection.execute("SELECT COUNT(*) FROM trades WHERE symbol=? AND magic=? AND open_time>=?",(symbol,int(magic),stamp)).fetchone()
+            return int(row[0])
+    def symbol_closed_since(self,symbol,since,magic=None):
+        stamp=since.isoformat() if hasattr(since,'isoformat') else str(since)
+        with self.connect() as connection:
+            if magic is None: row=connection.execute("SELECT 1 FROM trades WHERE symbol=? AND status='closed' AND close_time>=? LIMIT 1",(symbol,stamp)).fetchone()
+            else: row=connection.execute("SELECT 1 FROM trades WHERE symbol=? AND magic=? AND status='closed' AND close_time>=? LIMIT 1",(symbol,int(magic),stamp)).fetchone()
+            return row is not None
     def get_trade(self,ticket):
         with self.connect() as connection:
             row=connection.execute('SELECT * FROM trades WHERE ticket=?',(ticket,)).fetchone()
