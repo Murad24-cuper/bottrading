@@ -38,6 +38,8 @@ def test_start_control_refuses_a_fresh_heartbeat(tmp_path,monkeypatch):
 
 def test_start_control_falls_back_when_breakaway_from_job_is_denied(tmp_path,monkeypatch):
     monkeypatch.setattr(app,'ROOT',tmp_path)
+    monkeypatch.setattr(app,'DATA_DIR',tmp_path/'data')
+    monkeypatch.setattr(app,'LOG_DIR',tmp_path/'logs')
     monkeypatch.setattr(app,'DB_PATH',tmp_path/'data'/'bot.db')
     monkeypatch.setattr(app.queries,'get_bot_status',lambda path:None)
     calls=[]
