@@ -1,4 +1,4 @@
-from src.supervisor import clear_stale_pid_lock, heartbeat_is_stale, run_restart_supervisor, write_hang_report
+from src.supervisor import clear_stale_pid_lock, heartbeat_is_stale, hang_watchdog_should_terminate, run_restart_supervisor, write_hang_report
 import faulthandler
 import sys
 import threading
@@ -22,6 +22,12 @@ def test_supervisor_does_not_restart_after_stop_command():
     def child(): calls.append('run'); stop['value']=True; return 0
     result=run_restart_supervisor(child,lambda:stop['value'],lambda level,msg:events.append((level,msg)),sleep=lambda _:None)
     assert result==0 and calls==['run']
+
+def test_watchdog_grants_new_child_a_startup_grace_before_reusing_old_heartbeat():
+    assert not hang_watchdog_should_terminate(True,1,90)
+    assert not hang_watchdog_should_terminate(True,89.9,90)
+    assert hang_watchdog_should_terminate(True,90,90)
+    assert not hang_watchdog_should_terminate(False,120,90)
 
 
 def test_supervisor_stops_after_restart_limit_and_logs_critical():

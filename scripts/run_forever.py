@@ -5,6 +5,7 @@ from pathlib import Path
 import os
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -12,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 from src.config import load_settings
 from src.db import Database
 from src.logger import get_logger
-from src.supervisor import clear_stale_pid_lock, run_restart_supervisor, heartbeat_is_stale, write_hang_report
+from src.supervisor import clear_stale_pid_lock, run_restart_supervisor, heartbeat_is_stale, hang_watchdog_should_terminate, write_hang_report
 from scripts.run_bot import install_crash_handlers
 from src.paths import project_paths
 
@@ -89,10 +90,11 @@ def main() -> int:
         finally: output_handle.close()
         emit('INFO', f'Bot child started PID={child.pid}')
         hang_seconds=int(backoff['hang_seconds'])
+        child_started=time.monotonic()
         while True:
             try: return int(child.wait(timeout=1))
             except subprocess.TimeoutExpired: pass
-            if heartbeat_is_stale(settings.db_path,hang_seconds):
+            if hang_watchdog_should_terminate(heartbeat_is_stale(settings.db_path,hang_seconds),time.monotonic()-child_started,hang_seconds):
                 reason=f'heartbeat older than {hang_seconds}s; child PID={child.pid}'
                 write_hang_report(settings.logs_dir,reason)
                 emit('CRITICAL',f'Hang watchdog: {reason}; terminating child for supervised restart')

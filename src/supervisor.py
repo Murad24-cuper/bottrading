@@ -25,6 +25,10 @@ def heartbeat_is_stale(db_path: str | Path, hang_seconds: int, now: datetime | N
     except (OSError,sqlite3.Error,TypeError,ValueError):
         return False
 
+def hang_watchdog_should_terminate(heartbeat_stale: bool, child_runtime_seconds: float, hang_seconds: int) -> bool:
+    """Ignore a stale persisted heartbeat until the newly launched child has had time to start."""
+    return bool(heartbeat_stale and float(child_runtime_seconds)>=int(hang_seconds))
+
 def write_hang_report(log_dir: str | Path, reason: str) -> None:
     """Capture recent bot log lines and the supervisor's current stack."""
     root=Path(log_dir); root.mkdir(parents=True,exist_ok=True)
