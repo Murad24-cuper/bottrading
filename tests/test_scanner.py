@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from src.db import Database
 from src.models import Signal
-from src.scanner import Candidate,MarketScanner,adaptive_top_movers,expected_value_score,rank_candidates
+from src.scanner import Candidate,MarketScanner,adaptive_top_movers,expected_value_score,rank_candidates,select_diverse_movers
 
 def candidate(symbol,score):
     signal=Signal(symbol,'buy','M1',10,9,12,.8,'test')
@@ -20,6 +20,17 @@ def test_scan_breadth_expands_below_target_without_forcing_orders():
     assert adaptive_top_movers(40,15,10)==60
     assert adaptive_top_movers(40,15,15)==40
     assert adaptive_top_movers(40,15,20)==40
+
+def test_diverse_movers_round_robin_groups_and_prefer_untraded_underlying():
+    ranked=[(100,'EURUSD'),(99,'GBPUSD'),(98,'US30Cash'),(97,'US100Cash'),(96,'BTCUSD'),(95,'ETHUSD')]
+    groups={'EURUSD':'forex','GBPUSD':'forex','US30Cash':'indices','US100Cash':'indices','BTCUSD':'crypto','ETHUSD':'crypto'}
+    selected=select_diverse_movers(ranked,groups,1,4,{'EURUSD'})
+    assert {groups[s] for s in selected[:3]}=={'forex','indices','crypto'}
+    assert selected[0]!='EURUSD'
+
+def test_repeat_penalty_is_in_expected_risk_units():
+    item=candidate('EURUSD',.5); item.risk_money=2
+    assert rank_candidates([item],{'EURUSD':2},{'forex':1},.15,.05)==[]
 
 class FakeStrategy:
     name='fake'; required_timeframes=['M1']; allowed_groups=['forex']

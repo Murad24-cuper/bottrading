@@ -12,8 +12,9 @@ risk:
   max_positions_per_group: 6     # Correlation guard per asset group
   max_positions_per_currency: 3  # Net directional positions per FX/metals currency
   max_positions_per_underlying_group: 3 # Concurrent positions per underlying group
-  symbol_cooldown_minutes: 5     # No re-entry for a symbol after a close
-  max_trades_per_symbol_per_day: 20 # Maximum daily opens per symbol (UTC day)
+  symbol_cooldown_minutes: 20    # Fixed cooldown; never shortened by scanner vacancies
+  max_trades_per_symbol_per_day: 4 # Maximum daily opens per underlying (UTC day)
+  max_group_share_today: 0.4     # Group cap after at least 10 daily trades
   max_margin_usage_pct: 50       # Maximum projected margin / equity
   max_hold_minutes: 20           # Default hard holding limit; protected winners may extend
   max_hold_extended_minutes: 60  # Hard ceiling including protected-profit extensions
@@ -117,6 +118,9 @@ scanner:
   top_movers: 40                 # Full strategy analysis runs only on top movers
   movement_timeframe_minutes: 30 # Short-term movement measurement for ranking
   max_spread_volatility_ratio: 1.0  # Skip when spread exceeds one ATR; target cost gate remains stricter
+  min_movers_per_group: 5        # Round-robin minimum when candidates are available
+  repeat_penalty: 0.15           # Expected-R penalty per underlying trade today
+  group_repeat_penalty: 0.05     # Expected-R penalty per asset-group trade today
   timeframe_point_sizes: {}     # Optional symbol point sizes for candle spread pricing
 live:
   mode: trade                   # shadow = record decisions only; trade = submit orders

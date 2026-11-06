@@ -136,6 +136,25 @@ class Database:
             if magic is None: row=connection.execute('SELECT COUNT(*) FROM trades WHERE open_time>=?',(stamp,)).fetchone()
             else: row=connection.execute('SELECT COUNT(*) FROM trades WHERE open_time>=? AND magic=?',(stamp,int(magic))).fetchone()
             return int(row[0])
+    def count_underlying_trades_since(self,symbol,since,magic=None):
+        from .symbols import underlying_key
+        stamp=since.isoformat() if hasattr(since,'isoformat') else str(since)
+        with self.connect() as connection:
+            rows=connection.execute('SELECT symbol FROM trades WHERE open_time>=?'+(' AND magic=?' if magic is not None else ''),(stamp,int(magic)) if magic is not None else (stamp,)).fetchall()
+        key=underlying_key(symbol)
+        return sum(underlying_key(row[0])==key for row in rows)
+    def underlying_closed_since(self,symbol,since,magic=None):
+        from .symbols import underlying_key
+        stamp=since.isoformat() if hasattr(since,'isoformat') else str(since)
+        with self.connect() as connection:
+            rows=connection.execute("SELECT symbol FROM trades WHERE status='closed' AND close_time>=?"+(' AND magic=?' if magic is not None else ''),(stamp,int(magic)) if magic is not None else (stamp,)).fetchall()
+        key=underlying_key(symbol)
+        return any(underlying_key(row[0])==key for row in rows)
+    def count_group_trades_since(self,since,asset_group,magic=None):
+        stamp=since.isoformat() if hasattr(since,'isoformat') else str(since)
+        with self.connect() as connection:
+            row=connection.execute('SELECT COUNT(*) FROM trades WHERE open_time>=? AND asset_group=?'+(' AND magic=?' if magic is not None else ''),(stamp,str(asset_group),int(magic)) if magic is not None else (stamp,str(asset_group))).fetchone()
+            return int(row[0])
     def symbol_closed_since(self,symbol,since,magic=None):
         stamp=since.isoformat() if hasattr(since,'isoformat') else str(since)
         with self.connect() as connection:

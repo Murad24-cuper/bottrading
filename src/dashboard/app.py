@@ -209,6 +209,8 @@ def main():
         with metrics[1]: _metric_card('Bu günkü nəticə',format_money(daily_result,signed=True),result_color)
         with metrics[2]: _metric_card('Hazırda yatırılıb',format_money(snapshot.get('margin') if snapshot else None))
         with metrics[3]: _metric_card('Əməliyyatlar',str(summary['trades']),detail=f'{summary["win_rate"]:.1%} qazanma faizi')
+        diversity=queries.get_today_diversity(today_start,today_end,DB_PATH)
+        st.caption(f"Bu gün: {diversity['symbols']} fərqli alət, {diversity['groups']} qrup")
 
         opened=queries.get_open_positions(DB_PATH); now_utc=datetime.now(timezone.utc)
         for row in opened:
@@ -292,6 +294,13 @@ def main():
         with st.expander('Ətraflı məlumat',expanded=False):
             stats=status or {}; heartbeat_age=(datetime.now(timezone.utc)-_as_utc(status['time'])).total_seconds() if status and status.get('time') else None
             st.subheader('Hesab və skanlama')
+            diversity=queries.get_today_diversity(today_start,today_end,DB_PATH)
+            group_labels={'forex':'Valyuta','metals':'Metallar','indices':'İndekslər','energy':'Enerji','crypto':'Kripto','stocks':'Səhmlər','other':'Digər'}
+            st.caption('Bu gün qruplar üzrə əməliyyatlar')
+            if diversity['per_group']:
+                st.table(pd.DataFrame([{'Qrup':group_labels.get(group,group),'Əməliyyat sayı':count} for group,count in sorted(diversity['per_group'].items(),key=lambda item:-item[1])]))
+                st.caption('Bu gün ən çox işlənən alətlər: '+', '.join(f'{name} ({count})' for name,count in diversity['top_symbols']))
+            else: st.caption('Bu gün hələ bağlanmış əməliyyat yoxdur.')
             detail_metrics=st.columns(4)
             detail_metrics[0].metric('Kapital',format_money(snapshot.get('equity') if snapshot else None))
             detail_metrics[1].metric('Sərbəst marja',format_money(snapshot.get('free_margin') if snapshot else None))

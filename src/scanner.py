@@ -19,6 +19,7 @@ from .patterns.fibonacci import fibonacci_retracement
 from .levels import key_levels
 from .sessions import session_context
 from .market_context import build_market_context,context_for_signal
+from .symbols import underlying_key
 
 @dataclass
 class Candidate:
@@ -40,10 +41,12 @@ class Candidate:
 def expected_value_score(confidence,reward_money,risk_money,cost):
     return float(confidence)*float(reward_money)-(1-float(confidence))*float(risk_money)-float(cost)
 
-def rank_candidates(candidates):
+def rank_candidates(candidates, underlying_counts=None, group_counts=None, repeat_penalty=0.0, group_repeat_penalty=0.0):
     """Discard non-positive scores and keep the best signal for each symbol."""
     best={}
+    underlying_counts=underlying_counts or {}; group_counts=group_counts or {}
     for item in candidates:
+        item.score-=float(item.risk_money)*(float(repeat_penalty)*underlying_counts.get(underlying_key(item.symbol),0)+float(group_repeat_penalty)*group_counts.get(item.asset_group,0))
         if item.score<=0: continue
         prior=best.get(item.symbol)
         if prior is None or item.score>prior.score: best[item.symbol]=item
@@ -54,6 +57,31 @@ def adaptive_top_movers(base: int, target: int, open_count: int) -> int:
     target=max(1,int(target)); base=max(1,min(100,int(base)))
     vacancies=max(0,target-int(open_count))
     return min(100,base+math.ceil((min(vacancies,target)/target)*(100-base))) if vacancies else base
+
+def select_diverse_movers(ranked, groups, minimum_per_group=5, limit=40, traded_today=None):
+    """Select high-ranked movers with round-robin group coverage and low repetition."""
+    traded_today=traded_today or set(); buckets=defaultdict(list)
+    seen=set()
+    for _,symbol in ranked:
+        key=underlying_key(symbol)
+        if key in seen: continue
+        seen.add(key); buckets[groups.get(symbol,'other')].append(symbol)
+    selected=[]; offsets=Counter()
+    active=sorted(buckets)
+    for _ in range(max(0,int(minimum_per_group))):
+        for group in active:
+            choices=buckets[group]
+            choices.sort(key=lambda s:(underlying_key(s) in traded_today, next((i for i,(_,n) in enumerate(ranked) if n==s),len(ranked))))
+            if offsets[group]<len(choices) and len(selected)<limit:
+                selected.append(choices[offsets[group]]); offsets[group]+=1
+    remaining=[symbol for _,symbol in ranked if symbol not in selected]
+    remaining.sort(key=lambda s:(underlying_key(s) in traded_today, next((i for i,(_,n) in enumerate(ranked) if n==s),len(ranked))))
+    for symbol in remaining:
+        key=underlying_key(symbol)
+        if any(underlying_key(item)==key for item in selected): continue
+        if len(selected)>=limit: break
+        selected.append(symbol)
+    return selected
 
 class MarketScanner:
     def __init__(self,mt5,settings,db,symbol_service=None):
@@ -117,7 +145,8 @@ class MarketScanner:
                 if median_points>0 and not spread_within_median(current_points,median_points,float(spread_cfg.get('max_spread_vs_median',1.8))):
                     rejection['spread above 24h median limit']+=1; continue
             cached=self._volatility_cache.get(symbol); max_ratio=float(cfg['max_spread_volatility_ratio'])
-            if not force and cached and (datetime.now(timezone.utc)-cached['time']).total_seconds()<=int(cfg['movement_timeframe_minutes'])*60 and cached['atr']>0 and spread_price/cached['atr']>max_ratio:
+            horizon=max(1.0,float(self.settings.config['risk']['move_horizon_minutes']))
+            if not force and cached and (datetime.now(timezone.utc)-cached['time']).total_seconds()<=int(cfg['movement_timeframe_minutes'])*60 and cached['atr']>0 and spread_price/(cached['atr']*math.sqrt(horizon))>max_ratio:
                 rejection['spread too high relative to recent volatility']+=1; continue
             snapshots[symbol]={'point':point,'spread_price':spread_price}
             stage1.append(symbol)
@@ -134,19 +163,25 @@ class MarketScanner:
             if not price or not math.isfinite(price) or not math.isfinite(atr) or atr<=0:
                 if symbol in open_symbols: movement.append((float('-inf'),symbol)); continue
                 move_rejections['movement indicators unavailable']+=1; continue
-            spread_ratio=spread_price/atr if spread_price else 0.0
+            horizon=max(1.0,float(self.settings.config['risk']['move_horizon_minutes']))
+            expected_move=atr*math.sqrt(horizon)
+            spread_ratio=spread_price/expected_move if spread_price and expected_move>0 else 0.0
             self._volatility_cache[symbol]={'atr':atr,'time':datetime.now(timezone.utc)}
             if symbol not in open_symbols and spread_ratio>max_ratio:
                 move_rejections['spread too high relative to recent volatility']+=1; continue
             relative_range=recent_range/max(spread_price,snapshots.get(symbol,{}).get('point',0.0)*.01,1e-12)
-            horizon=float(self.settings.config['risk']['move_horizon_minutes'])
-            expected_move=atr*math.sqrt(horizon)
             score=expected_move/max(spread_price,snapshots.get(symbol,{}).get('point',0.0),1e-12)
             movement.append((score,symbol))
         self._cursor=(start+visited)%max(1,len(universe))
         top_n=adaptive_top_movers(int(cfg['top_movers']),int(cfg.get('target_open_positions',15)),len(owned))
         ranked=sorted(movement,key=lambda item:item[0],reverse=True)
-        top_symbols=[symbol for _,symbol in ranked[:top_n]]
+        today_trades=self.db.get_trades_for_day(datetime.now(timezone.utc).date())
+        underlying_counts=Counter(underlying_key(row['symbol']) for row in today_trades)
+        group_counts=Counter(row.get('asset_group') or self.symbols.get_asset_group(row['symbol']) for row in today_trades)
+        ranked=sorted(ranked,key=lambda item:(underlying_key(item[1]) in {key for key,count in underlying_counts.items() if count},-item[0]))
+        group_map={symbol:self.symbols.get_asset_group(symbol) for _,symbol in ranked}
+        traded={key for key,count in underlying_counts.items() if count}
+        top_symbols=select_diverse_movers(ranked,group_map,int(cfg.get('min_movers_per_group',5)),top_n,traded)
         top_symbols.extend(symbol for symbol in sorted(open_symbols) if symbol not in top_symbols)
         cached_context={symbol:{'M15':self._cache[(symbol,'M15')]} for symbol in top_symbols if (symbol,'M15') in self._cache}
         context_groups={symbol:self.symbols.get_asset_group(symbol) for symbol in cached_context}
@@ -230,7 +265,7 @@ class MarketScanner:
                 candidate=Candidate(symbol,group,strategy.name,signal,signal.confidence,volume,risk_money,reward_money,cost,score,feature_snapshot,spec,reason)
                 candidate.signal_row_id=self._write_signal(signal,cost['cost'],reason,score,feature_snapshot); results.append(candidate)
         self.last_strategy_diagnostics={name:dict(counts) for name,counts in strategy_diagnostics.items()}
-        best=rank_candidates([c for c in results if not c.skip_reason])
+        best=rank_candidates([c for c in results if not c.skip_reason],underlying_counts,group_counts,float(cfg.get('repeat_penalty',0.15)),float(cfg.get('group_repeat_penalty',0.05)))
         winners={c.symbol:c for c in best}
         for item in results:
             if item.symbol in winners and winners[item.symbol] is not item: item.skip_reason='superseded by higher-scoring signal for symbol'

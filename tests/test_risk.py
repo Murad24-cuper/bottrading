@@ -25,7 +25,7 @@ def test_volume_risk_uses_tick_money_for_major_asset_classes(entry,sl,tick_size,
     assert risk<=5+1e-8
 
 def make_context(tmp_path):
-    risk={'risk_per_trade_pct':0.5,'daily_loss_limit_pct':3.0,'weekly_loss_limit_pct':8.0,'max_open_positions':10,'max_positions_per_group':4,'max_positions_per_currency':2,'max_positions_per_underlying_group':2,'symbol_cooldown_minutes':30,'max_trades_per_symbol_per_day':5,'max_margin_usage_pct':40.0,'max_hold_minutes':720,'min_risk_reward':1.0,'max_cost_to_target_ratio':0.3,'max_spread_points':{},'no_entry_before_close_minutes':60,'max_session_gap_hours':6}
+    risk={'risk_per_trade_pct':0.5,'daily_loss_limit_pct':3.0,'weekly_loss_limit_pct':8.0,'max_open_positions':10,'max_positions_per_group':4,'max_positions_per_currency':2,'max_positions_per_underlying_group':2,'symbol_cooldown_minutes':30,'max_trades_per_symbol_per_day':5,'max_group_share_today':.4,'max_margin_usage_pct':40.0,'max_hold_minutes':720,'min_risk_reward':1.0,'max_cost_to_target_ratio':0.3,'max_spread_points':{},'no_entry_before_close_minutes':60,'max_session_gap_hours':6}
     settings=SimpleNamespace(config={'risk':risk},root=tmp_path,risk=SimpleNamespace(**risk))
     account=AccountState(1000,1000,0,1000,None,'USD',100,0,2)
     signal=Signal('EURUSD','buy','M5',100,99,102,0.8,'test')
@@ -88,6 +88,16 @@ def test_same_underlying_with_broker_suffix_is_blocked(tmp_path):
     signal.symbol='US500Cash'
     positions=[{'symbol':'US500-DEC26','asset_group':'indices','direction':'sell'}]
     assert check(open_positions=positions,symbol_group='indices')[1]=='underlying already has open position'
+
+def test_same_underlying_different_fx_alias_is_blocked(tmp_path):
+    _,_,signal,_,_,check=make_context(tmp_path)
+    signal.symbol='US30Cash'
+    assert check(open_positions=[{'symbol':'US30#','asset_group':'indices'}],symbol_group='indices')[1]=='underlying already has open position'
+
+def test_group_share_limit_after_ten_daily_trades(tmp_path):
+    _,_,_,_,_,check=make_context(tmp_path)
+    assert check(trades_today=10,group_trades_today=4)[1]=='maximum asset-group share today reached'
+    assert check(trades_today=9,group_trades_today=4)[0] is True
 
 def test_non_fx_symbol_without_currency_metadata_does_not_crash(tmp_path):
     _,_,signal,_,_,check=make_context(tmp_path)

@@ -282,18 +282,16 @@ class TradingBot:
             if reservation['position']['symbol'] not in visible_symbols:
                 open_positions.append(reservation['position']); reserved_margin+=reservation['margin']
         pnl_today,pnl_week=self._pnl_periods(now)
-        scan_config=self.settings.config.get('scanner',{})
-        target=max(1,int(scan_config.get('target_open_positions',15)))
-        cooldown=2 if len(open_positions)<target else self.settings.risk.symbol_cooldown_minutes
-        cooldown_active=cooldown>0 and self.db.symbol_closed_since(candidate.symbol,now-timedelta(minutes=cooldown),self.settings.magic_number)
         day_start=now.replace(hour=0,minute=0,second=0,microsecond=0)
-        symbol_trades_today=self.db.count_symbol_trades_since(candidate.symbol,day_start,self.settings.magic_number)
+        cooldown_active=self.db.underlying_closed_since(candidate.symbol,now-timedelta(minutes=self.settings.risk.symbol_cooldown_minutes),self.settings.magic_number) if hasattr(self.db,'underlying_closed_since') else self.db.symbol_closed_since(candidate.symbol,now-timedelta(minutes=self.settings.risk.symbol_cooldown_minutes),self.settings.magic_number)
+        symbol_trades_today=self.db.count_underlying_trades_since(candidate.symbol,day_start,self.settings.magic_number) if hasattr(self.db,'count_underlying_trades_since') else self.db.count_symbol_trades_since(candidate.symbol,day_start,self.settings.magic_number)
         session_closing=False
         if service and hasattr(service,'next_session_close'):
             upcoming=service.next_session_close(candidate.symbol,now,0.0)
             session_closing=bool(upcoming and 0<=(upcoming[0]-now).total_seconds()/60<=self.settings.risk.no_entry_before_close_minutes)
         trades_today=self.db.count_trades_since(day_start,self.settings.magic_number)+len(self._cycle_reservations)
-        allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,self.settings,candidate.cost,candidate.asset_group,now,margin+reserved_margin,volume,spec,cooldown_active,symbol_trades_today,session_closing,trades_today)
+        group_trades_today=(self.db.count_group_trades_since(day_start,candidate.asset_group,self.settings.magic_number) if hasattr(self.db,'count_group_trades_since') else 0)+sum(r['position'].get('asset_group')==candidate.asset_group for r in self._cycle_reservations)
+        allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,self.settings,candidate.cost,candidate.asset_group,now,margin+reserved_margin,volume,spec,cooldown_active,symbol_trades_today,session_closing,trades_today,group_trades_today)
         if not allowed:
             if why=='daily loss limit reached': self._notify('daily_loss','🛑 Gündəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.')
             if why=='weekly loss limit reached': self._notify('weekly_loss','🛑 Həftəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.')

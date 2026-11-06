@@ -52,6 +52,18 @@ def get_closed_trades(start_utc,end_utc,path=None):
     for row in rows: row['net_profit']=float(row.get('profit') or 0)+float(row.get('commission') or 0)+float(row.get('swap') or 0)
     return rows
 
+def get_today_diversity(start_utc,end_utc,path=None):
+    rows=_rows(path,"SELECT symbol,asset_group,COUNT(*) AS trades FROM trades WHERE open_time>=? AND open_time<? GROUP BY symbol,asset_group",(start_utc,end_utc))
+    from ..symbols import underlying_key
+    symbols={underlying_key(row['symbol']) for row in rows}
+    groups={row.get('asset_group') or 'other' for row in rows}
+    per_group={}
+    for row in rows: per_group[row.get('asset_group') or 'other']=per_group.get(row.get('asset_group') or 'other',0)+int(row['trades'])
+    per_symbol={}
+    for row in rows:
+        key=underlying_key(row['symbol']); per_symbol[key]=per_symbol.get(key,0)+int(row['trades'])
+    return {'symbols':len(symbols),'groups':len(groups),'per_group':per_group,'top_symbols':sorted(per_symbol.items(),key=lambda item:(-item[1],item[0]))[:10]}
+
 def get_partial_closes(start_utc,end_utc,path=None):
     return _rows(path,'SELECT time,symbol,ticket,volume,price,profit,commission,swap,reason FROM partial_closes WHERE time>=? AND time<? ORDER BY time DESC',(start_utc,end_utc))
 
