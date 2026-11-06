@@ -24,3 +24,15 @@ def test_signal_stats_snapshot_event_and_wal(tmp_path):
         assert conn.execute('SELECT COUNT(*) FROM equity_snapshots').fetchone()[0]==1
         assert conn.execute('SELECT level FROM bot_events').fetchone()[0]=='WARNING'
         assert conn.execute('PRAGMA journal_mode').fetchone()[0].lower()=='wal'
+
+def test_commands_have_utc_expiry_and_expire_stale_running_rows(tmp_path):
+    from datetime import datetime,timedelta,timezone
+    db=Database(tmp_path/'commands.db')
+    command=db.insert_command('close_all',ttl_seconds=60)
+    with db.connect() as conn:
+        row=conn.execute('SELECT created_at,expires_at,status FROM commands WHERE id=?',(command,)).fetchone()
+        assert row['status']=='pending'
+        assert datetime.fromisoformat(row['expires_at'])-datetime.fromisoformat(row['created_at'])==timedelta(seconds=60)
+        conn.execute("UPDATE commands SET status='running' WHERE id=?",(command,))
+    assert db.get_pending_commands(bot_started_at=datetime.now(timezone.utc)+timedelta(seconds=1))==[]
+    with db.connect() as conn: assert conn.execute('SELECT status FROM commands WHERE id=?',(command,)).fetchone()[0]=='expired'

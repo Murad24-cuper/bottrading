@@ -40,7 +40,7 @@ class FakeExecutor:
     def close_all(self,reason): self.closed_all+=1; return []
 
 def make_settings(root,mode='shadow',strategies=None,max_errors=5):
-    risk={'risk_per_trade_pct':.5,'daily_loss_limit_pct':3,'weekly_loss_limit_pct':8,'max_open_positions':10,'max_positions_per_group':4,'max_margin_usage_pct':40,'max_hold_minutes':120,'min_risk_reward':1,'max_cost_to_target_ratio':.3,'no_new_trades_friday_after_utc':'20:00','close_all_friday_utc':'21:30'}
+    risk={'risk_per_trade_pct':.5,'daily_loss_limit_pct':3,'weekly_loss_limit_pct':8,'max_open_positions':10,'max_positions_per_group':4,'max_positions_per_currency':2,'max_positions_per_underlying_group':2,'max_margin_usage_pct':40,'max_hold_minutes':120,'min_risk_reward':1,'max_cost_to_target_ratio':.3,'no_new_trades_friday_after_utc':'20:00','close_all_friday_utc':'21:30'}
     return SimpleNamespace(root=root,magic_number=20260001,risk=SimpleNamespace(**risk),db_path=root/'bot.db',config={'live':{'mode':mode,'strategies':strategies or [],'max_cycle_errors':max_errors,'equity_snapshot_seconds':30,'heartbeat_seconds':10},'risk':risk,'loop':{'interval_seconds':5}})
 
 def make_bot(tmp_path,mode='shadow',strategies=None,candidate=True,max_errors=5,clock=None):
@@ -100,6 +100,21 @@ def test_command_close_all_is_processed_and_marked_done(tmp_path):
     command_id=db.insert_command('close_all'); bot.cycle()
     with db.connect() as conn: row=conn.execute('SELECT status,message FROM commands WHERE id=?',(command_id,)).fetchone()
     assert executor.closed_all==1 and row['status']=='done' and row['message']=='completed'
+
+def test_commands_created_before_bot_start_are_expired(tmp_path):
+    bot,db,_,_,_,executor,_=make_bot(tmp_path,candidate=False)
+    command_id=db.insert_command('close_all')
+    bot.process_started_at=datetime.now(timezone.utc)+timedelta(seconds=1)
+    bot._process_commands()
+    with db.connect() as conn: row=conn.execute('SELECT status,message FROM commands WHERE id=?',(command_id,)).fetchone()
+    assert executor.closed_all==0 and row['status']=='expired'
+
+def test_expired_command_is_ignored_and_marked_expired(tmp_path):
+    _,db,_,_,_,_,_=make_bot(tmp_path,candidate=False)
+    command_id=db.insert_command('close_all',ttl_seconds=1)
+    future=datetime.now(timezone.utc)+timedelta(seconds=2)
+    assert db.get_pending_commands(now=future)==[]
+    with db.connect() as conn: assert conn.execute('SELECT status FROM commands WHERE id=?',(command_id,)).fetchone()[0]=='expired'
 
 def test_pause_and_resume_commands_manage_stop_file(tmp_path):
     bot,db,_,_,_,executor,item=make_bot(tmp_path,'trade',['breakout'])

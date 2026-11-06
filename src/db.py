@@ -1,6 +1,6 @@
 """SQLite persistence with WAL enabled for concurrent dashboard readers."""
 from __future__ import annotations
-from datetime import datetime,timezone,date
+from datetime import datetime,timezone,date,timedelta
 from pathlib import Path
 import sqlite3
 
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS bot_status(
  id INTEGER PRIMARY KEY CHECK(id=1), time TEXT, cycle INTEGER, mode TEXT, status TEXT,
  account_type TEXT, equity REAL, last_error TEXT);
 CREATE TABLE IF NOT EXISTS commands(
- id INTEGER PRIMARY KEY, time TEXT, command TEXT, status TEXT, message TEXT, processed_time TEXT);
+ id INTEGER PRIMARY KEY, time TEXT, created_at TEXT, expires_at TEXT, command TEXT, status TEXT, message TEXT, processed_time TEXT);
 '''
 
 class Database:
@@ -41,6 +41,19 @@ class Database:
             connection.executescript(SCHEMA)
             columns={row['name'] for row in connection.execute('PRAGMA table_info(signals)')}
             if 'score' not in columns: connection.execute('ALTER TABLE signals ADD COLUMN score REAL DEFAULT 0')
+            command_columns={row['name'] for row in connection.execute('PRAGMA table_info(commands)')}
+            if 'created_at' not in command_columns: connection.execute('ALTER TABLE commands ADD COLUMN created_at TEXT')
+            if 'expires_at' not in command_columns: connection.execute('ALTER TABLE commands ADD COLUMN expires_at TEXT')
+            rows=connection.execute('SELECT id,time,created_at,expires_at FROM commands WHERE created_at IS NULL OR expires_at IS NULL').fetchall()
+            for row in rows:
+                created=row['created_at'] or row['time'] or datetime.now(timezone.utc).isoformat()
+                try:
+                    parsed=datetime.fromisoformat(created.replace('Z','+00:00'))
+                    parsed=parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+                    expiry=(parsed+timedelta(seconds=60)).isoformat()
+                except ValueError:
+                    expiry=(datetime.now(timezone.utc)+timedelta(seconds=60)).isoformat()
+                connection.execute('UPDATE commands SET created_at=COALESCE(created_at,?),expires_at=COALESCE(expires_at,?) WHERE id=?',(created,expiry,row['id']))
     @staticmethod
     def _insert(connection,table,values):
         columns=list(values)
@@ -109,17 +122,31 @@ class Database:
         with self.connect() as connection:
             row=connection.execute('SELECT * FROM bot_status WHERE id=1').fetchone()
             return dict(row) if row else None
-    def insert_command(self,command):
+    def insert_command(self,command,ttl_seconds=60):
+        created=datetime.now(timezone.utc); expires=created+timedelta(seconds=int(ttl_seconds))
         with self.connect() as connection:
-            cursor=connection.execute('INSERT INTO commands(time,command,status,message) VALUES (?,?,?,?)',(datetime.now(timezone.utc).isoformat(),str(command),'pending',''))
+            cursor=connection.execute('INSERT INTO commands(time,created_at,expires_at,command,status,message) VALUES (?,?,?,?,?,?)',(created.isoformat(),created.isoformat(),expires.isoformat(),str(command),'pending',''))
             return cursor.lastrowid
-    def get_pending_commands(self):
+    def get_pending_commands(self,now=None,bot_started_at=None):
+        now=now or datetime.now(timezone.utc)
+        now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+        started=bot_started_at
+        if started is not None: started=started.replace(tzinfo=timezone.utc) if started.tzinfo is None else started.astimezone(timezone.utc)
         with self.connect() as connection:
-            return [dict(row) for row in connection.execute("SELECT * FROM commands WHERE status='pending' ORDER BY id")]
+            rows=connection.execute("SELECT * FROM commands WHERE status IN ('pending','running') ORDER BY id").fetchall(); ready=[]
+            for row in rows:
+                created=datetime.fromisoformat((row['created_at'] or row['time']).replace('Z','+00:00'))
+                expires=datetime.fromisoformat(row['expires_at'].replace('Z','+00:00')) if row['expires_at'] else created+timedelta(seconds=60)
+                created=created.replace(tzinfo=timezone.utc) if created.tzinfo is None else created.astimezone(timezone.utc)
+                expires=expires.replace(tzinfo=timezone.utc) if expires.tzinfo is None else expires.astimezone(timezone.utc)
+                if expires<=now or (started is not None and created<started):
+                    connection.execute("UPDATE commands SET status='expired',message='expired before processing',processed_time=? WHERE id=?",(now.isoformat(),row['id']))
+                elif row['status']=='pending': ready.append(dict(row))
+            return ready
     def update_command(self,command_id,status,message=''):
-        if status not in {'pending','running','done','failed'}: raise ValueError('Invalid command status')
+        if status not in {'pending','running','done','failed','expired'}: raise ValueError('Invalid command status')
         with self.connect() as connection:
-            connection.execute('UPDATE commands SET status=?,message=?,processed_time=? WHERE id=?',(status,str(message),datetime.now(timezone.utc).isoformat() if status in {'done','failed'} else None,command_id))
+            connection.execute('UPDATE commands SET status=?,message=?,processed_time=? WHERE id=?',(status,str(message),datetime.now(timezone.utc).isoformat() if status in {'done','failed','expired'} else None,command_id))
     def get_pnl_since(self,dt):
         stamp=dt.isoformat() if hasattr(dt,'isoformat') else str(dt)
         with self.connect() as connection:

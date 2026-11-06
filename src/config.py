@@ -15,6 +15,8 @@ class RiskSettings:
     weekly_loss_limit_pct: float
     max_open_positions: int
     max_positions_per_group: int
+    max_positions_per_currency: int
+    max_positions_per_underlying_group: int
     max_margin_usage_pct: float
     max_hold_minutes: int
     min_risk_reward: float
@@ -65,11 +67,11 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
         value=raw.get(key)
         if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<=low or (high is not None and value>high):
             raise ValueError(f'risk.{key} must be > {low}' + (f' and <= {high}' if high else ''))
-    for key in ('max_open_positions','max_positions_per_group','max_hold_minutes'):
+    for key in ('max_open_positions','max_positions_per_group','max_positions_per_currency','max_positions_per_underlying_group','max_hold_minutes'):
         if type(raw.get(key)) is not int or raw[key]<=0: raise ValueError(f'risk.{key} must be a positive integer')
     spreads=raw.get('max_spread_points')
     if not isinstance(spreads,dict) or any(not isinstance(v,(int,float)) or v<0 for v in spreads.values()): raise ValueError('risk.max_spread_points must map symbols to non-negative numbers')
-    risk=RiskSettings(float(raw['risk_per_trade_pct']),float(raw['daily_loss_limit_pct']),float(raw['weekly_loss_limit_pct']),raw['max_open_positions'],raw['max_positions_per_group'],float(raw['max_margin_usage_pct']),raw['max_hold_minutes'],float(raw['min_risk_reward']),float(raw['max_cost_to_target_ratio']),spreads,_clock(raw.get('no_new_trades_friday_after_utc'),'no_new_trades_friday_after_utc'),_clock(raw.get('close_all_friday_utc'),'close_all_friday_utc'))
+    risk=RiskSettings(float(raw['risk_per_trade_pct']),float(raw['daily_loss_limit_pct']),float(raw['weekly_loss_limit_pct']),raw['max_open_positions'],raw['max_positions_per_group'],raw['max_positions_per_currency'],raw['max_positions_per_underlying_group'],float(raw['max_margin_usage_pct']),raw['max_hold_minutes'],float(raw['min_risk_reward']),float(raw['max_cost_to_target_ratio']),spreads,_clock(raw.get('no_new_trades_friday_after_utc'),'no_new_trades_friday_after_utc'),_clock(raw.get('close_all_friday_utc'),'close_all_friday_utc'))
     credentials={key:os.getenv(key,'').strip() for key in ('MT5_LOGIN','MT5_PASSWORD','MT5_SERVER')}
     if require_credentials:
         for key,value in credentials.items():
@@ -77,6 +79,7 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     login=credentials['MT5_LOGIN']
     if login and not login.isdigit(): raise ValueError('MT5_LOGIN must be a numeric account number')
     if not isinstance(config['universe'].get('include_groups'),list) or not isinstance(config['universe'].get('exclude_symbols'),list) or not isinstance(config['universe'].get('symbol_aliases'),dict): raise ValueError('universe include_groups, exclude_symbols and symbol_aliases must be configured')
+    if type(config['universe'].get('exclude_dated_futures',True)) is not bool: raise ValueError('universe.exclude_dated_futures must be boolean')
     if not isinstance(config['timeframes'],list) or not config['timeframes']: raise ValueError('timeframes must be a non-empty list')
     if any(tf not in {'M1','M5','M15','H1'} for tf in config['timeframes']): raise ValueError('timeframes may contain only M1, M5, M15 and H1')
     if type(config['magic_number']) is not int or config['magic_number']<=0: raise ValueError('magic_number must be a positive integer')
@@ -106,4 +109,5 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     if not isinstance(live.get('strategies'),list) or any(not isinstance(name,str) for name in live['strategies']): raise ValueError('live.strategies must be a list of strategy names')
     for key in ('max_cycle_errors','equity_snapshot_seconds','heartbeat_seconds'):
         if type(live.get(key)) is not int or live[key]<=0: raise ValueError(f'live.{key} must be a positive integer')
+    if type(live.get('command_ttl_seconds',60)) is not int or live.get('command_ttl_seconds',60)<=0: raise ValueError('live.command_ttl_seconds must be a positive integer')
     return Settings(config,int(login) if login else None,credentials['MT5_PASSWORD'],credentials['MT5_SERVER'],os.getenv('MT5_PATH') or None,os.getenv('ALLOW_REAL','false').lower()=='true',path.parent,risk)

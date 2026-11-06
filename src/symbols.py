@@ -1,5 +1,28 @@
 from datetime import datetime,timezone
+import re
 from .time_utils import mt5_epoch_to_utc
+
+_DATED_FUTURE=re.compile(r'(?:[-_.]?(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(?:20)?\d{2})$',re.IGNORECASE)
+
+def is_dated_future(symbol):
+ return bool(_DATED_FUTURE.search(str(symbol).strip()))
+
+def underlying_key(symbol):
+ """Remove common broker suffixes and futures expiry from a symbol name."""
+ name=_DATED_FUTURE.sub('',str(symbol).strip().upper())
+ while True:
+  cleaned=re.sub(r'(?:CASH|#|M)$','',name,flags=re.IGNORECASE)
+  if cleaned==name: break
+  name=cleaned
+ return name.rstrip('._-')
+
+def underlying_group(symbol,asset_group):
+ if asset_group!='indices': return None
+ key=underlying_key(symbol)
+ if key.startswith('US'): return 'us_indices'
+ if key.startswith(('GER','DAX','DE','EU','FRA','UK')): return 'europe_indices'
+ if key.startswith(('JP','JPN','AUS','HK','SG')): return 'asia_pacific_indices'
+ return 'other_indices'
 class SymbolService:
  def __init__(self,mt5,settings): self.mt5=mt5; self.settings=settings; self.cache=[]; self.loaded=0
  def list_all_symbols(self,refresh_minutes=5):
@@ -58,6 +81,7 @@ class SymbolService:
   u=self.settings.config['universe']; out=[]
   for s in self.list_all_symbols():
    if s.name in u['exclude_symbols'] or self.get_asset_group(s.name) not in u['include_groups']: continue
+   if u.get('exclude_dated_futures',True) and is_dated_future(s.name): continue
    if self.is_tradable(s.name)[0]: out.append(s.name)
   return out
 

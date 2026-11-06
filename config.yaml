@@ -9,6 +9,8 @@ risk:
   weekly_loss_limit_pct: 8.0     # Stop new trades after this weekly equity loss
   max_open_positions: 10         # Total concurrent positions
   max_positions_per_group: 4     # Correlation guard per asset group
+  max_positions_per_currency: 2  # Net directional positions per FX/metals currency
+  max_positions_per_underlying_group: 2 # Concurrent positions per underlying group
   max_margin_usage_pct: 40       # Maximum projected margin / equity
   max_hold_minutes: 120          # Close our positions after this duration
   min_risk_reward: 1.0           # Minimum TP distance / SL distance
@@ -21,6 +23,7 @@ risk:
 universe:
   include_groups: [forex, metals, indices, energy, crypto, stocks]
   exclude_symbols: []
+  exclude_dated_futures: true    # Exclude names ending in month/year contract codes
   symbol_aliases:
     GOLD: [GOLD, XAUUSD]
     SILVER: [SILVER, XAGUSD]
@@ -77,6 +80,7 @@ live:
   max_cycle_errors: 5           # Disable new entries after this many consecutive errors
   equity_snapshot_seconds: 30
   heartbeat_seconds: 10
+  command_ttl_seconds: 60        # Dashboard commands expire after this many seconds
 history:
   data_dir: data/history
   ranges_months: {M1: 3, M5: 12, M15: 36, H1: 36}

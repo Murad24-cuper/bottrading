@@ -1,4 +1,4 @@
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from types import SimpleNamespace
 from src.models import Signal,AccountState
 from src.risk import calc_volume,check_trade_allowed
@@ -16,7 +16,7 @@ def test_calc_volume_caps_at_volume_max():
     assert calc_volume(100000,50,1.1,1.099,{**SPEC,'volume_max':0.2})[0]==0.2
 
 def make_context(tmp_path):
-    risk={'risk_per_trade_pct':0.5,'daily_loss_limit_pct':3.0,'weekly_loss_limit_pct':8.0,'max_open_positions':10,'max_positions_per_group':4,'max_margin_usage_pct':40.0,'max_hold_minutes':120,'min_risk_reward':1.0,'max_cost_to_target_ratio':0.3,'max_spread_points':{},'no_new_trades_friday_after_utc':'20:00','close_all_friday_utc':'21:30'}
+    risk={'risk_per_trade_pct':0.5,'daily_loss_limit_pct':3.0,'weekly_loss_limit_pct':8.0,'max_open_positions':10,'max_positions_per_group':4,'max_positions_per_currency':2,'max_positions_per_underlying_group':2,'max_margin_usage_pct':40.0,'max_hold_minutes':120,'min_risk_reward':1.0,'max_cost_to_target_ratio':0.3,'max_spread_points':{},'no_new_trades_friday_after_utc':'20:00','close_all_friday_utc':'21:30'}
     settings=SimpleNamespace(config={'risk':risk},root=tmp_path,risk=SimpleNamespace(**risk))
     account=AccountState(1000,1000,0,1000,None,'USD',100,0,2)
     signal=Signal('EURUSD','buy','M5',100,99,102,0.8,'test')
@@ -38,6 +38,11 @@ def test_check_trade_allowed_kill_switch_first(tmp_path):
 def test_check_trade_allowed_friday_cutoff(tmp_path):
     _,_,_,_,allowed,check=make_context(tmp_path); assert allowed[0]
     assert check(now_utc=datetime(2026,11,6,20,1,tzinfo=timezone.utc))[1]=='Friday trading cutoff'
+def test_friday_cutoff_uses_utc_when_local_calendar_day_is_saturday(tmp_path):
+    _,_,_,_,_,check=make_context(tmp_path)
+    baku=datetime(2026,11,7,0,30,tzinfo=timezone(timedelta(hours=4)))
+    assert baku.weekday()==5 and baku.astimezone(timezone.utc)==datetime(2026,11,6,20,30,tzinfo=timezone.utc)
+    assert check(now_utc=baku)[1]=='Friday trading cutoff'
 def test_check_trade_allowed_daily_loss_includes_floating(tmp_path):
     _,_,_,_,allowed,check=make_context(tmp_path); assert allowed[0]
     assert check(pnl_today=-25,open_positions=[{'symbol':'GBPUSD','profit':-6}])[1]=='daily loss limit reached'
@@ -55,6 +60,21 @@ def test_check_trade_allowed_group_limit(tmp_path):
 def test_check_trade_allowed_duplicate_symbol(tmp_path):
     _,_,_,_,allowed,check=make_context(tmp_path); assert allowed[0]
     assert check(open_positions=[{'symbol':'EURUSD','asset_group':'forex'}])[1]=='symbol already has open position'
+def test_currency_exposure_blocks_net_direction_over_limit(tmp_path):
+    _,_,signal,_,_,check=make_context(tmp_path)
+    signal.symbol='GBPAUD'
+    positions=[{'symbol':'AUDUSD','asset_group':'forex','direction':'sell','currency_base':'AUD','currency_profit':'USD'}, {'symbol':'EURAUD','asset_group':'forex','direction':'buy','currency_base':'EUR','currency_profit':'AUD'}]
+    assert check(open_positions=positions,symbol_spec={'currency_base':'GBP','currency_profit':'AUD'})[1]=='maximum net exposure for AUD reached'
+def test_same_underlying_with_broker_suffix_is_blocked(tmp_path):
+    _,_,signal,_,_,check=make_context(tmp_path)
+    signal.symbol='US500Cash'
+    positions=[{'symbol':'US500-DEC26','asset_group':'indices','direction':'sell'}]
+    assert check(open_positions=positions,symbol_group='indices')[1]=='underlying already has open position'
+def test_underlying_group_limit_blocks_correlated_indices(tmp_path):
+    _,_,signal,_,_,check=make_context(tmp_path)
+    signal.symbol='US500Cash'
+    positions=[{'symbol':'US30Cash','asset_group':'indices'}, {'symbol':'US400Cash','asset_group':'indices'}]
+    assert check(open_positions=positions,symbol_group='indices')[1]=='maximum positions for underlying group reached'
 def test_check_trade_allowed_requires_sl(tmp_path):
     _,_,signal,_,allowed,check=make_context(tmp_path); assert allowed[0]
     signal.sl_price=None

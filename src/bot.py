@@ -13,6 +13,7 @@ from .mt5_client import MT5Client
 from .risk import calc_volume,check_trade_allowed
 from .scanner import MarketScanner
 from .symbols import SymbolService
+from .symbols import underlying_group,underlying_key
 
 log=get_logger(__name__)
 RECONNECT_BACKOFF=(5,15,60)
@@ -44,6 +45,7 @@ class TradingBot:
     def __init__(self,settings:Settings,client=None,db=None,scanner=None,executor=None,clock=None,sleep=None,monotonic=None):
         self.settings=settings; self.client=client or MT5Client(settings); self.db=db or Database(settings.db_path)
         self.scanner=scanner; self.executor=executor; self.clock=clock or (lambda:datetime.now(timezone.utc)); self.sleep_fn=sleep or time.sleep; self.monotonic=monotonic or time.monotonic
+        self.process_started_at=self._now()
         self.cycle_number=0; self.consecutive_errors=0; self.trading_disabled=False; self.last_error=''; self._critical_reported=False
         self._market_closed_logged=False; self._last_snapshot=0.0; self._started=False; self._last_account_type='unknown'; self._daily_peak_equity=0.0
         self.stop_event=False; self._connection_down=False; self.lock=BotLock(settings.root/'data'/'bot.lock')
@@ -84,7 +86,7 @@ class TradingBot:
             return True
         return False
     def _process_commands(self):
-        for command in self.db.get_pending_commands():
+        for command in self.db.get_pending_commands(now=self._now(),bot_started_at=self.process_started_at):
             command_id=int(command['id']); action=command['command']
             self.db.update_command(command_id,'running')
             try:
@@ -136,7 +138,10 @@ class TradingBot:
         if margin is None:
             reason=f'order_calc_margin failed: {self.client.mt5.last_error()}'; self._signal_update(candidate,False,reason); return False
         service=getattr(self.scanner,'symbols',None)
-        open_positions=[{'symbol':p.symbol,'asset_group':service.get_asset_group(p.symbol) if service else candidate.asset_group,'profit':float(p.profit)+float(getattr(p,'swap',0) or 0)} for p in positions]
+        open_positions=[]
+        for p in positions:
+            info=self.client.mt5.symbol_info(p.symbol); group=service.get_asset_group(p.symbol) if service else candidate.asset_group
+            open_positions.append({'symbol':p.symbol,'asset_group':group,'exposure_group':underlying_group(p.symbol,group),'underlying':underlying_key(p.symbol),'direction':'buy' if p.type==self.client.mt5.POSITION_TYPE_BUY else 'sell','currency_base':getattr(info,'currency_base','') if info else '','currency_profit':getattr(info,'currency_profit','') if info else '','profit':float(p.profit)+float(getattr(p,'swap',0) or 0)})
         pnl_today,pnl_week=self._pnl_periods(now)
         allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,self.settings,candidate.cost,candidate.asset_group,now,margin,volume,spec)
         if not allowed:

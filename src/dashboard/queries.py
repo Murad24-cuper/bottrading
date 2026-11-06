@@ -1,6 +1,6 @@
 """SQLite-only dashboard data functions. Read queries open the database read-only."""
 from __future__ import annotations
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from pathlib import Path
 import sqlite3
 
@@ -62,9 +62,10 @@ def get_daily_pnl(path=None,days=30):
 def get_day_stats(day,path=None):
     return _rows(path,'SELECT * FROM daily_stats WHERE date=?',(day.isoformat() if hasattr(day,'isoformat') else str(day),))
 
-def enqueue_command(command,path=None):
+def enqueue_command(command,path=None,ttl_seconds=60):
     if command not in {'close_all','pause','resume'}: raise ValueError('Unsupported dashboard command')
     db=Path(path or DEFAULT_DB_PATH).resolve()
+    now=datetime.now(timezone.utc); created=now.isoformat(); expires=(now+timedelta(seconds=int(ttl_seconds))).isoformat()
     with sqlite3.connect(db,timeout=10) as connection:
-        cursor=connection.execute('INSERT INTO commands(time,command,status,message) VALUES (?,?,?,?)',(datetime.now(timezone.utc).isoformat(),command,'pending',''))
+        cursor=connection.execute('INSERT INTO commands(time,created_at,expires_at,command,status,message) VALUES (?,?,?,?,?,?)',(created,created,expires,command,'pending',''))
         return cursor.lastrowid

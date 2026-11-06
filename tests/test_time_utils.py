@@ -35,6 +35,12 @@ def test_converts_mt5_server_epoch_to_utc():
 
     assert mt5_epoch_to_utc(server_time.timestamp(), offset=timedelta(hours=2)) == now
 
+def test_bot_normalizes_local_saturday_clock_to_utc_friday(tmp_path):
+    from src.bot import TradingBot
+    local=datetime(2026,11,7,0,30,tzinfo=timezone(timedelta(hours=4)))
+    bot=object.__new__(TradingBot); bot.clock=lambda:local
+    assert bot._now()==datetime(2026,11,6,20,30,tzinfo=timezone.utc)
+
 
 def test_candle_index_is_converted_to_utc_and_symbol_is_selected(monkeypatch):
     import src.market_data as market_data
