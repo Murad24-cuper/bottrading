@@ -11,6 +11,22 @@ def _pivots(frame: pd.DataFrame, window: int=2):
         if lo[i]<=min(lo[i-window:i+window+1]): points.append((i,'L',lo[i]))
     return sorted(points)
 
+def _boundary_pattern(high_slope: float, low_slope: float, narrowing: bool, flat: float):
+    """Classify converging swing boundaries into a directional structure."""
+    sh,sl=high_slope,low_slope
+    if narrowing and sh<0<sl: return ('symmetrical_triangle','bullish')
+    if abs(sh)<=flat and sl>flat: return ('ascending_triangle','bullish')
+    if sh<-flat and abs(sl)<=flat: return ('descending_triangle','bearish')
+    if narrowing and sh>0 and sl>sh: return ('rising_wedge','bearish')
+    if narrowing and sh<sl<0: return ('falling_wedge','bullish')
+    if abs(sh)<=flat and abs(sl)<=flat: return ('rectangle','bullish' if sh>=0 else 'bearish')
+    return None
+
+def _continuation_pattern(impulse: float, consolidation: float, parallel: bool):
+    """Classify a strong impulse followed by a tight continuation range."""
+    if abs(impulse)<=0 or consolidation>=abs(impulse)*.55: return None
+    return 'flag' if parallel else 'pennant'
+
 def detect_chart_patterns(frame: pd.DataFrame, timeframe: str, tolerance: float=.015, swing_window: int=2) -> list[dict]:
     """Detect approximate structures; distances are measured in current ATRs."""
     if frame is None or len(frame)<30: return []
@@ -45,17 +61,15 @@ def detect_chart_patterns(frame: pd.DataFrame, timeframe: str, tolerance: float=
         hs=highs[-3:]; ls=lows[-3:]
         sh=np.polyfit([p[0] for p in hs],[p[2] for p in hs],1)[0]; sl=np.polyfit([p[0] for p in ls],[p[2] for p in ls],1)[0]
         width0=hs[0][2]-ls[0][2]; width1=hs[-1][2]-ls[-1][2]
-        if width0>0 and width1<width0*.8:
-            if sh<0<sl: add('symmetrical_triangle','bullish',hs[-1][2])
-            elif sh<0 and sl<0: add('descending_triangle','bearish',ls[-1][2])
-            elif sh>0 and sl>0: add('rising_wedge','bearish',ls[-1][2])
-            elif sh<0 and sl>0: add('falling_wedge','bullish',hs[-1][2])
-        elif abs(sh)<atr_now/len(data)*.3 and sl>0: add('ascending_triangle','bullish',hs[-1][2])
-        elif abs(sl)<atr_now/len(data)*.3 and sh<0: add('descending_triangle','bearish',ls[-1][2])
-        elif abs(sh-sl)<atr_now/len(data)*.3: add('rectangle','bullish' if price>(hs[-1][2]+ls[-1][2])/2 else 'bearish',hs[-1][2])
+        classified=_boundary_pattern(sh,sl,width0>0 and width1<width0*.8,atr_now/len(data)*.3)
+        if classified:
+            name,direction=classified; level=hs[-1][2] if direction=='bullish' else ls[-1][2]
+            if name in {'ascending_triangle','symmetrical_triangle','rising_wedge','rectangle'}: level=hs[-1][2]
+            add(name,direction,level)
         # Impulse followed by a tight ten-bar consolidation: flag/pennant.
         if len(data)>=30:
             impulse=float(data.close.iloc[-11]-data.close.iloc[-21]); consolidation=float(data.high.iloc[-10:].max()-data.low.iloc[-10:].min())
-            if abs(impulse)>atr_now*3 and consolidation<abs(impulse)*.55:
-                add('pennant' if abs(sh-sl)>atr_now/len(data)*.3 else 'flag','bullish' if impulse>0 else 'bearish',price)
+            continuation=_continuation_pattern(impulse,consolidation,abs(sh-sl)<=atr_now/len(data)*.3)
+            if abs(impulse)>atr_now*3 and continuation:
+                add(continuation,'bullish' if impulse>0 else 'bearish',price)
     return out

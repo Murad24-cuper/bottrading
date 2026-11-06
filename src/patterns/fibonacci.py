@@ -20,6 +20,6 @@ def fibonacci_retracement(frame: pd.DataFrame, timeframe: str, lookback: int=100
         value=hi-span*ratio if up else lo+span*ratio
         levels.append({'ratio':ratio,'price':float(value),'distance_atr':float(abs(price-value)/a) if a>0 else None})
     nearest=min(levels,key=lambda x:x['distance_atr'] if x['distance_atr'] is not None else float('inf'))
-    touched=float(last.low)<=nearest['price']<=float(last.high)
+    touched=[level for level in levels if float(last.low)<=level['price']<=float(last.high)]
     rejection=bool(touched and ((up and float(last.close)>float(last.open)) or (not up and float(last.close)<float(last.open))))
-    return {'timeframe':timeframe,'swing_direction':'up' if up else 'down','levels':levels,'nearest':nearest,'reacting':rejection}
+    return {'timeframe':timeframe,'swing_direction':'up' if up else 'down','levels':levels,'nearest':nearest,'reacting':rejection,'reaction_level':min(touched,key=lambda x:x['distance_atr']) if rejection else None}

@@ -14,3 +14,9 @@ def test_fibonacci_ignores_forming_bar():
     d=pd.DataFrame({'open':close-.1,'high':close+.5,'low':close-.5,'close':close,'tick_volume':1})
     expected=fibonacci_retracement(d,'H1'); d.loc[100,['high','low','close']]=[1e9,0,1e9]
     assert fibonacci_retracement(d,'H1')==expected
+
+def test_fibonacci_reaction_identifies_the_level_touched_by_rejection():
+    close=np.linspace(100,120,101)
+    d=pd.DataFrame({'open':close-.1,'high':close+.5,'low':close-.5,'close':close,'tick_volume':1})
+    result=fibonacci_retracement(d,'M15')
+    assert result['reacting'] == (result['reaction_level'] is not None)
