@@ -7,7 +7,7 @@ from .logger import get_logger
 from .time_utils import mt5_epoch_to_utc
 from . import market_data, indicators as ind
 from .risk import calc_volume
-from .trade_rules import adverse_exit_score, should_exit_early
+from .trade_rules import adverse_exit_score, scale_out_volume, should_exit_early, stagnation_due, stop_only_tightens
 
 log=get_logger(__name__)
 
@@ -136,7 +136,7 @@ class Executor:
         if float(sl or 0)<=0 or float(tp or 0)<=0:
             self._event(f'Refused SL/TP modification: ticket={ticket} must retain positive SL and TP','WARNING'); return False
         is_buy=p.type==self.mt5.POSITION_TYPE_BUY; current_sl=float(p.sl or 0)
-        if (is_buy and current_sl>0 and float(sl)<current_sl-1e-10) or (not is_buy and current_sl>0 and float(sl)>current_sl+1e-10):
+        if current_sl>0 and not stop_only_tightens('buy' if is_buy else 'sell',current_sl,float(sl)):
             self._event(f'Refused SL/TP modification: ticket={ticket} would loosen its stop','WARNING'); return False
         tick=self.mt5.symbol_info_tick(p.symbol)
         if tick is None or (is_buy and float(sl)>=float(tick.bid)) or (not is_buy and float(sl)<=float(tick.ask)):
@@ -166,10 +166,8 @@ class Executor:
             peak=max(float(row.get('peak_favorable_r') or 0),current_r)
             self.db.update_open_trade(row['ticket'],peak_favorable_r=peak)
             if not int(row.get('scale_out_done') or 0) and current_r>=config.first_target_r:
-                step=float(info.volume_step); minimum=float(info.volume_min)
-                desired=float(p.volume)*float(config.scale_out_pct)/100
-                partial=math.floor(desired/step+1e-10)*step
-                if partial<minimum-1e-9 or float(p.volume)-partial<minimum-1e-9:
+                partial,close_all=scale_out_volume(float(p.volume),float(info.volume_step),float(info.volume_min),float(config.scale_out_pct))
+                if close_all:
                     actions.append(self.close_position(p.ticket,'partial_tp')); continue
                 actions.append(self._close_partial(p,partial))
                 # Refresh the position after the partial fill before managing its stop.
@@ -188,7 +186,7 @@ class Executor:
                     if tighter and stop_ok and self.modify_sl_tp(p.ticket,breakeven,float(p.tp or 0)): protective_sl=breakeven
                 except Exception as exc:
                     self._event(f'Could not estimate breakeven costs ticket={p.ticket}: {exc}','WARNING')
-                try: frame=market_data.get_closed_candles(self.mt5,p.symbol,row.get('timeframe') or 'M5',max(30,int(config.momentum_lookback_bars)+2))
+                try: frame=market_data.get_closed_candles(self.mt5,p.symbol,'M1',max(30,int(config.momentum_lookback_bars)+2))
                 except Exception as exc:
                     self._event(f'Could not read management candles ticket={p.ticket}: {exc}','WARNING'); frame=None
                 if frame is not None and len(frame)>=int(config.momentum_lookback_bars)+1:
@@ -202,7 +200,7 @@ class Executor:
                     tighter=trail>protective_sl if is_buy else (protective_sl==0 or trail<protective_sl)
                     valid=trail<current if is_buy else trail>current
                     if math.isfinite(trail) and tighter and valid: self.modify_sl_tp(p.ticket,trail,float(p.tp or 0))
-            if age>=config.stagnation_minutes and peak<float(config.stagnation_min_r): actions.append(self.close_position(p.ticket,'stagnant'))
+            if stagnation_due(age,peak,config.stagnation_minutes,config.stagnation_min_r): actions.append(self.close_position(p.ticket,'stagnant'))
         return actions
     def enforce_adverse_move_exit(self, settings=None):
         """Close owned positions in the configured adverse R band when M1 evidence turns."""

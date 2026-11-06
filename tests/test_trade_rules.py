@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from src.trade_rules import adverse_exit_score, confidence_allowed, mtf_direction_agrees, should_exit_early, stop_target_from_atr, spread_within_median, may_extend
+from src.trade_rules import adverse_exit_score, confidence_allowed, mtf_direction_agrees, scale_out_volume, should_exit_early, stop_only_tightens, stagnation_due, stop_target_from_atr, spread_within_median, may_extend
 
 
 def _frame(direction='buy', bars=80):
@@ -57,3 +57,17 @@ def test_early_exit_score_and_r_band():
     assert should_exit_early(-.4,score,cfg)
     assert not should_exit_early(-.1,score,cfg)
     assert not should_exit_early(-.8,score,cfg)
+
+
+def test_scale_out_respects_step_minimum_and_closes_all_if_unsplittable():
+    assert scale_out_volume(.10,.01,.01,50)==(.05,False)
+    assert scale_out_volume(.01,.01,.01,50)==(.01,True)
+
+
+def test_trailing_stop_only_tightens_and_stagnation_rule():
+    assert stop_only_tightens('buy',100,100.1)
+    assert not stop_only_tightens('buy',100,99.9)
+    assert stop_only_tightens('sell',100,99.9)
+    assert not stop_only_tightens('sell',100,100.1)
+    assert stagnation_due(4,.1,4,.2)
+    assert not stagnation_due(3,.1,4,.2)

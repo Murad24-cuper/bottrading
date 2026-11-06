@@ -1,6 +1,7 @@
 """Pure helpers for short-horizon entries and exits."""
 from __future__ import annotations
 import math
+import decimal
 import pandas as pd
 from . import indicators as ind
 
@@ -84,6 +85,28 @@ def should_exit_early(current_r: float, score: int, config: dict) -> bool:
     return (bool(config.get('early_exit_enabled', True)) and
             float(config['early_exit_min_r']) <= float(current_r) <= float(config['early_exit_max_r']) and
             int(score) >= int(config['early_exit_score_threshold']))
+
+
+def scale_out_volume(open_volume: float, step: float, minimum: float, percent: float) -> tuple[float, bool]:
+    """Return a valid partial close; flag a full close when the remainder cannot be split."""
+    if min(open_volume, step, minimum, percent) <= 0 or percent >= 100:
+        raise ValueError('volume grid and scale-out percent must be positive')
+    unit = decimal.Decimal(str(step)); desired = decimal.Decimal(str(open_volume))*decimal.Decimal(str(percent))/100
+    partial = (desired/unit).to_integral_value(rounding=decimal.ROUND_FLOOR)*unit
+    opened = decimal.Decimal(str(open_volume)); min_volume=decimal.Decimal(str(minimum))
+    if partial < min_volume or opened-partial < min_volume:
+        return float(opened), True
+    return float(partial), False
+
+
+def stop_only_tightens(direction: str, old_stop: float, new_stop: float) -> bool:
+    """True when a proposed stop is no farther from entry than the existing stop."""
+    return new_stop >= old_stop if direction == 'buy' else new_stop <= old_stop
+
+
+def stagnation_due(age_minutes: float, peak_r: float, after_minutes: float, minimum_r: float) -> bool:
+    """Check whether a trade failed to make the configured progress in time."""
+    return float(age_minutes) >= float(after_minutes) and float(peak_r) < float(minimum_r)
 
 
 def may_extend(in_profit: bool, scaled_out: bool, stop_protects_profit: bool, mtf_agrees: bool,
