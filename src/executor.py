@@ -32,7 +32,7 @@ class Executor:
         if flags & int(getattr(m,'SYMBOL_FILLING_IOC',2)): return m.ORDER_FILLING_IOC
         if getattr(info,'trade_exemode',None)==getattr(m,'SYMBOL_TRADE_EXECUTION_MARKET',2): return None
         return m.ORDER_FILLING_RETURN
-    def open_trade(self,signal,volume):
+    def open_trade(self,signal,volume,expected_cost=None):
         m=self.mt5
         if self.kill_switch_active(): return self._failure('Refused open: STOP kill switch is active',volume)
         if signal.sl_price is None: return self._failure('Refused open: stop-loss is required',volume)
@@ -82,7 +82,8 @@ class Executor:
         ticket=int(getattr(result,'position',0) or getattr(result,'order',0) or getattr(result,'deal',0))
         now=datetime.now(timezone.utc).isoformat()
         try:
-            self.db.insert_trade(ticket=ticket,symbol=signal.symbol,asset_group=self._asset_group(signal.symbol),direction=signal.direction,volume=volume,initial_volume=volume,open_time=now,open_price=result.price,sl=signal.sl_price,tp=signal.tp_price,profit=0,commission=0,swap=0,strategy=signal.strategy_name,reason=signal.reason,magic=self.settings.magic_number,status='open',timeframe=signal.timeframe,initial_risk=abs(float(result.price)-float(signal.sl_price)),scale_out_done=0,peak_favorable_r=0)
+            costs=expected_cost if isinstance(expected_cost,dict) else {}
+            self.db.insert_trade(ticket=ticket,symbol=signal.symbol,asset_group=self._asset_group(signal.symbol),direction=signal.direction,volume=volume,initial_volume=volume,open_time=now,open_price=result.price,sl=signal.sl_price,tp=signal.tp_price,profit=0,commission=0,swap=0,strategy=signal.strategy_name,reason=signal.reason,magic=self.settings.magic_number,status='open',timeframe=signal.timeframe,initial_risk=abs(float(result.price)-float(signal.sl_price)),scale_out_done=0,peak_favorable_r=0,estimated_spread_cost=float(costs.get('spread_cost',0) or 0),estimated_commission_cost=float(costs.get('commission',0) or 0))
         except Exception as exc:
             # The broker position is open; surface the persistence failure loudly for reconciliation.
             self._event(f'CRITICAL: opened ticket {ticket} but could not write trade row: {exc}','ERROR')

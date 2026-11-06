@@ -82,7 +82,7 @@ def get_daily_pnl(path=None,days=30):
 
 def get_performance_report(start_utc,end_utc,path=None):
     """Return trade metrics and breakdowns for a UTC interval."""
-    trades=_rows(path,"SELECT id,ticket,symbol,asset_group,strategy,close_reason,close_time,profit,commission,swap FROM trades WHERE status='closed' AND close_time>=? AND close_time<? ORDER BY close_time",(start_utc,end_utc))
+    trades=_rows(path,"SELECT id,ticket,symbol,asset_group,strategy,close_reason,close_time,profit,commission,swap,estimated_spread_cost FROM trades WHERE status='closed' AND close_time>=? AND close_time<? ORDER BY close_time",(start_utc,end_utc))
     partials=_rows(path,'SELECT ticket,profit,commission,swap FROM partial_closes WHERE time>=? AND time<?',(start_utc,end_utc))
     partial_by_ticket={}; partial_cost_by_ticket={}
     for row in partials:
@@ -90,7 +90,7 @@ def get_performance_report(start_utc,end_utc,path=None):
         partial_cost_by_ticket[key]=partial_cost_by_ticket.get(key,0.0)+abs(float(row.get('commission') or 0))
     for row in trades:
         row['net']=sum(float(row.get(k) or 0) for k in ('profit','commission','swap'))+partial_by_ticket.get(int(row['ticket']),0.0)
-        row['costs']=abs(float(row.get('commission') or 0))+partial_cost_by_ticket.get(int(row['ticket']),0.0)
+        row['costs']=abs(float(row.get('commission') or 0))+partial_cost_by_ticket.get(int(row['ticket']),0.0)+float(row.get('estimated_spread_cost') or 0)
     values=[float(row['net']) for row in trades]
     winners=[value for value in values if value>0]; losers=[value for value in values if value<0]
     snapshots=_rows(path,'SELECT time,equity FROM equity_snapshots WHERE time>=? AND time<? ORDER BY time',(start_utc,end_utc))

@@ -283,7 +283,7 @@ class TradingBot:
             if why=='daily loss limit reached': self._notify('daily_loss','🛑 Gündəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.')
             if why=='weekly loss limit reached': self._notify('weekly_loss','🛑 Həftəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.')
             self._signal_update(candidate,False,why); return False
-        result=self.executor.open_trade(signal,volume)
+        result=self.executor.open_trade(signal,volume,expected_cost=candidate.cost)
         if not result.success:
             self._signal_update(candidate,False,result.message); return False
         self._cycle_reservations.append({'position':{'symbol':candidate.symbol,'asset_group':candidate.asset_group,'exposure_group':underlying_group(candidate.symbol,candidate.asset_group),'underlying':underlying_key(candidate.symbol),'direction':signal.direction,'currency_base':spec.get('currency_base',''),'currency_profit':spec.get('currency_profit',''),'profit':0.0},'margin':float(margin)})
