@@ -69,6 +69,8 @@ def test_scanner_mocked_market_data_logs_negative_and_ranks_positive(tmp_path,mo
     import json
     feature_json=json.loads(rows[0]['features'])
     assert 'observations' in feature_json and 'candlestick_patterns' in feature_json['observations']
+    assert 'brain' in feature_json and feature_json['brain']['memory']['probability'] is None
+    assert feature_json['brain']['suggested_risk_pct']==0
     assert scanner.last_scan_stats['total_symbols']==2
     assert scanner.last_scan_stats['symbols_scanned']==2
     assert scanner.last_scan_stats['scan_complete'] is True

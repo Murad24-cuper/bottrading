@@ -89,6 +89,24 @@ class MarketScanner:
         self.symbols=symbol_service or SymbolService(mt5,settings)
         self._cache={}; self._cursor=0; self._strategies=load_strategies(settings); self.last_universe_size=0
         self._volatility_cache={}; self._spread_cache={}; self.last_scan_stats={}; self.last_strategy_diagnostics={}
+        self._brain_rows=self._load_brain_rows()
+    def _load_brain_rows(self):
+        """Load optional historical memory; absence keeps the brain shadow-only."""
+        data_dir=getattr(self.settings,'data_dir',None)
+        if data_dir is None:
+            from pathlib import Path
+            configured=Path(self.settings.config.get('paths',{}).get('data_dir','data'))
+            data_dir=configured if configured.is_absolute() else Path(self.settings.root)/configured
+        path=data_dir/'brain'/'reference.parquet'
+        if not path.exists(): return {}
+        try:
+            frame=__import__('pandas').read_parquet(path)
+            required={'time','symbol','asset_group','vector','win','net_r'}
+            if not required.issubset(frame.columns): raise ValueError(f'missing {sorted(required-set(frame.columns))}')
+            return {str(group):rows.to_dict('records') for group,rows in frame.groupby('asset_group')}
+        except Exception as exc:
+            self.db.log_event('WARNING','brain',f'Brain reference memory unavailable; shadow score has no neighbours: {exc}')
+            return {}
     def _bars(self,symbol,timeframe,count):
         key=(symbol,timeframe); cached=self._cache.get(key)
         try:
@@ -229,6 +247,14 @@ class MarketScanner:
                 feature_snapshot=dict(features); observations=dict(features.get('observations',{}))
                 observations['signal_context']=context_for_signal(cycle_context,symbol,signal.direction,group)
                 feature_snapshot['observations']=observations
+                from .brain.checklist import evaluate as evaluate_brain_checklist
+                from .brain.decide import decide as decide_brain
+                brain_cfg=self.settings.config.get('brain',{})
+                brain_checklist=evaluate_brain_checklist(features,signal.direction,brain_cfg.get('checklist',{}).get('weights',{}),observations,signal.entry_hint,signal.tp_price)
+                from .brain.memory import query_memory,situation_vector
+                brain_rows=self._brain_rows.get(group,[])
+                brain_memory=query_memory(situation_vector(candles,observations['signal_context']),brain_rows,datetime.now(timezone.utc),symbol,int(brain_cfg.get('k_neighbors',300)),int(brain_cfg.get('query_exclude_same_symbol_days',1))) if brain_rows else {'count':0,'probability':None,'avg_win_r':0.0,'avg_loss_r':0.0,'cases':[],'mean_distance':None}
+                feature_snapshot['brain']={'checklist':brain_checklist,'memory':brain_memory,'decision':decide_brain(brain_checklist,brain_memory,brain_cfg),'suggested_risk_pct':0.0,'mode':'shadow' if brain_cfg.get('shadow',True) else 'disabled'}
                 if not confidence_allowed(signal.confidence,float(cfg.get('min_confidence',0.0))):
                     reason='confidence below scanner.min_confidence'; self._write_signal(signal,0,reason,features=feature_snapshot); strategy_diagnostics[strategy.name]['confidence_below_minimum']+=1; continue
                 if cfg.get('require_mtf_agreement',True) and not mtf_direction_agrees(candles,signal.direction,fast=int(cfg.get('mtf_ema_fast',5)),slow=int(cfg.get('mtf_ema_slow',13)),min_agree=int(cfg.get('mtf_min_agree',3))):
@@ -259,6 +285,9 @@ class MarketScanner:
                 cost=market_data.get_cost_estimate(self.mt5,symbol,volume)
                 risk_money=market_data.price_distance_to_money(self.mt5,symbol,abs(signal.entry_hint-signal.sl_price),volume)
                 reward_money=market_data.price_distance_to_money(self.mt5,symbol,abs(signal.tp_price-signal.entry_hint),volume)
+                from .brain.sizing import fractional_kelly_risk_pct
+                feature_snapshot['brain']['decision']=decide_brain(brain_checklist,brain_memory,brain_cfg,float(cost.get('cost',0))/max(risk_money,1e-12))
+                feature_snapshot['brain']['suggested_risk_pct']=fractional_kelly_risk_pct(float(brain_memory['probability']),float(brain_memory['avg_win_r']),float(brain_cfg.get('kelly_fraction',.25))) if brain_memory['probability'] is not None else 0.0
                 score=expected_value_score(signal.confidence,reward_money,risk_money,cost['cost'])
                 reason='expected value is non-positive' if score<=0 else ('below scanner.min_score' if score<float(cfg['min_score']) else '')
                 candidate=Candidate(symbol,group,strategy.name,signal,signal.confidence,volume,risk_money,reward_money,cost,score,feature_snapshot,spec,reason)
