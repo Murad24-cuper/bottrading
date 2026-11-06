@@ -307,6 +307,10 @@ def main():
             detail_metrics[2].metric('MT5 əlaqəsi','Aktivdir' if mt5_connected else 'Yoxdur')
             detail_metrics[3].metric('Ürək döyüntüsü',f'{heartbeat_age:.0f} san' if heartbeat_age is not None else 'Məlumat yoxdur')
             st.caption(f'Skanlama: cəmi {stats.get("scan_total",0)} · yoxlanıb {stats.get("scan_scanned",0)} · ticarətə uyğun {stats.get("scan_stage1_passed",0)} · təhlil edilən alətlər {stats.get("scan_top_n",0)} · siqnallar {stats.get("scan_signals",0)} · {float(stats.get("scan_seconds",0) or 0):.2f} san')
+            st.subheader('Gündəlik iş qrafiki')
+            schedule_rows=queries.get_scheduler_status(DB_PATH)
+            task_names={'hourly_history':'Saatlıq tarixçə','daily_backup':'Gündəlik ehtiyat nüsxə','weekly_retrain':'Həftəlik beyin yenilənməsi','weekly_vacuum':'Həftəlik DB təmizliyi'}
+            st.table(pd.DataFrame([{'İş':task_names.get(row['task'],row['task']),'Son icra':local_time(row['last_run']) if row['last_run'] else 'Hələ icra edilməyib','Növbəti icra (UTC)':row['next_run'],'Vəziyyət':row['status']} for row in schedule_rows]))
             target=int(_APP_CONFIG.get('scanner',{}).get('target_open_positions',15))
             st.caption(f'Açıq bot mövqeləri: {len(opened)} / {target} hədəf (hədəf məcburi əməliyyat sayı deyil)')
             skips=queries.get_top_skip_reasons_since((datetime.now(timezone.utc)-timedelta(hours=1)).isoformat(),DB_PATH,5)

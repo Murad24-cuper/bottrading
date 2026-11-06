@@ -75,7 +75,7 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     required={'account','risk','universe','timeframes','magic_number','executor','strategies','loop','scanner','history','backtest','live','supervisor','mt5','confluence','db_path'}
     missing=required-config.keys()
     if missing: raise ValueError(f'config.yaml is missing keys: {", ".join(sorted(missing))}')
-    for section in ('account','risk','universe','loop','scanner','history','backtest','live','supervisor','mt5','confluence'):
+    for section in ('account','risk','universe','loop','scanner','history','backtest','live','supervisor','mt5','confluence','health','schedule','brain'):
         if not isinstance(config[section],dict): raise ValueError(f'{section} must be a mapping')
     if config['account'].get('mode') not in {'demo','real'}: raise ValueError('account.mode must be demo or real')
     raw=config['risk']
@@ -123,6 +123,12 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     if not isinstance(scanner.get('min_score'),(int,float)): raise ValueError('scanner.min_score must be numeric')
     if not isinstance(scanner.get('min_confidence'),(int,float)) or not 0<=scanner['min_confidence']<=1: raise ValueError('scanner.min_confidence must be between 0 and 1')
     if scanner['min_confidence']<0.55: raise ValueError('scanner.min_confidence cannot be below the safety floor 0.55')
+    for key in ('max_memory_mb','warn_disk_free_gb','stop_downloads_free_gb'):
+        if not isinstance(config['health'].get(key),(int,float)) or config['health'][key]<=0: raise ValueError(f'health.{key} must be positive')
+    schedule=config['schedule']
+    for key in ('hourly_minute_utc','daily_rollover_hour_utc','weekly_day_utc','weekly_hour_utc'):
+        maximum=59 if key=='hourly_minute_utc' else 23 if key.endswith('hour_utc') else 6
+        if type(schedule.get(key)) is not int or not 0<=schedule[key]<=maximum: raise ValueError(f'schedule.{key} is out of range')
     if type(scanner.get('require_mtf_agreement')) is not bool: raise ValueError('scanner.require_mtf_agreement must be boolean')
     if type(scanner.get('mtf_min_agree')) is not int or not 2<=scanner['mtf_min_agree']<=3: raise ValueError('scanner.mtf_min_agree must be 2 or 3')
     if type(scanner.get('target_open_positions')) is not int or scanner['target_open_positions']<1: raise ValueError('scanner.target_open_positions must be a positive integer')

@@ -46,8 +46,11 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
     history_cfg=(settings.config if hasattr(settings,'config') else settings or {}).get('history',{})
     base=Path(history_cfg.get('data_dir','data/history'))
     if not base.is_absolute(): base=Path(getattr(settings,'root',Path.cwd()))/base
+    base.mkdir(parents=True,exist_ok=True)
     months_cfg=history_cfg.get('ranges_months',{'M1':3,'M5':12,'M15':36,'H1':36})
     max_bytes=int(float(history_cfg.get('max_storage_gb',5))*1024**3)
+    import shutil
+    min_free=int(float((settings.config if hasattr(settings,'config') else settings or {}).get('health',{}).get('stop_downloads_free_gb',2))*1024**3)
     result={}; specs_path=base/'symbol_specs.json'
     if specs_path.exists():
         try: metadata=json.loads(specs_path.read_text(encoding='utf-8'))
@@ -55,6 +58,8 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
     else: metadata={}
     symbol_service=SymbolService(mt5,settings) if settings is not None else None
     for symbol in symbols:
+        free=shutil.disk_usage(base if base.exists() else base.parent).free
+        if free<min_free: raise RuntimeError(f'History download stopped: only {free/1024**3:.2f} GB disk space remains; configured minimum is {min_free/1024**3:.1f} GB.')
         result[symbol]={}
         if not mt5.symbol_select(symbol,True): raise RuntimeError(f'symbol_select {symbol} failed: {mt5.last_error()}')
         info=mt5.symbol_info(symbol)

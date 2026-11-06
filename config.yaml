@@ -134,6 +134,15 @@ live:
 health:
   stale_ticks_seconds: 120       # Reconnect if all open-market symbols have stale ticks
   reconnect_failures_before_pause: 3 # Disable entries after repeated MT5 health failures
+  max_memory_mb: 1500
+  warn_disk_free_gb: 5
+  stop_downloads_free_gb: 2
+schedule:
+  hourly_minute_utc: 0
+  daily_rollover_hour_utc: 0
+  daily_backup_keep: 14
+  weekly_day_utc: 6
+  weekly_hour_utc: 2
 notify:
   big_loss_usd: 5.0              # Notify on a single larger net loss
   daily_summary_utc: "21:00"     # Daily summary time in UTC

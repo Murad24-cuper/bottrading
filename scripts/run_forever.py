@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import time
+import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -16,6 +17,7 @@ from src.logger import get_logger
 from src.supervisor import clear_stale_pid_lock, run_restart_supervisor, heartbeat_is_stale, hang_watchdog_should_terminate, write_hang_report, detached_python_executable
 from scripts.run_bot import install_crash_handlers
 from src.paths import project_paths
+from src.scheduler import due_scheduler_jobs,run_daily_backup,should_restart_for_memory
 
 log = get_logger('bot.supervisor')
 
@@ -28,6 +30,27 @@ def _pid_alive(pid: int) -> bool:
         return True
     except OSError:
         return False
+
+def _process_memory_mb(pid: int) -> float|None:
+    """Read process working-set size with the Windows API, without psutil."""
+    if os.name!='nt': return None
+    import ctypes
+    from ctypes import wintypes
+    class Counters(ctypes.Structure):
+        _fields_=[('cb',wintypes.DWORD),('PageFaultCount',wintypes.DWORD),('PeakWorkingSetSize',ctypes.c_size_t),('WorkingSetSize',ctypes.c_size_t),('QuotaPeakPagedPoolUsage',ctypes.c_size_t),('QuotaPagedPoolUsage',ctypes.c_size_t),('QuotaPeakNonPagedPoolUsage',ctypes.c_size_t),('QuotaNonPagedPoolUsage',ctypes.c_size_t),('PagefileUsage',ctypes.c_size_t),('PeakPagefileUsage',ctypes.c_size_t)]
+    kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+    kernel.OpenProcess.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD]; kernel.OpenProcess.restype=wintypes.HANDLE
+    kernel.CloseHandle.argtypes=[wintypes.HANDLE]
+    handle=kernel.OpenProcess(0x0400|0x0010,False,int(pid))
+    if not handle: return None
+    try:
+        counters=Counters(); counters.cb=ctypes.sizeof(counters)
+        psapi=ctypes.WinDLL('psapi',use_last_error=True)
+        psapi.GetProcessMemoryInfo.argtypes=[wintypes.HANDLE,ctypes.POINTER(Counters),wintypes.DWORD]
+        psapi.GetProcessMemoryInfo.restype=wintypes.BOOL
+        if not psapi.GetProcessMemoryInfo(handle,ctypes.byref(counters),counters.cb): return None
+        return counters.WorkingSetSize/1024**2
+    finally: kernel.CloseHandle(handle)
 
 
 def main() -> int:
@@ -62,6 +85,7 @@ def main() -> int:
     child_script = settings.root / 'scripts' / 'run_bot.py'
     bot_lock = data_dir / 'bot.lock'
     child = None
+    last_health_check=0.0; last_disk_warning=0.0
 
     def emit(level: str, message: str) -> None:
         getattr(log, level.lower(), log.info)(message)
@@ -95,6 +119,29 @@ def main() -> int:
         while True:
             try: return int(child.wait(timeout=1))
             except subprocess.TimeoutExpired: pass
+            tick=time.monotonic()
+            if tick-last_health_check>=60:
+                last_health_check=tick
+                free=shutil.disk_usage(settings.data_dir).free
+                health=settings.config.get('health',{})
+                if free<float(health.get('warn_disk_free_gb',5))*1024**3 and tick-last_disk_warning>=3600:
+                    emit('WARNING',f'Disk free space is low: {free/1024**3:.2f} GB')
+                    last_disk_warning=tick
+                memory=_process_memory_mb(child.pid)
+                if should_restart_for_memory(memory,float(health.get('max_memory_mb',1500))):
+                    emit('CRITICAL',f'Bot working set {memory:.0f} MB exceeds limit; restarting process without closing broker positions')
+                    child.terminate()
+                    try: child.wait(timeout=5)
+                    except subprocess.TimeoutExpired: child.kill(); child.wait()
+                    return 125
+                for task,key in due_scheduler_jobs(datetime.now(timezone.utc),settings.config):
+                    if task=='daily_backup':
+                        try: run_daily_backup(settings,db,datetime.now(timezone.utc))
+                        except Exception as exc: emit('ERROR',f'Daily DB backup failed: {type(exc).__name__}: {exc}')
+                    elif task=='weekly_maintenance':
+                        if not db.maintenance_done('weekly_retrain',key):
+                            emit('WARNING','Weekly brain retraining deferred: no complete training pipeline/data is available; brain remains shadow-only')
+                            db.mark_maintenance_done('weekly_retrain',key,datetime.now(timezone.utc))
             if hang_watchdog_should_terminate(heartbeat_is_stale(settings.db_path,hang_seconds),time.monotonic()-child_started,hang_seconds):
                 reason=f'heartbeat older than {hang_seconds}s; child PID={child.pid}'
                 write_hang_report(settings.logs_dir,reason)

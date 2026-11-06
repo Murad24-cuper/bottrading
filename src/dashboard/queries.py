@@ -64,6 +64,27 @@ def get_today_diversity(start_utc,end_utc,path=None):
         key=underlying_key(row['symbol']); per_symbol[key]=per_symbol.get(key,0)+int(row['trades'])
     return {'symbols':len(symbols),'groups':len(groups),'per_group':per_group,'top_symbols':sorted(per_symbol.items(),key=lambda item:(-item[1],item[0]))[:10]}
 
+def get_scheduler_status(path=None,now=None):
+    """Expose last and next UTC times for supervisor maintenance jobs."""
+    now=now or datetime.now(timezone.utc); now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+    config=_config.get('schedule',{}); db_path=Path(path or DEFAULT_DB_PATH)
+    try:
+        with _read(db_path) as connection:
+            connection.row_factory=sqlite3.Row
+            completed=[dict(row) for row in connection.execute('SELECT task,run_key,completed_at FROM maintenance_runs ORDER BY completed_at DESC LIMIT 50')]
+    except (sqlite3.Error,OSError): completed=[]
+    def weekly_next(day,hour):
+        days=(int(day)-now.weekday())%7; candidate=(now+timedelta(days=days)).replace(hour=int(hour),minute=0,second=0,microsecond=0)
+        return candidate+timedelta(days=7) if candidate<=now else candidate
+    hourly=(now+timedelta(hours=1)).replace(minute=0,second=0,microsecond=0)
+    daily=now.replace(hour=int(config.get('daily_rollover_hour_utc',0)),minute=0,second=0,microsecond=0)
+    if daily<=now: daily+=timedelta(days=1)
+    rows=[]
+    for task,next_run in [('hourly_history',hourly),('daily_backup',daily),('weekly_retrain',weekly_next(config.get('weekly_day_utc',6),config.get('weekly_hour_utc',2))),('weekly_vacuum',weekly_next(config.get('weekly_day_utc',6),config.get('weekly_hour_utc',2)))]:
+        last=next((row for row in completed if row['task']==task),None)
+        rows.append({'task':task,'last_run':last['completed_at'] if last else None,'next_run':next_run.isoformat(),'status':'tamamlanıb' if last else 'gözləyir'})
+    return rows
+
 def get_partial_closes(start_utc,end_utc,path=None):
     return _rows(path,'SELECT time,symbol,ticket,volume,price,profit,commission,swap,reason FROM partial_closes WHERE time>=? AND time<? ORDER BY time DESC',(start_utc,end_utc))
 
