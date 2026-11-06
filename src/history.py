@@ -47,6 +47,7 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
     base=Path(history_cfg.get('data_dir','data/history'))
     if not base.is_absolute(): base=Path(getattr(settings,'root',Path.cwd()))/base
     months_cfg=history_cfg.get('ranges_months',{'M1':3,'M5':12,'M15':36,'H1':36})
+    max_bytes=int(float(history_cfg.get('max_storage_gb',5))*1024**3)
     result={}; specs_path=base/'symbol_specs.json'
     if specs_path.exists():
         try: metadata=json.loads(specs_path.read_text(encoding='utf-8'))
@@ -93,7 +94,14 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
             if not combined.empty: combined=combined[~combined.index.duplicated(keep='last')]
             completed_before=datetime.now(timezone.utc)
             combined=combined[[stamp+timedelta(minutes=TF_MINUTES[tf])<=completed_before for stamp in combined.index]]
-            combined.to_parquet(path)
+            temporary=path.with_suffix(path.suffix+'.tmp')
+            combined.to_parquet(temporary)
+            existing_bytes=sum(file.stat().st_size for file in base.glob('*.parquet') if file!=path)
+            projected=existing_bytes+temporary.stat().st_size
+            if projected>max_bytes:
+                temporary.unlink(missing_ok=True)
+                raise RuntimeError(f'History storage cap {max_bytes/1024**3:.1f} GB exceeded while saving {symbol} {tf}; stop before writing more data.')
+            temporary.replace(path)
             result[symbol][tf]=combined.loc[(combined.index>=start)&(combined.index<=end)]
             actual=result[symbol][tf]
             if actual.empty: print(f'{symbol} {tf}: received 0 bars; no actual range available in {start.isoformat()}..{end.isoformat()}')

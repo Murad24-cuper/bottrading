@@ -119,6 +119,7 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
         if type(scanner.get(key)) is not int or scanner[key]<=0: raise ValueError(f'scanner.{key} must be a positive integer')
     if scanner['top_movers']>100: raise ValueError('scanner.top_movers must not exceed 100')
     if not isinstance(scanner.get('max_spread_volatility_ratio'),(int,float)) or scanner['max_spread_volatility_ratio']<=0: raise ValueError('scanner.max_spread_volatility_ratio must be positive')
+    if not isinstance(scanner.get('spread_volatility_horizon_minutes'),(int,float)) or scanner['spread_volatility_horizon_minutes']<=0: raise ValueError('scanner.spread_volatility_horizon_minutes must be positive')
     if not isinstance(scanner.get('min_score'),(int,float)): raise ValueError('scanner.min_score must be numeric')
     if not isinstance(scanner.get('min_confidence'),(int,float)) or not 0<=scanner['min_confidence']<=1: raise ValueError('scanner.min_confidence must be between 0 and 1')
     if scanner['min_confidence']<0.55: raise ValueError('scanner.min_confidence cannot be below the safety floor 0.55')

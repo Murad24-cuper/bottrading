@@ -53,6 +53,7 @@ risk:
 universe:
   include_groups: [forex, metals, indices, energy, crypto, stocks]
   refresh_minutes: 5           # Refresh broker symbol discovery/cache interval
+  tick_freshness_seconds_by_group: {forex: 120, metals: 180, indices: 180, energy: 300, crypto: 300, stocks: 1800, other: 180}
   exclude_symbols: []
   exclude_dated_futures: true    # Exclude names ending in month/year contract codes
   symbol_aliases:
@@ -118,6 +119,7 @@ scanner:
   top_movers: 40                 # Full strategy analysis runs only on top movers
   movement_timeframe_minutes: 30 # Short-term movement measurement for ranking
   max_spread_volatility_ratio: 1.0  # Skip when spread exceeds one ATR; target cost gate remains stricter
+  spread_volatility_horizon_minutes: 20 # Compare spread against 20-minute expected movement
   min_movers_per_group: 5        # Round-robin minimum when candidates are available
   repeat_penalty: 0.15           # Expected-R penalty per underlying trade today
   group_repeat_penalty: 0.05     # Expected-R penalty per asset-group trade today
@@ -161,7 +163,8 @@ confluence:
   rules: []                       # Optional entry filters; disabled by default
 history:
   data_dir: data/history
-  ranges_months: {M1: 3, M5: 12, M15: 36, H1: 36}
+  ranges_months: {M1: 6, M5: 24, M15: 24, H1: 36}
+  max_storage_gb: 5
   liquid_aliases: [GOLD, SILVER, EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, EURJPY, GBPJPY, US30, NAS100, GER40, OIL, BTCUSD, ETHUSD]
 backtest:
   start_equity: 1000

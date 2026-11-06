@@ -112,8 +112,19 @@ class SymbolService:
   stamp=getattr(t,'time_msc',0)/1000 if t and getattr(t,'time_msc',0) else (getattr(t,'time',0) if t else 0)
   tick_utc=mt5_epoch_to_utc(stamp,self.mt5) if stamp else None
   age=(datetime.now(timezone.utc)-tick_utc).total_seconds() if tick_utc else float('inf')
-  if not t or age< -5 or age>60: return False,'stale tick / market closed'
-  if check_session and not self.session_history_available(symbol): return False,'session history unavailable'
+  group=self.get_asset_group(symbol)
+  fresh_limits=self.settings.config['universe'].get('tick_freshness_seconds_by_group',{})
+  freshness=float(fresh_limits.get(group,fresh_limits.get('other',60)))
+  if not t or age< -5 or age>freshness: return False,'stale tick / market closed'
+  history_known=self.session_history_available(symbol) if check_session else True
+  if check_session and not history_known:
+   # Sparse newly-listed symbols may not have enough bars to infer sessions;
+   # require fresh closed-bar activity in addition to the fresh quote.
+   from .market_data import get_closed_candles
+   try: recent=get_closed_candles(self.mt5,symbol,'M1',5)
+   except (RuntimeError,ValueError): recent=None
+   if recent is None or recent.empty or (datetime.now(timezone.utc)-recent.index[-1].to_pydatetime()).total_seconds()>freshness+60:
+    return False,'no recent bar activity'
   upcoming=self.next_session_close(symbol,now_utc,0.0) if check_session else None
   if upcoming:
    now=now_utc or datetime.now(timezone.utc)
@@ -129,7 +140,7 @@ class SymbolService:
   import time
   if self._candidate_cache and time.monotonic()-self._candidate_loaded<int(self.settings.config['universe']['refresh_minutes'])*60:
    return list(self._candidate_cache)
-  self.select_liquid_symbols()
+  preferred=self.select_liquid_symbols()
   u=self.settings.config['universe']; out=[]
   for item in self.list_all_symbols():
    name=item.name
@@ -137,8 +148,9 @@ class SymbolService:
    if u.get('exclude_dated_futures',True) and is_dated_future(name): continue
    if select and not self.mt5.symbol_select(name,True): continue
    out.append(name)
-  self._candidate_cache=out; self._candidate_loaded=time.monotonic()
-  return list(out)
+  preferred=[name for name in preferred if name in out]
+  self._candidate_cache=list(dict.fromkeys([*preferred,*out])); self._candidate_loaded=time.monotonic()
+  return list(self._candidate_cache)
  def get_universe(self):
   return [name for name in self.get_candidates() if self.is_tradable(name)[0]]
 

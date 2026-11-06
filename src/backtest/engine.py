@@ -266,7 +266,7 @@ class Backtester:
                             m1_closed=supplied.get('M1')
                             atr_fallback=float(ind.atr(m1_closed).iloc[-1]) if m1_closed is not None and len(m1_closed) else 0.0
                             point=self._point(symbol,self.specs.get(symbol,{}))
-                            horizon=max(1.0,float(self.settings.config.get('risk',{}).get('move_horizon_minutes',10)))
+                            horizon=max(1.0,float(scanner_cfg.get('spread_volatility_horizon_minutes',self.settings.config.get('risk',{}).get('move_horizon_minutes',10))))
                             if not spread_within_expected_move(current_spread*point,atr_fallback,horizon,float(scanner_cfg.get('max_spread_volatility_ratio',1.0))): continue
                     indices=data[symbol][tf].index; next_pos=indices.searchsorted(open_time,side='right')
                     if next_pos>=len(indices): continue

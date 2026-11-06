@@ -145,7 +145,7 @@ class MarketScanner:
                 if median_points>0 and not spread_within_median(current_points,median_points,float(spread_cfg.get('max_spread_vs_median',1.8))):
                     rejection['spread above 24h median limit']+=1; continue
             cached=self._volatility_cache.get(symbol); max_ratio=float(cfg['max_spread_volatility_ratio'])
-            horizon=max(1.0,float(self.settings.config['risk']['move_horizon_minutes']))
+            horizon=max(1.0,float(cfg.get('spread_volatility_horizon_minutes',self.settings.config['risk']['move_horizon_minutes'])))
             if not force and cached and (datetime.now(timezone.utc)-cached['time']).total_seconds()<=int(cfg['movement_timeframe_minutes'])*60 and not spread_within_expected_move(spread_price,cached['atr'],horizon,max_ratio):
                 rejection['spread too high relative to recent volatility']+=1; continue
             snapshots[symbol]={'point':point,'spread_price':spread_price}
@@ -163,7 +163,7 @@ class MarketScanner:
             if not price or not math.isfinite(price) or not math.isfinite(atr) or atr<=0:
                 if symbol in open_symbols: movement.append((float('-inf'),symbol)); continue
                 move_rejections['movement indicators unavailable']+=1; continue
-            horizon=max(1.0,float(self.settings.config['risk']['move_horizon_minutes']))
+            horizon=max(1.0,float(cfg.get('spread_volatility_horizon_minutes',self.settings.config['risk']['move_horizon_minutes'])))
             expected_move=atr*math.sqrt(horizon)
             self._volatility_cache[symbol]={'atr':atr,'time':datetime.now(timezone.utc)}
             if symbol not in open_symbols and not spread_within_expected_move(spread_price,atr,horizon,max_ratio):

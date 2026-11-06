@@ -58,6 +58,28 @@ def test_dated_futures_can_be_included_when_explicitly_configured():
     service = make_service(['US500-DEC26'], exclude_dated=False)
     assert service.get_universe() == ['US500-DEC26']
 
+def test_configured_liquid_symbols_are_selected_first_for_rotation():
+    service=make_service(['US500Cash','US400Cash'])
+    service.settings.config['history']['liquid_aliases']=['US400Cash']
+    assert service.get_candidates()[:2]==['US400Cash','US500Cash']
+
+def test_missing_session_history_falls_back_to_recent_bar_activity(monkeypatch):
+    import pandas as pd
+    from src import market_data
+    service=make_service(['US500Cash']); service.session_history_available=lambda symbol:False
+    service.settings.config['universe']['tick_freshness_seconds_by_group']={'indices':180,'other':60}
+    now=pd.Timestamp.now(tz='UTC')
+    monkeypatch.setattr(market_data,'get_closed_candles',lambda *args,**kwargs:pd.DataFrame({'close':[1]},index=[now-pd.Timedelta(minutes=1)]))
+    assert service.is_tradable('US500Cash')==(True,'tradable')
+
+def test_missing_recent_bar_activity_rejects_when_session_history_is_unavailable(monkeypatch):
+    import pandas as pd
+    from src import market_data
+    service=make_service(['US500Cash']); service.session_history_available=lambda symbol:False
+    service.settings.config['universe']['tick_freshness_seconds_by_group']={'indices':180,'other':60}
+    monkeypatch.setattr(market_data,'get_closed_candles',lambda *args,**kwargs:pd.DataFrame())
+    assert service.is_tradable('US500Cash')==(False,'no recent bar activity')
+
 def test_session_close_is_inferred_in_utc_from_repeated_hourly_gaps():
     import pandas as pd
     from datetime import timedelta
