@@ -124,3 +124,28 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
         specs_path.parent.mkdir(parents=True,exist_ok=True)
         specs_path.write_text(json.dumps(metadata,indent=2,default=str),encoding='utf-8')
     return result
+
+def refresh_incremental_batch(mt5,settings,now=None):
+    """Update one persisted brain-universe symbol/timeframe through the bot's MT5 session."""
+    cfg=settings.config.get('history',{})
+    if not cfg.get('incremental_refresh_enabled',False): return None
+    universe_path=Path(settings.data_dir)/'brain'/'universe.json'
+    if not universe_path.is_file(): return None
+    payload=json.loads(universe_path.read_text(encoding='utf-8'))
+    symbols=[str(row['symbol']) for row in payload.get('symbols',[]) if isinstance(row,dict) and row.get('symbol')]
+    timeframes=[str(tf) for tf in cfg.get('incremental_timeframes',['M1','M5','M15','H1']) if tf in TF_MINUTES]
+    if not symbols or not timeframes: return None
+    cursor_path=Path(settings.data_dir)/'history_refresh_cursor.json'
+    try: cursor=max(0,int(json.loads(cursor_path.read_text(encoding='utf-8')).get('cursor',0)))
+    except (OSError,ValueError,TypeError,json.JSONDecodeError): cursor=0
+    pairs=[(symbol,tf) for symbol in symbols for tf in timeframes]
+    cursor%=len(pairs); symbol,timeframe=pairs[cursor]
+    end=now or datetime.now(timezone.utc)
+    end=end.replace(tzinfo=timezone.utc) if end.tzinfo is None else end.astimezone(timezone.utc)
+    days=max(1,int(cfg.get('incremental_batch_days',{}).get(timeframe,7)))
+    result=download_history(mt5,[symbol],[timeframe],end-timedelta(days=days),end,settings)
+    cursor_path.parent.mkdir(parents=True,exist_ok=True)
+    temp=cursor_path.with_suffix('.tmp')
+    temp.write_text(json.dumps({'cursor':(cursor+1)%len(pairs),'updated_at':end.isoformat()}),encoding='utf-8')
+    temp.replace(cursor_path)
+    return {'symbol':symbol,'timeframe':timeframe,'bars':len(result.get(symbol,{}).get(timeframe,[])),'cursor':(cursor+1)%len(pairs)}

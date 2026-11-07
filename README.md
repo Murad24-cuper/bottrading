@@ -1,6 +1,8 @@
 # XM MT5 Trading Bot
 
 For server deployment under Linux/Wine, see [docs/SERVER.md](docs/SERVER.md).
+On the server, incremental history refreshes run in small rotating batches over
+the bot's existing MT5 session; no second terminal connection is opened.
 
 This is a single-owner XM trading bot. Python connects to the locally running MetaTrader 5 terminal through the official `MetaTrader5` package. It scans the broker's discovered symbols, records decisions and trades in SQLite, and provides a localhost dashboard. It never withdraws money. Validate on DEMO before considering any real account.
 

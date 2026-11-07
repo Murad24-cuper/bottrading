@@ -63,6 +63,7 @@ class TradingBot:
         self.notifier=TelegramNotifier(rate_limit_minutes=notify_cfg.get('rate_limit_minutes',5))
         self._health_failures=0; self._entries_health_blocked=False; self._trade_allowed=False; self._last_daily_summary=''; self._last_maintenance_day=''
         self._data_dir=data_dir; self._brain_drift_checked=0.0
+        self._history_refresh_cycle=0
         self._last_notified_trade_id=self.db.latest_trade_id() if hasattr(self.db,'latest_trade_id') else 0
         self._observed_utc_day=self._now().date()-timedelta(days=1)
         self._daily_limit_alert_day=''; self._weekly_limit_alert_week=''
@@ -396,6 +397,16 @@ class TradingBot:
         if self._stop_after_cycle:
             self._set_status('stopped',state.equity)
             return CycleResult(False,0)
+        history_cfg=self.settings.config.get('history',{})
+        refresh_every=max(1,int(history_cfg.get('incremental_refresh_every_cycles',4)))
+        self._history_refresh_cycle+=1
+        if history_cfg.get('incremental_refresh_enabled',False) and self._history_refresh_cycle%refresh_every==0:
+            try:
+                from .history import refresh_incremental_batch
+                refreshed=refresh_incremental_batch(self.client.mt5,self.settings,now)
+                if refreshed: self._event('INFO',f"Incremental history updated {refreshed['symbol']} {refreshed['timeframe']} bars={refreshed['bars']}")
+            except Exception as exc:
+                self._event('WARNING',f'Incremental history batch failed: {type(exc).__name__}: {exc}')
         scan=getattr(self.scanner,'scan',None) or getattr(self.scanner,'scan_once')
         candidates=scan()
         scan_stats=getattr(self.scanner,'last_scan_stats',{})

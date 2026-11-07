@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
 import pandas as pd
-from src.history import download_history,_rates
+from src.history import download_history,_rates,refresh_incremental_batch
 
 class FakeMT5:
     TIMEFRAME_M1=1
@@ -57,3 +57,20 @@ def test_history_uses_large_safe_chunks_before_seven_day_fallback():
     result=_rates(mt5,'BTCUSD','M5',start,end,max_bars=80000)
     assert len(mt5.calls)==4 # Initial request plus three near-limit chunks.
     assert len(result)==3
+
+def test_incremental_refresh_rotates_one_symbol_timeframe_on_same_mt5_session(tmp_path,monkeypatch):
+    import json
+    import src.history as history
+    data_dir=tmp_path/'data'; brain=data_dir/'brain'; brain.mkdir(parents=True)
+    (brain/'universe.json').write_text(json.dumps({'symbols':[{'symbol':'EURUSD'},{'symbol':'GOLD'}]}),encoding='utf-8')
+    settings=SimpleNamespace(root=tmp_path,data_dir=data_dir,config={'timeframes':['M1'],'history':{'data_dir':'data/history','incremental_refresh_enabled':True,'incremental_timeframes':['M1','M5'],'incremental_batch_days':{'M1':1,'M5':7}}})
+    calls=[]; monkeypatch.setattr(history,'download_history',lambda mt5,symbols,timeframes,start,end,settings:calls.append((mt5,symbols,timeframes,start,end)) or {symbols[0]:{timeframes[0]:pd.DataFrame(index=range(3))}})
+    mt5=object(); now=datetime(2026,1,10,tzinfo=timezone.utc)
+    first=refresh_incremental_batch(mt5,settings,now)
+    second=refresh_incremental_batch(mt5,settings,now)
+    assert (calls[0][1],calls[0][2])==(['EURUSD'],['M1'])
+    assert (calls[1][1],calls[1][2])==(['EURUSD'],['M5'])
+    assert calls[0][0] is mt5 and calls[1][0] is mt5
+    assert (calls[0][4]-calls[0][3]).days==1
+    assert (calls[1][4]-calls[1][3]).days==7
+    assert first['cursor']==1 and second['cursor']==2

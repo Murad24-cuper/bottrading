@@ -192,6 +192,10 @@ brain:
   live_min_expectancy_r: 0.0
 history:
   data_dir: data/history
+  incremental_refresh_enabled: true
+  incremental_timeframes: [M1, M5, M15, H1]
+  incremental_batch_days: {M1: 1, M5: 7, M15: 14, H1: 30}
+  incremental_refresh_every_cycles: 4
   ranges_months: {M1: 6, M5: 24, M15: 24, H1: 36}
   max_storage_gb: 5
   max_bars_per_request: 80000 # Stay below the MT5 terminal's history response ceiling

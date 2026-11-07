@@ -151,7 +151,7 @@ def main() -> int:
                     try: run_daily_backup(settings,db,utc_now())
                     except Exception as exc: emit('ERROR',f'Daily DB backup failed: {type(exc).__name__}: {exc}')
                 def hourly_history_job(key):
-                    emit('WARNING','Hourly history refresh deferred: MT5 access is owned by the bot child; no safe handoff is configured')
+                    emit('INFO','Incremental history refresh runs in small batches through the bot child shared MT5 session')
                     db.mark_maintenance_done('hourly_history',key,utc_now())
                 def weekly_job(key):
                     emit('WARNING','Weekly brain retraining deferred: no complete training pipeline/data is available; brain remains shadow-only')
