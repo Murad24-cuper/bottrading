@@ -2,7 +2,9 @@ $ErrorActionPreference='Stop'
 $Server='ec2-user@16.192.113.6'
 $Key=Join-Path $env:USERPROFILE 'Downloads\bot.pem'
 if (!(Test-Path $Key)) { throw "SSH key not found: $Key" }
-python -m pytest
+$python=Join-Path $PSScriptRoot '..\.venv\Scripts\python.exe'
+if (!(Test-Path $python)) { $python=(Get-Command python -ErrorAction Stop).Source }
+& $python -m pytest
 if ($LASTEXITCODE -ne 0) { throw 'Local tests failed; deployment stopped.' }
 $archive=Join-Path $env:TEMP 'tradingbot-deploy.tar'
 git archive --format=tar HEAD -o $archive
