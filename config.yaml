@@ -194,6 +194,7 @@ history:
   data_dir: data/history
   ranges_months: {M1: 6, M5: 24, M15: 24, H1: 36}
   max_storage_gb: 5
+  max_bars_per_request: 80000 # Stay below the MT5 terminal's history response ceiling
   liquid_aliases: [GOLD, SILVER, EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, EURJPY, GBPJPY, US30, NAS100, GER40, OIL, BTCUSD, ETHUSD]
 backtest:
   start_equity: 1000

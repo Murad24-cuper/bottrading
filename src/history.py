@@ -13,25 +13,33 @@ TF_MINUTES={'M1':1,'M5':5,'M15':15,'H1':60}
 def _safe_name(symbol): return re.sub(r'[^A-Za-z0-9_.-]','_',symbol)
 def history_path(directory,symbol,timeframe): return Path(directory)/f'{_safe_name(symbol)}_{timeframe}.parquet'
 
-def _rates(mt5,symbol,timeframe,start,end,chunk_days=7):
-    """Read a range, falling back to bounded chunks when MT5 rejects a long request."""
+def _rates(mt5,symbol,timeframe,start,end,chunk_days=7,max_bars=80000):
+    """Read history using near-limit chunks, recursively falling back to 7 days."""
     tf=getattr(mt5,'TIMEFRAME_'+timeframe)
     def fetch(a,b):
         rows=mt5.copy_rates_range(symbol,tf,a,b)
         return None if rows is None else pd.DataFrame(rows)
-    rows=fetch(start,end)
+    try: rows=fetch(start,end)
+    except Exception: rows=None
     if rows is None:
-        print(f'{symbol} {timeframe}: full-range request failed ({mt5.last_error()}); retrying in {chunk_days}-day chunks')
-        frames=[]; cursor=start; step=timedelta(days=chunk_days)
+        print(f'{symbol} {timeframe}: full-range request failed ({mt5.last_error()}); retrying in bounded chunks')
+        safe_days=max(chunk_days,int(max_bars*TF_MINUTES[timeframe]/1440))
+        def fetch_chunk(a,b):
+            try: part=fetch(a,b)
+            except Exception as exc:
+                print(f'{symbol} {timeframe}: chunk {a.isoformat()}..{b.isoformat()} failed: {exc}')
+                part=None
+            if part is not None:
+                return [part] if not part.empty else []
+            if (b-a).total_seconds()<=chunk_days*86400:
+                print(f'{symbol} {timeframe}: chunk {a.isoformat()}..{b.isoformat()} unavailable ({mt5.last_error()})')
+                return []
+            midpoint=a+(b-a)/2
+            return fetch_chunk(a,midpoint)+fetch_chunk(midpoint,b)
+        frames=[]; cursor=start; step=timedelta(days=safe_days)
         while cursor<end:
             chunk_end=min(cursor+step,end)
-            try: part=fetch(cursor,chunk_end)
-            except Exception as exc:
-                print(f'{symbol} {timeframe}: chunk {cursor.isoformat()}..{chunk_end.isoformat()} failed: {exc}')
-                part=None
-            if part is None:
-                print(f'{symbol} {timeframe}: chunk {cursor.isoformat()}..{chunk_end.isoformat()} unavailable ({mt5.last_error()})')
-            elif not part.empty: frames.append(part)
+            frames.extend(fetch_chunk(cursor,chunk_end))
             cursor=chunk_end
         rows=pd.concat(frames,ignore_index=True) if frames else pd.DataFrame()
     if rows.empty: return pd.DataFrame(columns=['open','high','low','close','tick_volume','spread'],index=pd.DatetimeIndex([],tz='UTC',name='time'))
@@ -43,7 +51,8 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
     end=date_to or datetime.now(timezone.utc)
     if end.tzinfo is None: end=end.replace(tzinfo=timezone.utc)
     end=end.astimezone(timezone.utc)
-    history_cfg=(settings.config if hasattr(settings,'config') else settings or {}).get('history',{})
+    full_config=settings.config if hasattr(settings,'config') else settings or {}
+    history_cfg=full_config.get('history',{})
     base=Path(history_cfg.get('data_dir','data/history'))
     if not base.is_absolute(): base=Path(getattr(settings,'root',Path.cwd()))/base
     base.mkdir(parents=True,exist_ok=True)
@@ -93,7 +102,7 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
                 if start<first: ranges.append((start,min(end,first)))
                 after=last+step
                 if after<end: ranges.append((max(start,after),end))
-            new=[_rates(mt5,symbol,tf,a,b) for a,b in ranges if a<b]
+            new=[_rates(mt5,symbol,tf,a,b,max_bars=int(history_cfg.get('max_bars_per_request',80000))) for a,b in ranges if a<b]
             parts=[frame for frame in (existing,*new) if not frame.empty]
             combined=pd.concat(parts).sort_index() if parts else pd.DataFrame(columns=['open','high','low','close','tick_volume','spread'],index=pd.DatetimeIndex([],tz='UTC',name='time'))
             if not combined.empty: combined=combined[~combined.index.duplicated(keep='last')]
