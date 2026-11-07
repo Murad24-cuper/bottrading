@@ -77,6 +77,24 @@ def test_scanner_mocked_market_data_logs_negative_and_ranks_positive(tmp_path,mo
     assert scanner.last_scan_stats['top_movers']==2
     assert scanner.last_scan_stats['groups_open']=={'forex':2}
 
+def test_open_groups_include_fresh_quotes_rejected_by_volatility_filter(tmp_path,monkeypatch):
+    import src.scanner as scanner_module
+    monkeypatch.setattr(scanner_module,'load_strategies',lambda settings:[])
+    class MT5:
+        def symbol_info(self,symbol): return SimpleNamespace(point=.0001)
+        def symbol_info_tick(self,symbol): return SimpleNamespace(bid=1.0,ask=1.0001)
+        def positions_get(self): return []
+    config={'risk':{'move_horizon_minutes':10},'scanner':{'max_seconds_per_cycle':5,'candle_count':100,'movement_timeframe_minutes':30,'max_spread_volatility_ratio':0,'top_movers':40,'target_open_positions':10,'min_movers_per_group':1,'spread_median_lookback_hours':24,'spread_median_cache_seconds':300,'max_spread_vs_median':1.5,'timeframe_point_sizes':{},'max_candidates':10,'min_score':0},'universe':{'refresh_minutes':5}}
+    settings=SimpleNamespace(config=config,risk=SimpleNamespace(no_entry_before_close_minutes=60,max_spread_points={}),root=tmp_path)
+    scanner=MarketScanner(MT5(),settings,Database(tmp_path/'open-groups.db'),FakeSymbols())
+    scanner._spread_cache={name:{'median_points':1.0,'time':datetime.now(timezone.utc)} for name in ('EURUSD','GBPUSD')}
+    bars=pd.DataFrame({'open':np.arange(100)+1,'high':np.arange(100)+2,'low':np.arange(100),'close':np.arange(100)+1,'tick_volume':100,'spread':1},index=pd.date_range('2026-01-01',periods=100,freq='min',tz='UTC'))
+    scanner._bars=lambda symbol,tf,count:bars
+    scanner.scan_once()
+    assert scanner.last_scan_stats['groups_open']=={'forex':2}
+    assert scanner.last_scan_stats['stage1_passed']==2
+    assert scanner.last_scan_stats['signals']==0
+
 def test_cached_m1_history_refetches_when_longer_spread_window_is_needed(tmp_path,monkeypatch):
     import src.scanner as scanner_module
     from src import market_data

@@ -52,7 +52,7 @@ class TradingBot:
         self.scanner=scanner; self.executor=executor; self.clock=clock or (lambda:datetime.now(timezone.utc)); self.sleep_fn=sleep or time.sleep; self.monotonic=monotonic or time.monotonic
         self.process_started_at=self._now()
         self.cycle_number=0; self.consecutive_errors=0; self.trading_disabled=False; self.last_error=''; self._critical_reported=False
-        self._market_closed_logged=False; self._last_snapshot=0.0; self._started=False; self._last_account_type='unknown'; self._daily_peak_equity=0.0
+        self._market_closed_logged=False; self._market_filter_logged=False; self._last_snapshot=0.0; self._started=False; self._last_account_type='unknown'; self._daily_peak_equity=0.0
         data_dir=getattr(settings,'data_dir',settings.root/'data')
         self.stop_event=False; self._connection_down=False; self.lock=BotLock(data_dir/'bot.lock')
         self._stop_after_cycle=False
@@ -399,13 +399,19 @@ class TradingBot:
         scan=getattr(self.scanner,'scan',None) or getattr(self.scanner,'scan_once')
         candidates=scan()
         scan_stats=getattr(self.scanner,'last_scan_stats',{})
-        market_closed=bool(scan_stats.get('scan_complete',False)) and int(scan_stats.get('stage1_passed',0))==0
+        groups_open=scan_stats.get('groups_open',{})
+        market_closed=bool(scan_stats.get('scan_complete',False)) and not groups_open
         if market_closed and not self._market_closed_logged:
             self._event('INFO','No tradable symbols: markets appear closed; scan interval extended')
             self._market_closed_logged=True
         elif not market_closed and self._market_closed_logged:
             self._event('INFO','Tradable market symbols are available again')
             self._market_closed_logged=False
+        if not market_closed and not candidates and groups_open and not self._market_filter_logged:
+            self._event('INFO',f'Fresh market quotes are open in {dict(groups_open)}; no candidate passed current scan and risk filters')
+            self._market_filter_logged=True
+        elif candidates or market_closed:
+            self._market_filter_logged=False
         allow_entries=health_ok and self.consecutive_errors<int(self.live['max_cycle_errors']) and not self.trading_disabled
         week_start=week_key
         weekly=self.db.get_or_create_week_start(week_start,state.balance)

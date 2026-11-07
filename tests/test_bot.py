@@ -62,6 +62,15 @@ def test_shadow_cycle_logs_skip_and_never_opens(tmp_path):
     with db.connect() as conn:
         assert conn.execute("SELECT 1 FROM bot_events WHERE message LIKE 'Open bot positions by asset group:%'").fetchone()
 
+def test_fresh_markets_without_candidates_are_not_logged_as_closed(tmp_path):
+    bot,db,_,_,scanner,_,_=make_bot(tmp_path,candidate=False)
+    scanner.last_scan_stats={'scan_complete':True,'groups_open':{'crypto':48},'signals':0}
+    bot.cycle()
+    with db.connect() as conn:
+        messages=[row[0] for row in conn.execute("SELECT message FROM bot_events WHERE source='bot'")]
+    assert any('Fresh market quotes are open' in message for message in messages)
+    assert not any('markets appear closed' in message for message in messages)
+
 def test_trade_mode_opens_only_live_allowlisted_strategy(tmp_path):
     bot,db,_,_,_,executor,item=make_bot(tmp_path,'trade',['breakout'])
     bot.cycle()

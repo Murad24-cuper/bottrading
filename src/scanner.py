@@ -134,7 +134,7 @@ class MarketScanner:
         owned=[p for p in (self.mt5.positions_get() or []) if int(p.magic)==self.settings.magic_number] if hasattr(self.mt5,'positions_get') else []
         open_symbols={str(p.symbol) for p in owned}
         universe=list(dict.fromkeys([*candidates,*sorted(open_symbols)])); self.last_universe_size=len(universe)
-        stage1=[]; rejection=Counter(); snapshots={}; movement=[]; move_rejections=Counter()
+        stage1=[]; rejection=Counter(); snapshots={}; movement=[]; move_rejections=Counter(); quote_open_groups=Counter()
         budget=float(cfg['max_seconds_per_cycle']); stage1_budget=budget*0.55; start=self._cursor%max(1,len(universe)); visited=0
         minutes=int(cfg['movement_timeframe_minutes']); m1_count=max(10,minutes)
         while visited<len(universe):
@@ -145,6 +145,7 @@ class MarketScanner:
                 try: ok,reason=self.symbols.is_tradable(symbol,check_session=False)
                 except TypeError: ok,reason=self.symbols.is_tradable(symbol)
                 if not ok: rejection[reason]+=1; continue
+                quote_open_groups[self.symbols.get_asset_group(symbol)]+=1
             info=self.mt5.symbol_info(symbol); tick=self.mt5.symbol_info_tick(symbol) if hasattr(self.mt5,'symbol_info_tick') else None
             if not force and (info is None or tick is None): rejection['tick unavailable']+=1; continue
             point=float(getattr(info,'point',0) or 0) if info else 0.0
@@ -305,7 +306,7 @@ class MarketScanner:
             item.skip_reason='scanner candidate limit reached'
             if item.signal_row_id is not None: self._set_skip_reason(item.signal_row_id,item.skip_reason)
         elapsed=perf_counter()-started
-        groups_open=Counter(self.symbols.get_asset_group(symbol) for _,symbol in movement)
+        groups_open=quote_open_groups
         self.last_scan_stats={'total_symbols':len(universe),'symbols_scanned':visited,'scan_complete':visited>=len(universe),'stage1_passed':len(stage1),'top_movers':len(analysed),'top_movers_selected':len(top_symbols),'signals':len(results),'scan_seconds':round(elapsed,3),'stage1_rejections':dict(rejection+move_rejections),'strategy_diagnostics':self.last_strategy_diagnostics,'groups_open':dict(groups_open)}
         if visited<len(universe): self.db.log_event('INFO','scanner',f'Scan budget reached after {visited}/{len(universe)} symbols; rotation resumes at {self._cursor}')
         self.db.log_event('INFO','scanner',f"Scan total={len(universe)} scanned={visited} complete={visited>=len(universe)} stage1_passed={len(stage1)} top_movers_selected={len(top_symbols)} analysed={len(analysed)} signals={len(results)} seconds={elapsed:.3f} stage1_rejections={dict(rejection+move_rejections)} strategy_diagnostics={self.last_strategy_diagnostics}")
