@@ -28,6 +28,19 @@ def test_detects_server_offset_from_selected_liquid_symbol():
     assert detect_server_utc_offset(mt5, now, ("EURUSD",)) == timedelta(hours=2)
     assert mt5.selected == [("EURUSD", True)]
 
+def test_weekend_offset_ignores_stale_fx_tick_and_uses_fresh_crypto_fallback():
+    now=datetime(2026,11,7,13,0,tzinfo=timezone.utc)
+    stale=now-timedelta(hours=13,minutes=20)
+    live=now+timedelta(hours=2,seconds=20)
+    class WeekendMT5(FakeMT5):
+        def symbols_get(self): return [SimpleNamespace(name='BTCUSD',path='Crypto\\Crypto')]
+        def symbol_info_tick(self,symbol):
+            stamp=live.timestamp() if symbol=='BTCUSD' else stale.timestamp()
+            return SimpleNamespace(time=int(stamp),time_msc=int(stamp*1000))
+    mt5=WeekendMT5(SimpleNamespace(time=int(stale.timestamp()),time_msc=int(stale.timestamp()*1000)))
+    assert detect_server_utc_offset(mt5,now)==timedelta(hours=2)
+    assert ('BTCUSD',True) in mt5.selected
+
 
 def test_converts_mt5_server_epoch_to_utc():
     now = datetime(2026, 11, 5, 19, 0, tzinfo=timezone.utc)
