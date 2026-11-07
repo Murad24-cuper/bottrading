@@ -157,7 +157,12 @@ def main():
     else:
         status_text=f'🟢 Bot işləyir · {account if account == "DEMO" else "Hesab"} hesab'; status_kind='good'
     colors={'good':'#167d3f','warn':'#a66a00','bad':'#b42318'}
-    st.markdown(f'<div class="status-bar" style="background:{colors[status_kind]}">{status_text}</div>',unsafe_allow_html=True)
+    try:
+        raw_groups=json.loads((status or {}).get('scan_groups_open') or '{}')
+        group_labels={'forex':'Valyuta','metals':'Metallar','indices':'İndekslər','energy':'Enerji','crypto':'Kripto','stocks':'Səhmlər','other':'Digər'}
+        opened_groups=', '.join(group_labels.get(group,group) for group,count in raw_groups.items() if int(count)>0) or 'Hazırda açıq qrup yoxdur'
+    except (ValueError,TypeError): opened_groups='Bazar qrupları məlum deyil'
+    st.markdown(f'<div class="status-bar" style="background:{colors[status_kind]}">{status_text}<br><small>Açıq bazarlar: {opened_groups}</small></div>',unsafe_allow_html=True)
     restart_count=queries.get_supervisor_restart_count(today_start,today_end,DB_PATH)
     st.caption(f'Nəzarətçi: {"işləyir" if supervisor_running else "dayanıb"} · Bu gün yenidən başladılma: {restart_count}')
     st.markdown('<style>.status-bar{color:white;padding:.75rem 1rem;border-radius:.55rem;font-weight:650;margin:.4rem 0 1rem}.metric-card{padding:1.1rem 1rem;border:1px solid rgba(128,128,128,.25);border-radius:.7rem;min-height:105px}.metric-label{font-size:.95rem;opacity:.8}.metric-value{font-size:1.7rem;font-weight:700;margin-top:.3rem}.metric-detail{font-size:.8rem;opacity:.75;margin-top:.2rem}div[data-testid="stButton"] button{min-height:3rem;font-weight:650}</style>',unsafe_allow_html=True)

@@ -28,6 +28,8 @@ def test_recent_brain_outcomes_include_costs_and_partial_closes(tmp_path):
 
 def test_signal_stats_snapshot_event_and_wal(tmp_path):
     db=Database(tmp_path/'dashboard.db')
+    db.upsert_bot_status(time='2026-11-07T12:00:00+00:00',cycle=1,mode='shadow',status='running',account_type='DEMO',scan_groups_open='{"crypto":2}')
+    assert db.get_bot_status()['scan_groups_open']=='{"crypto":2}'
     db.insert_signal(symbol='XAUUSD',strategy='test',direction='buy',timeframe='M5',confidence=.8,entry=2000,sl=1990,tp=2020,expected_cost=.1,taken=0,skip_reason='test')
     db.upsert_daily_stats(date='2026-11-05',start_balance=100,end_balance=101,pnl=1,trades_count=1,wins=1,losses=0,max_drawdown=0,invested_margin_peak=2)
     db.upsert_daily_stats(date='2026-11-05',start_balance=100,end_balance=102,pnl=2,trades_count=2,wins=2,losses=0,max_drawdown=0,invested_margin_peak=2)

@@ -75,6 +75,7 @@ def test_scanner_mocked_market_data_logs_negative_and_ranks_positive(tmp_path,mo
     assert scanner.last_scan_stats['symbols_scanned']==2
     assert scanner.last_scan_stats['scan_complete'] is True
     assert scanner.last_scan_stats['top_movers']==2
+    assert scanner.last_scan_stats['groups_open']=={'forex':2}
 
 def test_cached_m1_history_refetches_when_longer_spread_window_is_needed(tmp_path,monkeypatch):
     import src.scanner as scanner_module

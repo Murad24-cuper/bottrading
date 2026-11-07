@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS bot_status(
  id INTEGER PRIMARY KEY CHECK(id=1), time TEXT, cycle INTEGER, mode TEXT, status TEXT,
  account_type TEXT, equity REAL, last_error TEXT, mt5_connected INTEGER DEFAULT 0, scan_total INTEGER,
  scan_scanned INTEGER, scan_complete INTEGER, scan_stage1_passed INTEGER, scan_top_n INTEGER, scan_signals INTEGER,
- scan_seconds REAL, scan_rejections TEXT, strategy_diagnostics TEXT, trade_allowed INTEGER DEFAULT 0);
+ scan_seconds REAL, scan_rejections TEXT, strategy_diagnostics TEXT, trade_allowed INTEGER DEFAULT 0, scan_groups_open TEXT);
 CREATE TABLE IF NOT EXISTS commands(
  id INTEGER PRIMARY KEY, time TEXT, created_at TEXT, expires_at TEXT, command TEXT, status TEXT, message TEXT, processed_time TEXT);
 CREATE TABLE IF NOT EXISTS schema_migrations(name TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -81,7 +81,7 @@ class Database:
             if 'deal_ticket' not in partial_columns: connection.execute('ALTER TABLE partial_closes ADD COLUMN deal_ticket INTEGER')
             connection.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_partial_deal_ticket ON partial_closes(deal_ticket) WHERE deal_ticket IS NOT NULL')
             status_columns={row['name'] for row in connection.execute('PRAGMA table_info(bot_status)')}
-            for name, sql_type in {'mt5_connected':'INTEGER DEFAULT 0','scan_total':'INTEGER','scan_scanned':'INTEGER','scan_complete':'INTEGER','scan_stage1_passed':'INTEGER','scan_top_n':'INTEGER','scan_signals':'INTEGER','scan_seconds':'REAL','scan_rejections':'TEXT','strategy_diagnostics':'TEXT','trade_allowed':'INTEGER DEFAULT 0'}.items():
+            for name, sql_type in {'mt5_connected':'INTEGER DEFAULT 0','scan_total':'INTEGER','scan_scanned':'INTEGER','scan_complete':'INTEGER','scan_stage1_passed':'INTEGER','scan_top_n':'INTEGER','scan_signals':'INTEGER','scan_seconds':'REAL','scan_rejections':'TEXT','strategy_diagnostics':'TEXT','trade_allowed':'INTEGER DEFAULT 0','scan_groups_open':'TEXT'}.items():
                 if name not in status_columns: connection.execute(f'ALTER TABLE bot_status ADD COLUMN {name} {sql_type}')
             columns={row['name'] for row in connection.execute('PRAGMA table_info(signals)')}
             if 'score' not in columns: connection.execute('ALTER TABLE signals ADD COLUMN score REAL DEFAULT 0')

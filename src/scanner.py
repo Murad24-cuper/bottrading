@@ -305,7 +305,8 @@ class MarketScanner:
             item.skip_reason='scanner candidate limit reached'
             if item.signal_row_id is not None: self._set_skip_reason(item.signal_row_id,item.skip_reason)
         elapsed=perf_counter()-started
-        self.last_scan_stats={'total_symbols':len(universe),'symbols_scanned':visited,'scan_complete':visited>=len(universe),'stage1_passed':len(stage1),'top_movers':len(analysed),'top_movers_selected':len(top_symbols),'signals':len(results),'scan_seconds':round(elapsed,3),'stage1_rejections':dict(rejection+move_rejections),'strategy_diagnostics':self.last_strategy_diagnostics}
+        groups_open=Counter(self.symbols.get_asset_group(symbol) for _,symbol in movement)
+        self.last_scan_stats={'total_symbols':len(universe),'symbols_scanned':visited,'scan_complete':visited>=len(universe),'stage1_passed':len(stage1),'top_movers':len(analysed),'top_movers_selected':len(top_symbols),'signals':len(results),'scan_seconds':round(elapsed,3),'stage1_rejections':dict(rejection+move_rejections),'strategy_diagnostics':self.last_strategy_diagnostics,'groups_open':dict(groups_open)}
         if visited<len(universe): self.db.log_event('INFO','scanner',f'Scan budget reached after {visited}/{len(universe)} symbols; rotation resumes at {self._cursor}')
         self.db.log_event('INFO','scanner',f"Scan total={len(universe)} scanned={visited} complete={visited>=len(universe)} stage1_passed={len(stage1)} top_movers_selected={len(top_symbols)} analysed={len(analysed)} signals={len(results)} seconds={elapsed:.3f} stage1_rejections={dict(rejection+move_rejections)} strategy_diagnostics={self.last_strategy_diagnostics}")
         return selected
