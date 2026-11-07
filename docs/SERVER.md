@@ -21,6 +21,9 @@ PowerShell-də layihə qovluğundan `.scriptsserver.ps1 tunnel` işlədin və
 
 Paneldə Start/Stop idarəetməsi də mövcuddur. `STOP` faylı yeni ticarəti
 bloklayır. `data/supervisor.stop` supervisora dayandırma istəyidir.
+Transfer zamanı Windows layihəsində də `runtime.location: server` yazılır;
+bu guard yerli botun yenidən başladılmasının qarşısını alır. Yalnız server
+konteynerində `BOT_LOCATION=server` verildikdə server botu başlayır.
 
 ## VNC və MT5 quraşdırılması
 
