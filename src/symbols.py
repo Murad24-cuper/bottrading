@@ -75,7 +75,7 @@ class SymbolService:
   return self.cache
  def get_asset_group(self,symbol):
   i=self.mt5.symbol_info(symbol); path=(getattr(i,'path','') or '').lower() if i else ''
-  for key,group in [('forex','forex'),('metal','metals'),('index','indices'),('energy','energy'),('crypto','crypto'),('stock','stocks'),('share','stocks')]:
+  for key,group in [('forex','forex'),('metal','metals'),('indices','indices'),('index','indices'),('energy','energy'),('crypto','crypto'),('stock','stocks'),('share','stocks')]:
    if key in path: return group
   n=symbol.lower()
   if any(x in n for x in ('xau','xag','xpd','xpt','gold','silver','palladium','platinum')): return 'metals'

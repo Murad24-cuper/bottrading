@@ -46,6 +46,11 @@ def test_underlying_normalizes_cash_and_expiry_suffixes():
     assert underlying_key('US500-DEC26') == 'US500'
     assert underlying_key('EURUSDm') == 'EURUSD'
 
+def test_broker_path_with_spelled_out_indices_is_grouped_as_index():
+    service=make_service(['Altcoins_INDX'])
+    service.mt5.symbol_info=lambda name: SimpleNamespace(path='Thematic Indices\\Standard\\Altcoins_INDX')
+    assert service.get_asset_group('Altcoins_INDX')=='indices'
+
 
 def test_dated_futures_are_excluded_from_universe_by_default():
     service = make_service(['US500Cash', 'US500-DEC26', 'US400Cash'])
