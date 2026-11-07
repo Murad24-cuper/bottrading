@@ -6,7 +6,7 @@ import sys
 import threading
 import traceback
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from src.config import load_settings
+from src.config import assert_runtime_location,load_settings
 from src.bot import TradingBot
 from src.db import Database
 from src.notify import TelegramNotifier
@@ -52,6 +52,7 @@ def main():
     db=None; bot=None; reason='startup failed'; result=1
     try:
         settings=load_settings()
+        assert_runtime_location(settings.config)
         db=Database(settings.db_path)
         bot=TradingBot(settings,db=db)
         bot.run_forever()

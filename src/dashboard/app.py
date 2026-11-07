@@ -35,6 +35,8 @@ def _supervisor_pid():
 
 def _supervisor_running():
     pid=_supervisor_pid()
+    if _APP_CONFIG.get('runtime',{}).get('location','local')=='server':
+        return bool(pid)
     if pid and _pid_running(pid): return True
     if pid:
         try: (DATA_DIR/'supervisor.pid').unlink(missing_ok=True)
@@ -67,7 +69,8 @@ def _heartbeat_fresh(status,now=None):
 
 def _start_bot():
     """Start one detached bot process, with both UI and bot locks guarding races."""
-    status=queries.get_bot_status(DB_PATH); pid=_lock_pid(); running=_pid_running(pid); supervisor_running=_supervisor_running()
+    server_mode=_APP_CONFIG.get('runtime',{}).get('location','local')=='server'
+    status=queries.get_bot_status(DB_PATH); pid=None if server_mode else _lock_pid(); running=False if server_mode else _pid_running(pid); supervisor_running=False if server_mode else _supervisor_running()
     lock_path=DATA_DIR/'bot.lock'
     if running or supervisor_running or _heartbeat_fresh(status): return False,'Bot artıq işləyir kimi görünür.'
     if lock_path.exists() and not running:
@@ -80,6 +83,8 @@ def _start_bot():
         stop=ROOT/'STOP'
         if stop.exists(): stop.unlink()
         (DATA_DIR/'supervisor.stop').unlink(missing_ok=True)
+        if server_mode:
+            return True,'Server supervisor start requested.'
         python=ROOT/'.venv'/'Scripts'/'pythonw.exe'; script=ROOT/'scripts'/'run_forever.py'
         log_path=LOG_DIR/'bot_stdout.log'; log_path.parent.mkdir(parents=True,exist_ok=True)
         flags=getattr(subprocess,'DETACHED_PROCESS',0x00000008)|getattr(subprocess,'CREATE_NEW_PROCESS_GROUP',0x00000200)
@@ -141,7 +146,8 @@ def main():
     detail_end=(datetime.combine(selected,dt_time.min,tzinfo=AZ_TZ)+timedelta(days=1)).astimezone(timezone.utc).isoformat()
     status=queries.get_bot_status(DB_PATH); snapshot=queries.get_latest_snapshot(DB_PATH)
     summary=queries.get_day_summary(today_start,today_end,DB_PATH)
-    stale=not _heartbeat_fresh(status); pid=_lock_pid(); supervisor_running=_supervisor_running(); process_running=_pid_running(pid) or supervisor_running
+    stale=not _heartbeat_fresh(status); pid=_lock_pid(); supervisor_running=_supervisor_running()
+    process_running=(supervisor_running or _heartbeat_fresh(status)) if _APP_CONFIG.get('runtime',{}).get('location','local')=='server' else (_pid_running(pid) or supervisor_running)
     account=(status or {}).get('account_type','UNKNOWN').upper(); paused=(ROOT/'STOP').exists()
     mt5_connected=bool((status or {}).get('mt5_connected',0)) and not stale
     if not process_running:

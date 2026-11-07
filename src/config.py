@@ -8,6 +8,13 @@ import math
 import yaml
 from dotenv import load_dotenv
 
+def assert_runtime_location(config: dict[str, Any], actual: str | None = None) -> None:
+    """Refuse to start a bot from a machine not selected by config."""
+    expected=config.get('runtime',{}).get('location','local')
+    running=(actual if actual is not None else os.getenv('BOT_LOCATION','local')).strip().lower()
+    if expected != running:
+        raise RuntimeError(f'Bot location guard: config requires {expected!r}, process is {running!r}')
+
 @dataclass(frozen=True)
 class RiskSettings:
     risk_per_trade_pct: float
@@ -72,6 +79,9 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     try: config=yaml.safe_load(path.read_text(encoding='utf-8'))
     except (OSError,yaml.YAMLError) as exc: raise ValueError(f'Cannot load config.yaml: {exc}') from exc
     if not isinstance(config,dict): raise ValueError('config.yaml must contain a YAML mapping')
+    runtime=config.setdefault('runtime',{})
+    if not isinstance(runtime,dict) or runtime.get('location','local') not in {'local','server'}:
+        raise ValueError('runtime.location must be local or server')
     required={'account','risk','universe','timeframes','magic_number','executor','strategies','loop','scanner','history','backtest','live','supervisor','mt5','confluence','db_path'}
     missing=required-config.keys()
     if missing: raise ValueError(f'config.yaml is missing keys: {", ".join(sorted(missing))}')

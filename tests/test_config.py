@@ -1,6 +1,13 @@
 from pathlib import Path
 from src import config as config_module
 
+def test_runtime_location_guard_blocks_wrong_machine():
+    import pytest
+    from src.config import assert_runtime_location
+    with pytest.raises(RuntimeError,match='requires .server.'):
+        assert_runtime_location({'runtime':{'location':'server'}},'local')
+    assert_runtime_location({'runtime':{'location':'server'}},'server')
+
 def test_default_config_loads_for_offline_work(monkeypatch):
     monkeypatch.setattr(config_module,'load_dotenv',lambda *args,**kwargs:False)
     root=Path(__file__).resolve().parents[1]

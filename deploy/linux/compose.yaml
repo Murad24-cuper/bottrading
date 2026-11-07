@@ -1,0 +1,43 @@
+services:
+  mt5bot:
+    build:
+      context: ../..
+      dockerfile: deploy/linux/mt5/Dockerfile
+    container_name: tradingbot-mt5
+    restart: unless-stopped
+    mem_limit: 3g
+    shm_size: 512m
+    environment:
+      TZ: UTC
+      BOT_LOCATION: server
+    volumes:
+      - /opt/tradingbot:/opt/tradingbot
+      - /opt/tradingbot/.env:/opt/tradingbot/.env:ro
+      - wine:/opt/wine
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/tradingbot-healthcheck"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+    ports:
+      - "127.0.0.1:5900:5900"
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: deploy/linux/dashboard.Dockerfile
+    container_name: tradingbot-dashboard
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      TZ: UTC
+      STREAMLIT_SERVER_HEADLESS: "true"
+    volumes:
+      - /opt/tradingbot:/opt/tradingbot:ro
+      - /opt/tradingbot/data:/opt/tradingbot/data
+      - /opt/tradingbot/logs:/opt/tradingbot/logs
+    ports:
+      - "127.0.0.1:8501:8501"
+    command: ["python", "-m", "streamlit", "run", "src/dashboard/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+volumes:
+  wine:

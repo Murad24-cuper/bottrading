@@ -211,3 +211,5 @@ backtest:
     breakout: {range_bars: [15, 20], volume_ratio: [1.1, 1.3]}
     volatility_scalp: {target_atr: [0.3, 0.4], max_spread_target_ratio: [0.15, 0.2]}
 db_path: data/bot.db
+runtime:
+  location: local               # local | server; a mismatch refuses bot startup

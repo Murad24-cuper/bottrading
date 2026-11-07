@@ -12,7 +12,7 @@ from datetime import datetime,timezone
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.config import load_settings
+from src.config import assert_runtime_location,load_settings
 from src.db import Database
 from src.logger import get_logger
 from src.supervisor import clear_stale_pid_lock, run_restart_supervisor, heartbeat_is_stale, hang_watchdog_should_terminate, write_hang_report, detached_python_executable
@@ -68,6 +68,7 @@ def main() -> int:
         stream=output.open('a',encoding='utf-8',buffering=1); sys.stdout=stream; sys.stderr=stream
     install_crash_handlers()
     settings = load_settings()
+    assert_runtime_location(settings.config)
     db = Database(settings.db_path)
     data_dir = settings.data_dir
     data_dir.mkdir(parents=True, exist_ok=True)
