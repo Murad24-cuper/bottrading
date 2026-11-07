@@ -18,7 +18,7 @@ from src.logger import get_logger
 from src.supervisor import clear_stale_pid_lock, run_restart_supervisor, heartbeat_is_stale, hang_watchdog_should_terminate, write_hang_report, detached_python_executable
 from scripts.run_bot import install_crash_handlers
 from src.paths import project_paths
-from src.scheduler import due_scheduler_jobs,run_daily_backup,should_restart_for_memory
+from src.scheduler import due_scheduler_jobs,run_scheduler_tick,run_daily_backup,should_restart_for_memory
 
 log = get_logger('bot.supervisor')
 
@@ -143,14 +143,20 @@ def main() -> int:
                     try: child.wait(timeout=5)
                     except subprocess.TimeoutExpired: child.kill(); child.wait()
                     return 125
+                completed=set()
                 for task,key in due_scheduler_jobs(utc_now(),settings.config):
-                    if task=='daily_backup':
-                        try: run_daily_backup(settings,db,utc_now())
-                        except Exception as exc: emit('ERROR',f'Daily DB backup failed: {type(exc).__name__}: {exc}')
-                    elif task=='weekly_maintenance':
-                        if not db.maintenance_done('weekly_retrain',key):
-                            emit('WARNING','Weekly brain retraining deferred: no complete training pipeline/data is available; brain remains shadow-only')
-                            db.mark_maintenance_done('weekly_retrain',key,utc_now())
+                    if db.maintenance_done(task,key): completed.add((task,key))
+                def daily_backup_job(key):
+                    try: run_daily_backup(settings,db,utc_now())
+                    except Exception as exc: emit('ERROR',f'Daily DB backup failed: {type(exc).__name__}: {exc}')
+                def hourly_history_job(key):
+                    emit('WARNING','Hourly history refresh deferred: MT5 access is owned by the bot child; no safe handoff is configured')
+                    db.mark_maintenance_done('hourly_history',key,utc_now())
+                def weekly_job(key):
+                    emit('WARNING','Weekly brain retraining deferred: no complete training pipeline/data is available; brain remains shadow-only')
+                    db.mark_maintenance_done('weekly_retrain',key,utc_now())
+                    db.mark_maintenance_done('weekly_maintenance',key,utc_now())
+                run_scheduler_tick(utc_now(),settings.config,completed,{'daily_backup':daily_backup_job,'hourly_history':hourly_history_job,'weekly_maintenance':weekly_job})
             if hang_watchdog_should_terminate(heartbeat_is_stale(settings.db_path,hang_seconds),time.monotonic()-child_started,hang_seconds):
                 reason=f'heartbeat older than {hang_seconds}s; child PID={child.pid}'
                 write_hang_report(settings.logs_dir,reason)

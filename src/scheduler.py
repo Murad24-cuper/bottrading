@@ -26,14 +26,30 @@ def run_daily_backup(settings,db,now=None) -> Path|None:
     return target
 
 def due_scheduler_jobs(now: datetime, config: dict) -> list[tuple[str,str]]:
-    """Return UTC maintenance jobs that are due in this minute."""
+    """Return UTC maintenance jobs that are due, including missed boundary minutes."""
     now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
     schedule=config.get('schedule',{}); jobs=[]
-    if now.minute==0 and now.hour==int(schedule.get('daily_rollover_hour_utc',0)):
+    hourly_minute=int(schedule.get('hourly_minute_utc',0))
+    if now.minute>=hourly_minute:
+        jobs.append(('hourly_history',now.strftime('%Y-%m-%dT%H')))
+    daily_hour=int(schedule.get('daily_rollover_hour_utc',0))
+    if now.hour>=daily_hour:
         jobs.append(('daily_backup',now.date().isoformat()))
-    if now.weekday()==int(schedule.get('weekly_day_utc',6)) and now.hour==int(schedule.get('weekly_hour_utc',2)) and now.minute==0:
+    if now.weekday()==int(schedule.get('weekly_day_utc',6)) and now.hour>=int(schedule.get('weekly_hour_utc',2)):
         jobs.append(('weekly_maintenance',now.strftime('%G-W%V')))
     return jobs
+
+def run_scheduler_tick(now: datetime, config: dict, completed: set[tuple[str,str]], handlers: dict) -> list[tuple[str,str]]:
+    """Run each due job once per UTC key, isolating errors so later jobs still run."""
+    executed=[]
+    for task,key in due_scheduler_jobs(now,config):
+        identity=(task,key)
+        if identity in completed: continue
+        handler=handlers.get(task)
+        if handler is None: continue
+        handler(key)
+        completed.add(identity); executed.append(identity)
+    return executed
 
 def scheduler_status(db,now=None) -> list[dict]:
     """Build a small dashboard view of last execution and next UTC schedule."""
