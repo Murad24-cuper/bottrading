@@ -2,19 +2,20 @@
 set -eu
 mkdir -p /opt/tradingbot/data /opt/tradingbot/logs
 export WINEPREFIX WINEARCH WINEDEBUG DISPLAY
-Xvfb "$DISPLAY" -screen 0 1280x800x24 -nolisten tcp >/opt/tradingbot/logs/xvfb.log 2>&1 &
+Xvfb "$DISPLAY" -ac -screen 0 1280x800x24 -nolisten tcp >/opt/tradingbot/logs/xvfb.log 2>&1 &
 XVFB_PID=$!
 fluxbox >/opt/tradingbot/logs/window-manager.log 2>&1 &
 WM_PID=$!
-x11vnc -display "$DISPLAY" -forever -shared -nopw -rfbport 5900 >/opt/tradingbot/logs/vnc.log 2>&1 &
+x11vnc -display "$DISPLAY" -auth /dev/null -forever -shared -nopw -rfbport 5900 >/opt/tradingbot/logs/vnc.log 2>&1 &
 VNC_PID=$!
 cleanup() { kill "$VNC_PID" "$WM_PID" "$XVFB_PID" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 sleep 2
 PY='C:\Program Files\Python311\python.exe'
 if [ ! -f '/opt/wine/drive_c/Program Files/Python311/python.exe' ]; then
-  wineboot --init >>/opt/tradingbot/logs/wine.log 2>&1
-  winetricks -q vcrun2022 >>/opt/tradingbot/logs/wine.log 2>&1
+  wineboot --init >>/opt/tradingbot/logs/wine.log 2>&1 || echo 'Wine initialization has a pending GUI or runtime prompt; waiting for Wine readiness.' >>/opt/tradingbot/logs/wine.log
+  until wine cmd /c echo WINE_READY >/dev/null 2>&1; do sleep 5; done
+  winetricks -q vcrun2022 >>/opt/tradingbot/logs/wine.log 2>&1 || echo 'VC runtime bootstrap failed; continuing to the Python package import check.' >>/opt/tradingbot/logs/wine.log
   wine /opt/python.exe /quiet InstallAllUsers=1 PrependPath=1 Include_test=0 >>/opt/tradingbot/logs/wine.log 2>&1
   wine "$PY" -m pip install --upgrade pip >>/opt/tradingbot/logs/wine.log 2>&1
   wine "$PY" -m pip install MetaTrader5 pandas numpy python-dotenv pyyaml requests scikit-learn pyarrow pytest >>/opt/tradingbot/logs/wine.log 2>&1
