@@ -36,9 +36,10 @@ def test_detached_supervisor_prefers_pythonw_and_falls_back(tmp_path):
     assert detached_python_executable(python)==str(pythonw)
 
 def test_supervisor_health_check_interval():
-    from scripts.run_forever import health_check_due
+    from scripts.run_forever import health_check_due,utc_now
     assert not health_check_due(10,69.9)
     assert health_check_due(10,70)
+    assert utc_now().utcoffset().total_seconds()==0
 
 
 def test_supervisor_stops_after_restart_limit_and_logs_critical():

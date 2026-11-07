@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import shutil
+from datetime import datetime,timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -24,6 +25,10 @@ log = get_logger('bot.supervisor')
 def health_check_due(last_check: float, now: float, interval: float=60.0) -> bool:
     """Return whether the supervisor's periodic child-health check is due."""
     return float(now)-float(last_check)>=float(interval)
+
+def utc_now() -> datetime:
+    """Return an aware UTC timestamp for supervisor schedules and events."""
+    return datetime.now(timezone.utc)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -138,14 +143,14 @@ def main() -> int:
                     try: child.wait(timeout=5)
                     except subprocess.TimeoutExpired: child.kill(); child.wait()
                     return 125
-                for task,key in due_scheduler_jobs(datetime.now(timezone.utc),settings.config):
+                for task,key in due_scheduler_jobs(utc_now(),settings.config):
                     if task=='daily_backup':
-                        try: run_daily_backup(settings,db,datetime.now(timezone.utc))
+                        try: run_daily_backup(settings,db,utc_now())
                         except Exception as exc: emit('ERROR',f'Daily DB backup failed: {type(exc).__name__}: {exc}')
                     elif task=='weekly_maintenance':
                         if not db.maintenance_done('weekly_retrain',key):
                             emit('WARNING','Weekly brain retraining deferred: no complete training pipeline/data is available; brain remains shadow-only')
-                            db.mark_maintenance_done('weekly_retrain',key,datetime.now(timezone.utc))
+                            db.mark_maintenance_done('weekly_retrain',key,utc_now())
             if hang_watchdog_should_terminate(heartbeat_is_stale(settings.db_path,hang_seconds),time.monotonic()-child_started,hang_seconds):
                 reason=f'heartbeat older than {hang_seconds}s; child PID={child.pid}'
                 write_hang_report(settings.logs_dir,reason)
