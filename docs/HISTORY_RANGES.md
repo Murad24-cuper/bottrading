@@ -55,3 +55,16 @@ Requested weekday ranges: M1 12 months, M5/M15 36 months, H1 60 months. Requeste
 | GOLD24-7 | M1 | 100476 | 2026-08-27T16:03:00+00:00 | 2026-11-08T16:46:00+00:00 |
 | GOLD24-7 | M5 | 36333 | 2026-06-30T23:00:00+00:00 | 2026-11-08T16:45:00+00:00 |
 | GOLD24-7 | M15 | 12024 | 2026-06-30T23:00:00+00:00 | 2026-11-07T13:45:00+00:00 |
+
+## Weekend-open indices identified by the supervised scan
+
+Detected 2026-11-08 UTC: `Altcoins_INDX`, `Crypto_10`. Their history was downloaded after the existing F4/W5 refresh; available ranges are:
+
+| Symbol | Timeframe | Bars | First UTC bar | Last UTC bar |
+|---|---|---:|---|---|
+| Altcoins_INDX | M1 | 101705 | 2026-08-29T21:55:00+00:00 | 2026-11-08T18:11:00+00:00 |
+| Altcoins_INDX | M5 | 100341 | 2025-11-23T20:05:00+00:00 | 2026-11-08T18:10:00+00:00 |
+| Altcoins_INDX | M15 | 69877 | 2024-11-08T08:15:00+00:00 | 2026-11-08T18:00:00+00:00 |
+| Crypto_10 | M1 | 99880 | 2026-08-31T04:20:00+00:00 | 2026-11-08T18:11:00+00:00 |
+| Crypto_10 | M5 | 99976 | 2025-11-25T02:25:00+00:00 | 2026-11-08T18:10:00+00:00 |
+| Crypto_10 | M15 | 69875 | 2024-11-08T08:15:00+00:00 | 2026-11-08T18:00:00+00:00 |
