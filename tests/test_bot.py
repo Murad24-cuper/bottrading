@@ -202,6 +202,20 @@ def test_cycle_reservations_enforce_global_daily_trade_cap(tmp_path):
         skipped=conn.execute("SELECT skip_reason FROM signals WHERE symbol='BBB'").fetchone()[0]
     assert skipped=='maximum trades today reached'
 
+def test_cycle_reservations_enforce_total_stop_risk_cap(tmp_path):
+    bot,db,_,_,_,executor,_=make_bot(tmp_path,'trade',['breakout'],candidate=False)
+    bot.settings.config['risk']['max_total_open_risk_pct']=.75
+    candidates=[]
+    for symbol in ('AAA','BBB'):
+        signal=Signal(symbol,'buy','M1',100,99,102,.8,'breakout','test')
+        signal_id=db.insert_signal(symbol=symbol,strategy='breakout',direction='buy',timeframe='M1',confidence=.8,entry=100,sl=99,tp=102,expected_cost=.1,taken=0,skip_reason='')
+        candidates.append(SimpleNamespace(symbol=symbol,asset_group='other',strategy='breakout',signal=signal,cost={'cost':.1},symbol_spec={'trade_tick_value':1,'trade_tick_size':1,'volume_min':.01,'volume_step':.01,'volume_max':5},score=5,signal_row_id=signal_id))
+    bot.scanner.candidates=candidates; bot.cycle()
+    assert len(executor.opened)==1
+    with db.connect() as conn:
+        skipped=conn.execute("SELECT skip_reason FROM signals WHERE symbol='BBB'").fetchone()[0]
+    assert skipped=='total open stop risk cap reached'
+
 def test_terminal_trade_permission_blocks_new_entries(tmp_path):
     bot,db,mt5,_,_,executor,item=make_bot(tmp_path,'trade',['breakout'])
     mt5.terminal_info=lambda:SimpleNamespace(connected=True,trade_allowed=False)
