@@ -211,6 +211,13 @@ class Database:
     def get_closed_trades_for_day(self,day):
         day=day.isoformat() if hasattr(day,'isoformat') else str(day)
         with self.connect() as connection: return [dict(row) for row in connection.execute("SELECT * FROM trades WHERE status='closed' AND substr(close_time,1,10)=? ORDER BY close_time",(day,))]
+    def get_closed_trades_between(self,start,end,magic=None):
+        first=start.isoformat() if hasattr(start,'isoformat') else str(start)
+        last=end.isoformat() if hasattr(end,'isoformat') else str(end)
+        sql="SELECT * FROM trades WHERE status='closed' AND close_time>=? AND close_time<?"
+        params=[first,last]
+        if magic is not None: sql+=' AND magic=?'; params.append(int(magic))
+        with self.connect() as connection: return [dict(row) for row in connection.execute(sql+' ORDER BY close_time',params)]
     def get_daily_stats(self,day):
         day=day.isoformat() if hasattr(day,'isoformat') else str(day)
         with self.connect() as connection:

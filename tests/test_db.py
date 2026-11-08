@@ -96,6 +96,13 @@ def test_daily_report_is_append_only_and_readable(tmp_path):
     db.save_daily_report('2026-11-05',{'pnl':99},'2026-11-07T00:00:00+00:00')
     assert db.get_daily_reports(1)[0]['payload']=='{"pnl": 1.25}'
 
+def test_closed_trades_between_uses_utc_half_open_range(tmp_path):
+    db=Database(tmp_path/'weekly.db')
+    for ticket,stamp in ((1,'2026-11-02T12:00:00+00:00'),(2,'2026-11-08T20:00:00+00:00'),(3,'2026-11-09T00:00:00+00:00')):
+        db.insert_trade(ticket=ticket,magic=20260001,status='closed',close_time=stamp,profit=1)
+    rows=db.get_closed_trades_between('2026-11-02T00:00:00+00:00','2026-11-09T00:00:00+00:00',20260001)
+    assert [row['ticket'] for row in rows]==[1,2]
+
 def test_database_backup_contains_committed_wal_data(tmp_path):
     db=Database(tmp_path/'live.db')
     db.log_event('WARNING','test','preserve me')

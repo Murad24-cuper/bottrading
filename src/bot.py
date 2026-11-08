@@ -459,6 +459,33 @@ class TradingBot:
         if nets: message+=f' · orta qazanc: {sum(wins)/len(wins):.2f} $ · orta zərər: {sum(losses)/len(losses):.2f} $' if losses else f' · orta qazanc: {sum(wins)/len(wins):.2f} $ · orta zərər: 0.00 $'
         message+=f' · ən yaxşı: {best:+.2f} $ · ən zəif: {worst:+.2f} $'
         self._notify('daily_summary',message); self._last_daily_summary=day
+    def _weekly_summary(self,now):
+        if now.weekday()!=6: return
+        target=self.settings.config.get('notify',{}).get('weekly_summary_utc','21:00')
+        if now.strftime('%H:%M')<target: return
+        week_key=now.strftime('%G-W%V')
+        if self.db.maintenance_done('weekly_learning',week_key): return
+        monday=now.date()-timedelta(days=6)
+        start=datetime.combine(monday,datetime.min.time(),tzinfo=timezone.utc)
+        end=start+timedelta(days=7)
+        rows=self.db.get_closed_trades_between(start,end,self.settings.magic_number)
+        def net(row): return float(row.get('profit') or 0)+float(row.get('commission') or 0)+float(row.get('swap') or 0)
+        by_strategy=Counter(); by_group=Counter()
+        for row in rows:
+            value=net(row); by_strategy[str(row.get('strategy') or 'Naməlum')]+=value; by_group[str(row.get('asset_group') or 'digər')]+=value
+        pnl=sum(net(row) for row in rows)
+        lessons=[]
+        if by_strategy:
+            best=max(by_strategy,key=by_strategy.get); worst=min(by_strategy,key=by_strategy.get)
+            lessons.append(f'strategiya üzrə yaxşı: {best} {by_strategy[best]:+.2f} $, zəif: {worst} {by_strategy[worst]:+.2f} $')
+        if by_group:
+            best_group=max(by_group,key=by_group.get); worst_group=min(by_group,key=by_group.get)
+            lessons.append(f'qrup üzrə yaxşı: {best_group} {by_group[best_group]:+.2f} $, zəif: {worst_group} {by_group[worst_group]:+.2f} $')
+        message=f"🧠 Bu həftə öyrəndiklərim · {start.date().isoformat()}–{(end-timedelta(days=1)).date().isoformat()} · {len(rows)} bağlanan əməliyyat · xalis {pnl:+.2f} $."
+        if lessons: message+=' '+' · '.join(lessons)+'.'
+        else: message+=' Əməliyyat olmayıb; strategiya nəticəsi çıxarmaq üçün nümunə yoxdur.'
+        self.db.log_event('INFO','bot',message); self._notify('weekly_learning',message)
+        self.db.mark_maintenance_done('weekly_learning',week_key,now)
     def _daily_maintenance(self,now):
         day=now.date().isoformat()
         if self._last_maintenance_day==day or self.db.maintenance_done('daily',day):
@@ -552,6 +579,7 @@ class TradingBot:
         self._daily_rollover_report(now)
         self._daily_maintenance(now)
         self._daily_summary(now)
+        self._weekly_summary(now)
         vacuum_key=now.strftime('%G-W%V')
         db_cfg=self.settings.config.get('db',{})
         if now.weekday()==int(db_cfg.get('vacuum_weekday_utc',6)) and not positions and not self.db.maintenance_done('vacuum',vacuum_key):

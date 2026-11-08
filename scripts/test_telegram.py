@@ -17,7 +17,7 @@ def main():
         status=notifier.last_http_status
         print(f'Telegram test failed: HTTP {status}' if status is not None else 'Telegram test failed: no HTTP status (network/API unreachable)')
         return 1
-    print('Test bildirişi Telegram-a göndərildi.')
+    print(f'Test bildirişi Telegram-a göndərildi · HTTP {notifier.last_http_status}.')
     return 0
 
 if __name__=='__main__': raise SystemExit(main())

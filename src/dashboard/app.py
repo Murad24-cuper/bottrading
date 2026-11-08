@@ -416,6 +416,10 @@ def main():
             else: st.caption('Günlük statistika hələ yoxdur.')
 
     with tab_brain:
+        weekly_learning=next((row for row in queries.get_recent_events(DB_PATH,100) if 'Bu həftə öyrəndiklərim' in row.get('message','')),None)
+        st.subheader('Bu həftə öyrəndiklərim')
+        if weekly_learning: st.info(translate_message(weekly_learning['message']))
+        else: st.caption('Həftəlik yekun hesabat hələ yoxdur.')
         brain_cfg=_APP_CONFIG.get('brain',{}); gate_path=DATA_DIR/'brain'/'gate.json'
         try: gate=json.loads(gate_path.read_text(encoding='utf-8'))
         except (OSError,ValueError): gate={'status':'FAIL','reasons':['Yekun test qiymətləndirməsi hələ aparılmayıb.']}

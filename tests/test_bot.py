@@ -172,6 +172,15 @@ def test_run_forever_records_exit_reason(tmp_path):
     assert any('test cycle limit reached' in row['message'] for row in rows)
     assert client.closed and not (tmp_path/'data'/'bot.lock').exists()
 
+def test_weekly_learning_summary_is_sent_and_idempotent(tmp_path):
+    now=datetime(2026,11,8,22,0,tzinfo=timezone.utc)
+    bot,db,_,_,_,_,_=make_bot(tmp_path,clock=lambda:now)
+    sent=[]; bot.notifier=SimpleNamespace(send=lambda event,message:sent.append((event,message)))
+    db.insert_trade(ticket=700,magic=20260001,status='closed',close_time='2026-11-03T12:00:00+00:00',open_time='2026-11-03T11:00:00+00:00',profit=2,commission=-.1,swap=0,strategy='trend_pullback',asset_group='forex')
+    bot._weekly_summary(now); bot._weekly_summary(now)
+    assert len(sent)==1 and sent[0][0]=='weekly_learning'
+    assert 'Bu həftə öyrəndiklərim' in sent[0][1] and '+1.90 $' in sent[0][1]
+
 def test_cycle_reservations_enforce_max_open_when_terminal_positions_lag(tmp_path):
     bot,db,_,_,_,executor,_=make_bot(tmp_path,'trade',['breakout'],candidate=False)
     bot.settings.config['risk']['max_open_positions']=2
