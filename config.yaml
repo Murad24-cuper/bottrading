@@ -74,8 +74,10 @@ universe:
     OIL: [OIL, WTI, USOIL]
     BTCUSD: [BTCUSD, BTC]
     ETHUSD: [ETHUSD, ETH]
+    Altcoins_INDX: [Altcoins_INDX]
+    Crypto_10: [Crypto_10]
   focus_symbols: [EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, US500, NAS100, US30, GER40, GOLD]
-  weekend_symbols: [BTCUSD, ETHUSD, GOLD24-7]
+  weekend_symbols: [BTCUSD, ETHUSD, GOLD24-7, Altcoins_INDX, Crypto_10]
   weekend_include_open_indices: true
 
 timeframes: [M1, M5, M15]
@@ -190,7 +192,7 @@ brain:
   min_ev_r: 0.05
   k_neighbors: 300
   kelly_fraction: 0.25
-  max_symbols: 13                # Ten weekday focus symbols plus three weekend symbols
+  max_symbols: 15                # Ten weekday focus symbols plus five discovered weekend symbols
   max_reference_situations: 1500000
   query_exclude_same_symbol_days: 1
   checklist:
@@ -222,7 +224,7 @@ history:
   weekend_ranges_months: {M1: 6, M5: 24, M15: 24}
   max_storage_gb: 5
   max_bars_per_request: 80000 # Stay below the MT5 terminal's history response ceiling
-  liquid_aliases: [EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, US500, NAS100, US30, GER40, GOLD, BTCUSD, ETHUSD, GOLD24-7]
+  liquid_aliases: [EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, US500, NAS100, US30, GER40, GOLD, BTCUSD, ETHUSD, GOLD24-7, Altcoins_INDX, Crypto_10]
 weekend:
   enabled: true
   risk_per_trade_pct: 0.15
