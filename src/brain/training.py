@@ -25,8 +25,8 @@ def split_name(timestamp,split):
     return 'purged'
 
 
-def label_trade(frame,entry_index,direction,atr,spec,horizon_minutes=20,sl_mult=.8,tp_mult=1.2,slippage_points=1.0):
-    """Simulate next-bar entry and conservative OHLC stop/target ordering after costs."""
+def label_trade(frame,entry_index,direction,atr,spec,horizon_minutes=20,sl_mult=.8,tp_mult=1.2,slippage_points=1.0,timeout_minutes=None,commission_per_lot_per_side=0.0):
+    """Label a causal triple-barrier trade with spread, slippage, and commission."""
     if direction not in {'buy','sell'} or atr<=0 or entry_index<0 or entry_index+1>=len(frame): return None
     point=float(spec.get('point_size',spec.get('point',spec.get('trade_tick_size',1e-5))) or 1e-5)
     tick_size=float(spec.get('trade_tick_size',spec.get('tick_size',point)) or point)
@@ -37,11 +37,23 @@ def label_trade(frame,entry_index,direction,atr,spec,horizon_minutes=20,sl_mult=
     reward=float(atr)*np.sqrt(max(1.0,float(horizon_minutes)))*float(tp_mult)+spread
     if risk<=0 or tick_size<=0: return None
     stop=entry-risk if direction=='buy' else entry+risk; target=entry+reward if direction=='buy' else entry-reward
-    last=frame.iloc[min(len(frame)-1,entry_index+int(max(1,horizon_minutes)))]
+    timeout=int(max(1,timeout_minutes if timeout_minutes is not None else horizon_minutes))
+    first_future=entry_index+1
+    if hasattr(frame.index,'__getitem__') and first_future<len(frame):
+        try:
+            from pandas import DatetimeIndex,Timestamp
+            if isinstance(frame.index,DatetimeIndex):
+                opened=frame.index[first_future]
+                deadline=opened+__import__('pandas').Timedelta(minutes=timeout)
+                stop_index=int(frame.index.searchsorted(deadline,side='right'))
+                future_indices=range(first_future,max(first_future,min(stop_index,len(frame))))
+            else: future_indices=range(first_future,min(len(frame),entry_index+timeout+1))
+        except (TypeError,ValueError): future_indices=range(first_future,min(len(frame),entry_index+timeout+1))
+    else: future_indices=range(first_future,min(len(frame),entry_index+timeout+1))
+    if not future_indices: return None
+    last=frame.iloc[future_indices[-1]]
     exit_price=float(last.close); reason='time'
-    for offset in range(1,int(max(1,horizon_minutes))+1):
-        idx=entry_index+offset
-        if idx>=len(frame): break
+    for idx in future_indices:
         bar=frame.iloc[idx]
         sl_hit=float(bar.low)<=stop if direction=='buy' else float(bar.high)+spread>=stop
         tp_hit=float(bar.high)>=target if direction=='buy' else float(bar.low)+spread<=target
@@ -54,8 +66,14 @@ def label_trade(frame,entry_index,direction,atr,spec,horizon_minutes=20,sl_mult=
     exit_price-=slip if direction=='buy' else -slip
     net_distance=(exit_price-entry) if direction=='buy' else (entry-exit_price)
     cost_distance=2*slip
+    commission=float(commission_per_lot_per_side)
+    tick_value=float(spec.get('trade_tick_value_loss',spec.get('trade_tick_value',spec.get('tick_value',0))) or 0)
+    if commission<0 or (commission and (tick_value<=0 or tick_size<=0)): return None
+    money_per_price=tick_value/tick_size
+    commission_distance=(2*commission/money_per_price) if commission else 0.0
+    net_distance-=commission_distance
     net_r=net_distance/risk
-    return {'win':bool(net_r>0),'net_r':float(net_r),'reason':reason,'entry':entry,'exit':exit_price,'risk_distance':risk,'cost_distance':cost_distance}
+    return {'win':bool(net_r>0),'net_r':float(net_r),'reason':reason,'entry':entry,'exit':exit_price,'risk_distance':risk,'cost_distance':float(cost_distance+commission_distance)}
 
 
 def fit_probability_calibration(probabilities,labels,bins=10):
