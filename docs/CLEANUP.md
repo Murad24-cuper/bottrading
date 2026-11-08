@@ -1699,3 +1699,5 @@ History symbol specs now contain 15 configured focus/weekend symbols. `data/bot.
 
 Post-test regenerated cache files removed: 109.
 The documented manifest total was 1,270,972,271 bytes; measured free space increased from 793.08 GB to 794.26 GB. `reports/focus_replay_2026-11-06.json` and all logs younger than 14 days were retained.
+
+Final post-health-check cache sweep: 0 regenerated `.pyc`/pytest cache files removed. Tests were not rerun after this non-code cache-only cleanup.
