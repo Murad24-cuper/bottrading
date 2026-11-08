@@ -138,12 +138,17 @@ def refresh_incremental_batch(mt5,settings,now=None):
     cursor_path=Path(settings.data_dir)/'history_refresh_cursor.json'
     try: cursor=max(0,int(json.loads(cursor_path.read_text(encoding='utf-8')).get('cursor',0)))
     except (OSError,ValueError,TypeError,json.JSONDecodeError): cursor=0
-    pairs=[(symbol,tf) for symbol in symbols for tf in timeframes]
+    weekend_names={str(name) for name in settings.config.get('universe',{}).get('weekend_symbols',[])}
+    weekend_timeframes=cfg.get('weekend_timeframes',['M1','M5','M15'])
+    pairs=[(symbol,tf) for symbol in symbols for tf in timeframes if symbol not in weekend_names or tf in weekend_timeframes]
     cursor%=len(pairs); symbol,timeframe=pairs[cursor]
     end=now or datetime.now(timezone.utc)
     end=end.replace(tzinfo=timezone.utc) if end.tzinfo is None else end.astimezone(timezone.utc)
     days=max(1,int(cfg.get('incremental_batch_days',{}).get(timeframe,7)))
-    months=max(1,int(cfg.get('ranges_months',{}).get(timeframe,12)))
+    if symbol in weekend_names:
+        months=max(1,int(cfg.get('weekend_ranges_months',{}).get(timeframe,6 if timeframe=='M1' else 24)))
+    else:
+        months=max(1,int(cfg.get('ranges_months',{}).get(timeframe,12)))
     target_start=end-timedelta(days=30.4375*months)
     base=Path(cfg.get('data_dir','data/history'))
     if not base.is_absolute(): base=Path(getattr(settings,'root',Path.cwd()))/base

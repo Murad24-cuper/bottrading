@@ -26,7 +26,7 @@ def test_default_config_loads_for_offline_work(monkeypatch):
     assert settings.risk.max_session_gap_hours==6
     assert settings.config['scanner']['top_movers']==40
     assert settings.config['scanner']['mtf_min_agree']==2
-    assert settings.config['scanner']['target_open_positions']==15
+    assert settings.config['scanner']['target_open_positions']==10
     assert settings.risk.max_open_positions==20
     assert settings.risk.max_margin_usage_pct==50
     assert settings.config['scanner']['max_seconds_per_cycle']>0

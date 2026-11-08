@@ -26,6 +26,7 @@ CLOSE_REASON_LABELS = {
     'stagnant': 'Yerində sayırdı',
     'time': 'Vaxt bitdi (20 dəq)',
     'session_close': 'Bazar bağlanır',
+    'news': 'Xəbərdən öncə bağlandı',
     'manual': 'Əl ilə bağlandı',
     'kill': 'Təcili dayandırma',
     'weekly_stop': 'Həftəlik limit',

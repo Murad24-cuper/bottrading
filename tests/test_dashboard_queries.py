@@ -58,3 +58,12 @@ def test_dashboard_feature_impact_reads_persisted_closed_trade_features(tmp_path
     db.insert_trade(ticket=99,status='closed',profit=1,commission=0,swap=0,features=json.dumps({'observations':{'with_usd_context':True}}))
     result=queries.get_feature_impact(path)
     assert result and result[0]['feature']=='observations.with_usd_context=true' and result[0]['trades']==1
+
+def test_exploration_is_separate_from_main_dashboard_metrics(tmp_path):
+    path=tmp_path/'modes.db'; db=Database(path)
+    base={'asset_group':'forex','direction':'buy','volume':.01,'open_time':'2026-11-05T10:00:00+00:00','close_time':'2026-11-05T10:10:00+00:00','profit':1,'commission':0,'swap':0,'magic':1,'status':'closed','strategy':'test'}
+    db.insert_trade(ticket=1,symbol='EURUSD',**base)
+    db.insert_trade(ticket=2,symbol='GBPUSD',**base,mode='exploration')
+    start='2026-11-05T00:00:00+00:00'; end='2026-11-06T00:00:00+00:00'
+    assert queries.get_performance_report(start,end,path)['overall']['trades']==1
+    assert len(queries.get_exploration_trades(start,end,path))==1

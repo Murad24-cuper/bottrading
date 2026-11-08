@@ -217,6 +217,12 @@ def main():
                         st.session_state.action_message=f'Əmr göndərilmədi: {translate_message(exc)}'; st.session_state.action_level='error'
                     st.rerun()
 
+        with st.expander('Yaxın xəbərlər',expanded=False):
+            calendar_rows=[row for row in queries.get_recent_events(DB_PATH,100) if row.get('source')=='news' and 'Yaxın xəbər ·' in row.get('message','')]
+            if calendar_rows:
+                st.dataframe(pd.DataFrame([{'Təqvim yenilənib':local_time(row['time']),'Xəbər':row['message'].replace('Yaxın xəbər · ','')} for row in calendar_rows[:20]]),use_container_width=True,hide_index=True)
+            else: st.caption('Növbəti 24 saat üçün təzə xəbər təqvimi yoxdur.')
+
         daily_result=float(summary['net_pnl']); result_color='#16803c' if daily_result>0 else '#c62828' if daily_result<0 else '#777'
         metrics=st.columns(4)
         with metrics[0]: _metric_card('Balans',format_money(snapshot.get('balance') if snapshot else None))
@@ -244,6 +250,19 @@ def main():
             closed_frame=pd.DataFrame([{'Saat':local_time(r['close_time']),'Alət':r['symbol'],'İstiqamət':direction_label(r['direction']),'Nəticə':r['net_profit'],'Səbəb':close_reason_label(r['close_reason'])} for r in closed])
             st.table(closed_frame.style.format({'Nəticə':lambda value:format_money(value,signed=True)}).map(_money_color,subset=['Nəticə']))
         else: st.caption('Bu gün bağlanan əməliyyat yoxdur.')
+
+        exploration=queries.get_exploration_trades(today_start,today_end,DB_PATH)
+        st.subheader('Kəşf əməliyyatları')
+        if exploration:
+            exploration_frame=pd.DataFrame([{'Saat':local_time(row['open_time']),'Alət':row['symbol'],'İstiqamət':direction_label(row['direction']),'Nəticə':row['net_profit'],'Status':'Açıqdır' if row['status']=='open' else close_reason_label(row.get('close_reason'))} for row in exploration])
+            st.dataframe(exploration_frame.style.format({'Nəticə':lambda value:format_money(value,signed=True)}).map(_money_color,subset=['Nəticə']),use_container_width=True,hide_index=True)
+            closed_exploration=[row for row in exploration if row['status']=='closed']
+            if closed_exploration:
+                st.caption(f"Kəşf əməliyyatlarının nəticəsi: {sum(row['net_profit'] for row in closed_exploration):+.2f} $ · {len(closed_exploration)} bağlanmış əməliyyat")
+        else: st.caption('Bu gün kəşf əməliyyatı yoxdur.')
+        weekend_control=queries.get_weekend_control(DB_PATH)
+        if weekend_control and weekend_control.get('disabled_until'):
+            st.warning(f"Həftəsonu rejimi mənfi nəticəyə görə {local_time(weekend_control['disabled_until'])} tarixinədək söndürülüb.")
 
         st.subheader('Bu günkü balans dəyişməsi')
         curve=queries.get_equity_curve(today_start,today_end,DB_PATH)

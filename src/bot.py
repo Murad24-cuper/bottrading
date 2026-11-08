@@ -18,7 +18,7 @@ from .symbols import SymbolService
 from .symbols import underlying_group,underlying_key
 from .time_utils import mt5_epoch_to_utc, server_clock_drift_seconds
 from .trade_rules import weekend_mode_active
-from .notify import TelegramNotifier
+from .notify import TelegramNotifier,TelegramCommandPoller
 
 log=get_logger(__name__)
 RECONNECT_BACKOFF=(5,15,60)
@@ -63,12 +63,14 @@ class TradingBot:
         cfg=settings.config
         notify_cfg=cfg.get('notify',{})
         self.notifier=TelegramNotifier(rate_limit_minutes=notify_cfg.get('rate_limit_minutes',5))
+        self.telegram_commands=TelegramCommandPoller(self.db,ttl_seconds=int(cfg.get('live',{}).get('command_ttl_seconds',60)))
         self._health_failures=0; self._entries_health_blocked=False; self._trade_allowed=False; self._last_daily_summary=''; self._last_maintenance_day=''
         self._data_dir=data_dir; self._brain_drift_checked=0.0
         self._history_refresh_cycle=0
         self._last_notified_trade_id=self.db.latest_trade_id() if hasattr(self.db,'latest_trade_id') else 0
         self._observed_utc_day=self._now().date()-timedelta(days=1)
         self._daily_limit_alert_day=''; self._weekly_limit_alert_week=''
+        self._weekend_gate_notified_until=''
         self._clock_checked=False
     @property
     def live(self): return self.settings.config['live']
@@ -246,6 +248,17 @@ class TradingBot:
                     (self.settings.root/'STOP').write_text('PAUSE\n',encoding='utf-8')
                 elif action=='resume':
                     (self.settings.root/'STOP').unlink(missing_ok=True)
+                elif action in {'status','health','today','positions'}:
+                    status=self.db.get_bot_status() or {}; positions=self._owned_positions()
+                    if action in {'status','health'}:
+                        text=f"Bot: {status.get('status','naməlum')} · hesab: {status.get('account_type','naməlum')} · MT5: {'qoşulub' if status.get('mt5_connected') else 'əlaqə yoxdur'} · heartbeat: {status.get('time','naməlum')}"
+                    elif action=='positions':
+                        text='Açıq bot mövqeləri: '+(', '.join(f"{p.symbol} {'alış' if p.type==0 else 'satış'} {p.volume:g}" for p in positions) if positions else 'yoxdur')
+                    else:
+                        rows=self.db.get_trades_for_day(self._now().date()); closed=[r for r in rows if r.get('status')=='closed']
+                        pnl=sum(float(r.get('profit') or 0)+float(r.get('commission') or 0)+float(r.get('swap') or 0) for r in closed)
+                        text=f"Bu gün: {len(closed)} bağlanan əməliyyat · xalis nəticə {pnl:+.2f} $"
+                    self._notify(f'telegram_command_{command_id}',text)
                 else: raise ValueError(f'Unknown bot command: {action}')
                 self.db.update_command(command_id,'done','completed')
                 self._event('INFO',f'Processed command {command_id}: {action}')
@@ -293,14 +306,52 @@ class TradingBot:
         spec=candidate.symbol_spec
         weekend=weekend_mode_active(now,self.settings.config)
         weekend_cfg=self.settings.config.get('weekend',{})
-        risk_pct=min(self.settings.risk.risk_per_trade_pct,float(weekend_cfg.get('risk_per_trade_pct',self.settings.risk.risk_per_trade_pct))) if weekend else self.settings.risk.risk_per_trade_pct
+        weekend_gate=self.db.weekend_gate(now,20,7) if weekend and hasattr(self.db,'weekend_gate') else {}
+        if weekend_gate.get('disabled_until') and weekend_gate['disabled_until']>now.isoformat():
+            self._signal_update(candidate,False,'weekend mode disabled after negative 20-trade expectancy')
+            if self._weekend_gate_notified_until!=weekend_gate['disabled_until']:
+                self._weekend_gate_notified_until=weekend_gate['disabled_until']
+                message=f"Weekend trading disabled until {weekend_gate['disabled_until']} after negative expectancy across {weekend_gate['sample_size']} trades"
+                self._event('WARNING',message); self._notify('weekend_disabled','Həftəsonu rejimi son 20 əməliyyatın mənfi nəticəsinə görə 7 gün söndürüldü.')
+            return False
+        exploration_cfg=self.settings.config.get('demo_exploration',{})
+        candidate_features=getattr(candidate,'features',{})
+        if not hasattr(candidate,'features'): candidate.features=candidate_features
+        exploration_eligible=bool(exploration_cfg.get('enabled',False) and self._last_account_type=='DEMO' and candidate_features.get('exploration',{}).get('eligible',False))
+        trade_mode=('weekend_exploration' if weekend else 'exploration') if exploration_eligible else ('weekend' if weekend else 'main')
+        risk_pct=float(exploration_cfg.get('risk_per_trade_pct',.1)) if exploration_eligible else self.settings.risk.risk_per_trade_pct
+        if weekend: risk_pct=min(risk_pct,float(weekend_cfg.get('risk_per_trade_pct',risk_pct)))
         gate_settings=self.settings
         if weekend:
             risk_config=dict(self.settings.config['risk']); risk_config['max_open_positions']=min(int(risk_config['max_open_positions']),int(weekend_cfg.get('max_open_positions',3)))
             gate_settings=SimpleNamespace(config={**self.settings.config,'risk':risk_config},root=self.settings.root)
+        if exploration_eligible:
+            risk_config=dict(gate_settings.config['risk'])
+            risk_config['min_risk_reward']=float(exploration_cfg.get('min_risk_reward',1.0))
+            risk_config['max_cost_to_target_ratio']=float(exploration_cfg.get('max_cost_to_target_ratio',.45))
+            risk_config['max_open_positions']=min(int(risk_config['max_open_positions']),int(exploration_cfg.get('max_open_positions',5)))
+            gate_settings=SimpleNamespace(config={**gate_settings.config,'risk':risk_config},root=self.settings.root)
         volume,volume_reason=calc_volume(state.equity,risk_pct,signal.entry_hint,signal.sl_price,spec)
         if volume<=0:
             self._signal_update(candidate,False,volume_reason); return False
+        risk_limit_pct=float(self.settings.config.get('risk',{}).get('max_total_open_risk_pct',5.0))
+        def _risk_money(distance,trade_volume,trade_spec):
+            tick_size=float(trade_spec.get('trade_tick_size') or trade_spec.get('tick_size') or trade_spec.get('point_size') or trade_spec.get('point') or 0)
+            tick_value=float(trade_spec.get('trade_tick_value_loss') or trade_spec.get('trade_tick_value') or trade_spec.get('tick_value') or 0)
+            if tick_size<=0 or tick_value<=0: return float('inf')
+            return abs(float(distance))/tick_size*tick_value*float(trade_volume)
+        current_open_risk=0.0
+        for position in positions:
+            stop=float(getattr(position,'sl',0.0) or 0.0)
+            if stop<=0:
+                self._signal_update(candidate,False,'existing bot position has no stop-loss; total open risk cannot be verified'); return False
+            info=self.client.mt5.symbol_info(position.symbol) if hasattr(self.client.mt5,'symbol_info') else None
+            position_spec=info._asdict() if info is not None and hasattr(info,'_asdict') else (dict(info) if isinstance(info,dict) else {})
+            current_open_risk+=_risk_money(abs(float(position.price_open)-stop),float(position.volume),position_spec)
+        reserved_risk=sum(float(row.get('risk_money',0.0)) for row in self._cycle_reservations)
+        new_risk=_risk_money(abs(float(signal.entry_hint)-float(signal.sl_price)),volume,spec)
+        if current_open_risk+reserved_risk+new_risk>float(state.equity)*risk_limit_pct/100:
+            self._signal_update(candidate,False,'total open stop risk cap reached'); return False
         order_type=self.client.mt5.ORDER_TYPE_BUY if signal.direction=='buy' else self.client.mt5.ORDER_TYPE_SELL
         margin=self.client.mt5.order_calc_margin(order_type,candidate.symbol,volume,signal.entry_hint)
         if margin is None:
@@ -329,13 +380,39 @@ class TradingBot:
         group_trades_today=(self.db.count_group_trades_since(day_start,candidate.asset_group,self.settings.magic_number) if hasattr(self.db,'count_group_trades_since') else 0)+sum(r['position'].get('asset_group')==candidate.asset_group for r in self._cycle_reservations)
         allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,gate_settings,candidate.cost,candidate.asset_group,now,margin+reserved_margin,volume,spec,cooldown_active,symbol_trades_today,session_closing,trades_today,group_trades_today)
         if not allowed:
+            if (not exploration_eligible and exploration_cfg.get('enabled',False) and self._last_account_type=='DEMO'
+                    and why in {'net risk/reward below minimum','cost-to-target ratio too high'}
+                    and signal.confidence>=float(exploration_cfg.get('min_confidence',.45))):
+                exploration_eligible=True; trade_mode='weekend_exploration' if weekend else 'exploration'; risk_pct=float(exploration_cfg.get('risk_per_trade_pct',.1))
+                if weekend: risk_pct=min(risk_pct,float(weekend_cfg.get('risk_per_trade_pct',risk_pct)))
+                features=getattr(candidate,'features',{}); features['exploration']={'eligible':True,'soft_failures':[why]}; features['trade_mode']=trade_mode
+                count_open=self.db.count_mode_trades_since('exploration',now,open_only=True)
+                count_today=self.db.count_mode_trades_since('exploration',day_start)
+                if count_open>=int(exploration_cfg.get('max_open_positions',5)) or count_today>=int(exploration_cfg.get('max_trades_per_day',40)):
+                    self._signal_update(candidate,False,'exploration trade limit reached'); return False
+                volume,volume_reason=calc_volume(state.equity,risk_pct,signal.entry_hint,signal.sl_price,spec)
+                if volume<=0: self._signal_update(candidate,False,volume_reason); return False
+                margin=self.client.mt5.order_calc_margin(order_type,candidate.symbol,volume,signal.entry_hint)
+                if margin is None: self._signal_update(candidate,False,'order_calc_margin failed'); return False
+                relaxed=dict(self.settings.config['risk'])
+                relaxed['min_risk_reward']=float(exploration_cfg.get('min_risk_reward',1.0))
+                relaxed['max_cost_to_target_ratio']=float(exploration_cfg.get('max_cost_to_target_ratio',.45))
+                relaxed['max_open_positions']=min(int(relaxed['max_open_positions']),int(exploration_cfg.get('max_open_positions',5)))
+                gate_settings=SimpleNamespace(config={**self.settings.config,'risk':relaxed},root=self.settings.root)
+                allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,gate_settings,candidate.cost,candidate.asset_group,now,margin+reserved_margin,volume,spec,cooldown_active,symbol_trades_today,session_closing,trades_today,group_trades_today)
             if why=='daily loss limit reached': self._notify('daily_loss','🛑 Gündəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.')
             if why=='weekly loss limit reached': self._notify('weekly_loss','🛑 Həftəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.')
-            self._signal_update(candidate,False,why); return False
+            if not allowed: self._signal_update(candidate,False,why); return False
+        if exploration_eligible:
+            count_open=self.db.count_mode_trades_since('exploration',now,open_only=True)
+            count_today=self.db.count_mode_trades_since('exploration',day_start)
+            if count_open>=int(exploration_cfg.get('max_open_positions',5)) or count_today>=int(exploration_cfg.get('max_trades_per_day',40)):
+                self._signal_update(candidate,False,'exploration trade limit reached'); return False
+        candidate_features.setdefault('trade_mode',trade_mode)
         result=self.executor.open_trade(signal,volume,expected_cost=candidate.cost,features=getattr(candidate,'features',{}))
         if not result.success:
             self._signal_update(candidate,False,result.message); return False
-        self._cycle_reservations.append({'position':{'symbol':candidate.symbol,'asset_group':candidate.asset_group,'exposure_group':underlying_group(candidate.symbol,candidate.asset_group),'underlying':underlying_key(candidate.symbol),'direction':signal.direction,'currency_base':spec.get('currency_base',''),'currency_profit':spec.get('currency_profit',''),'profit':0.0},'margin':float(margin)})
+        self._cycle_reservations.append({'position':{'symbol':candidate.symbol,'asset_group':candidate.asset_group,'exposure_group':underlying_group(candidate.symbol,candidate.asset_group),'underlying':underlying_key(candidate.symbol),'direction':signal.direction,'currency_base':spec.get('currency_base',''),'currency_profit':spec.get('currency_profit',''),'profit':0.0},'margin':float(margin),'risk_money':float(new_risk)})
         self._signal_update(candidate,True,'')
         # Refresh portfolio state before the next ranked candidate.
         get_account_state(self.client.mt5); self._owned_positions()
@@ -396,8 +473,9 @@ class TradingBot:
         self._cycle_reservations=[]
         self._components(); account=self._account_type(); state=get_account_state(self.client.mt5); self._startup(state)
         self._check_clock(now)
+        if hasattr(self.scanner,'_load_news_calendar'): self.scanner._load_news_calendar(now)
         health_ok=self._health(now)
-        self.executor.sync_positions(); getattr(self.executor,'enforce_adverse_move_exit',lambda *_:None)(self.settings); self.executor.enforce_time_stop(self._management_settings(now)); self.executor.enforce_session_close(self.settings,now)
+        self.executor.sync_positions(); getattr(self.executor,'enforce_adverse_move_exit',lambda *_:None)(self.settings); getattr(self.executor,'enforce_news_positions',lambda *_:[])(getattr(self.scanner,'_news_events',[]),now); self.executor.enforce_time_stop(self._management_settings(now)); self.executor.enforce_session_close(self.settings,now)
         self._notify_closed_losses()
         pnl_today,pnl_week=self._pnl_periods(now)
         open_rows={int(row['ticket']):row for row in self.db.get_open_trades()}
@@ -422,8 +500,12 @@ class TradingBot:
         if history_cfg.get('incremental_refresh_enabled',False) and self._history_refresh_cycle%refresh_every==0:
             try:
                 from .history import refresh_incremental_batch
+                refresh_started=self.monotonic()
                 refreshed=refresh_incremental_batch(self.client.mt5,self.settings,now)
-                if refreshed: self._event('INFO',f"Incremental history updated {refreshed['symbol']} {refreshed['timeframe']} bars={refreshed['bars']}")
+                elapsed=self.monotonic()-refresh_started
+                budget=float(history_cfg.get('incremental_budget_seconds',1.5))
+                if elapsed>budget: self._event('WARNING',f'Incremental history request exceeded the cycle budget ({elapsed:.2f}s > {budget:.2f}s); one request ran sequentially and no cycles overlapped')
+                elif refreshed: self._event('INFO',f"Incremental history updated {refreshed['symbol']} {refreshed['timeframe']} bars={refreshed['bars']} elapsed={elapsed:.2f}s")
             except Exception as exc:
                 self._event('WARNING',f'Incremental history batch failed: {type(exc).__name__}: {exc}')
         scan=getattr(self.scanner,'scan',None) or getattr(self.scanner,'scan_once')
@@ -529,6 +611,7 @@ class TradingBot:
         locked=False
         try:
             self.lock.acquire(); locked=True
+            self.telegram_commands.start()
             for name in ('SIGINT','SIGTERM','SIGBREAK'):
                 signum=getattr(signal,name,None)
                 if signum is None: continue
@@ -560,3 +643,5 @@ class TradingBot:
                     finally: self.lock.release()
             try: self.notifier.flush()
             except Exception: log.exception('Telegram bildirişləri dayandırılarkən tamamlanmadı')
+            try: self.telegram_commands.stop()
+            except Exception: log.exception('Telegram əmr polleri dayandırılarkən xəta')

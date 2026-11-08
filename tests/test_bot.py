@@ -81,6 +81,15 @@ def test_trade_mode_opens_only_live_allowlisted_strategy(tmp_path):
     assert executor2.opened==[]
     with db2.connect() as conn: assert conn.execute('SELECT skip_reason FROM signals WHERE id=?',(item2.signal_row_id,)).fetchone()[0]=='strategy not allowed live'
 
+def test_demo_exploration_candidate_is_sized_and_tagged_separately(tmp_path):
+    bot,db,_,_,_,executor,item=make_bot(tmp_path,'trade',['breakout'])
+    bot.settings.config['demo_exploration']={'enabled':True,'risk_per_trade_pct':.1,'max_open_positions':5,'max_trades_per_day':40,'min_confidence':.45,'mtf_min_agree':2,'min_risk_reward':1,'max_cost_to_target_ratio':.45}
+    item.features={'exploration':{'eligible':True,'soft_failures':['confidence below scanner.min_confidence']}}
+    bot.cycle()
+    assert len(executor.opened)==1
+    assert item.features['trade_mode']=='exploration'
+    assert executor.opened[0][1]<=1.0
+
 def test_stop_blocks_entries_and_halt_exits_cleanly(tmp_path):
     bot,db,_,_,scanner,executor,item=make_bot(tmp_path,'trade',['breakout'])
     (tmp_path/'STOP').write_text('PAUSE\n',encoding='utf-8')

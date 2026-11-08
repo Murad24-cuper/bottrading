@@ -12,6 +12,7 @@ risk:
   max_positions_per_group: 6     # Correlation guard per asset group
   max_positions_per_currency: 3  # Net directional positions per FX/metals currency
   max_positions_per_underlying_group: 2 # Correlated US indices and other underlying groups
+  max_total_open_risk_pct: 5.0    # Maximum combined stop risk across bot positions and cycle reservations
   symbol_cooldown_minutes: 20    # Fixed cooldown; never shortened by scanner vacancies
   max_trades_per_symbol_per_day: 4 # Maximum daily opens per underlying (UTC day)
   max_group_share_today: 0.4     # Group cap after at least 10 daily trades
@@ -99,7 +100,6 @@ strategies:
     params: {range_bars: 20, atr_expansion: 1.0, volume_ratio: 1.0, reward_range: 1.5}
   volatility_scalp:
     enabled: true
-    groups: [forex, metals, indices, energy, crypto]
     timeframes: [M1, M5, M15]
     groups: [forex, metals, indices, energy, crypto, stocks]
     params: {atr_period: 14, atr_percentile: 0.70, percentile_lookback_bars: 7200, target_atr: 0.4, stop_atr: 0.65, max_spread_target_ratio: 0.35}
@@ -111,7 +111,8 @@ scanner:
   candle_count: 250
   min_score: 0.0
   min_confidence: 0.55
-  target_open_positions: 15     # Scanner work adapts below this target; no forced trades
+  target_open_positions: 10     # Scanner work adapts below this target; no forced trades
+  full_rotation_seconds: 60     # Every active focus symbol receives full analysis within this window
   require_mtf_agreement: true
   mtf_min_agree: 2               # Require this many agreeing closed-bar timeframes
   mtf_ema_fast: 5               # Fast EMA for M1/M5/M15 direction agreement
@@ -120,7 +121,6 @@ scanner:
   spread_median_lookback_hours: 24
   spread_median_cache_seconds: 300
   extend_min_score: 0.7          # Continuation score required to extend a protected winner
-  extend_min_score: 0.7
   top_movers: 40                 # Full strategy analysis runs only on top movers
   movement_timeframe_minutes: 30 # Short-term movement measurement for ranking
   max_spread_volatility_ratio: 1.0  # Skip when spread exceeds one ATR; target cost gate remains stricter
@@ -189,13 +189,21 @@ brain:
   min_ev_r: 0.05
   k_neighbors: 300
   kelly_fraction: 0.25
-  max_symbols: 400
+  max_symbols: 13                # Ten weekday focus symbols plus three weekend symbols
   max_reference_situations: 1500000
   query_exclude_same_symbol_days: 1
   checklist:
     weights: {trend: 1.0, location: 1.0, pattern: 1.0, candle: 1.0, fibonacci: 0.7, levels: 1.0, momentum: 1.0, volatility: 0.8, session: 0.5, context: 0.5}
   acceptance: {min_trades: 500, min_profit_factor: 1.1, min_symbols: 30, calibration_error: 0.05}
-  universe_quotas: {forex: 80, indices: 50, stocks: 100, crypto: 50, metals: 30, energy: 20}
+  universe_quotas: {forex: 5, indices: 4, stocks: 0, crypto: 2, metals: 2, energy: 0}
+  kelly_fraction: 0.25
+  pca_components: 28
+  max_reference_memory_mb: 800
+  max_reference_situations: 1500000
+  purge_gap_minutes: 20
+  sample_every_minutes: 30
+  rounds: 5
+  weekend_memory_file: weekend_reference.parquet
   retrain_day_utc: 6
   retrain_hour_utc: 2
   live_drift_window: 100
@@ -218,6 +226,15 @@ weekend:
   max_open_positions: 3
   move_horizon_minutes: 60
   max_hold_extended_minutes: 120
+demo_exploration:
+  enabled: true
+  risk_per_trade_pct: 0.1
+  max_open_positions: 5
+  max_trades_per_day: 40
+  min_confidence: 0.45
+  mtf_min_agree: 2
+  min_risk_reward: 1.0
+  max_cost_to_target_ratio: 0.45
 backtest:
   start_equity: 1000
   commission_per_lot_per_side: 0.0

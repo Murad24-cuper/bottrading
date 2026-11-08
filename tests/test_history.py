@@ -91,3 +91,16 @@ def test_incremental_refresh_backfills_oldest_missing_chunk(tmp_path,monkeypatch
     start,end=calls[0]
     assert end==first.to_pydatetime()
     assert (end-start).days==7
+
+def test_weekend_history_uses_shorter_ranges_and_no_h1(tmp_path,monkeypatch):
+    import json
+    import src.history as history
+    data_dir=tmp_path/'data'; brain=data_dir/'brain'; brain.mkdir(parents=True)
+    (brain/'universe.json').write_text(json.dumps({'symbols':[{'symbol':'BTCUSD'}]}),encoding='utf-8')
+    settings=SimpleNamespace(root=tmp_path,data_dir=data_dir,config={'universe':{'weekend_symbols':['BTCUSD']},'history':{'data_dir':'data/history','ranges_months':{'M1':12,'M5':36,'M15':36,'H1':60},'weekend_ranges_months':{'M1':6,'M5':24,'M15':24},'weekend_timeframes':['M1','M5','M15'],'incremental_refresh_enabled':True,'incremental_timeframes':['M1','M5','M15','H1'],'incremental_batch_days':{'M1':1,'M5':7,'M15':14,'H1':30}}})
+    calls=[]
+    monkeypatch.setattr(history,'download_history',lambda mt5,symbols,timeframes,start,end,settings:calls.append((timeframes[0],start,end)) or {'BTCUSD':{timeframes[0]:pd.DataFrame(index=[])}})
+    now=datetime(2026,11,8,tzinfo=timezone.utc)
+    for _ in range(3): refresh_incremental_batch(object(),settings,now)
+    assert [row[0] for row in calls]==['M1','M5','M15']
+    assert (now-calls[1][1]).days==7

@@ -123,3 +123,14 @@ def test_weekly_vacuum_and_idempotent_maintenance_marker(tmp_path):
     db.mark_maintenance_done('daily','2026-11-06')
     assert db.maintenance_done('daily','2026-11-06')
     db.vacuum()
+
+def test_weekend_gate_disables_for_seven_days_after_twenty_losing_weekend_trades(tmp_path):
+    from datetime import datetime,timezone
+    db=Database(tmp_path/'weekend-gate.db')
+    for ticket in range(20):
+        db.insert_trade(ticket=ticket+1,symbol='BTCUSD',mode='weekend',status='closed',close_time=f'2026-11-{ticket+1:02}T00:00:00+00:00',profit=-1,commission=0,swap=0)
+    now=datetime(2026,12,1,tzinfo=timezone.utc)
+    result=db.weekend_gate(now,20,7)
+    assert result['sample_size']==20 and result['expectancy']==-1
+    assert result['disabled_until']=='2026-12-08T00:00:00+00:00'
+    assert db.weekend_gate(now.replace(day=2),20,7)['disabled_until']==result['disabled_until']

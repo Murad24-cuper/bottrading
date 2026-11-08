@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS trades(
  strategy TEXT, reason TEXT, magic INTEGER, status TEXT, close_reason TEXT,
  timeframe TEXT, initial_risk REAL, initial_volume REAL, scale_out_done INTEGER DEFAULT 0, peak_favorable_r REAL DEFAULT 0,
  extension_until TEXT, extended_minutes INTEGER DEFAULT 0, estimated_spread_cost REAL DEFAULT 0,
- estimated_commission_cost REAL DEFAULT 0, features TEXT NOT NULL DEFAULT '{}');
+ estimated_commission_cost REAL DEFAULT 0, features TEXT NOT NULL DEFAULT '{}', mode TEXT NOT NULL DEFAULT 'main');
 CREATE TABLE IF NOT EXISTS partial_closes(
  id INTEGER PRIMARY KEY, deal_ticket INTEGER, ticket INTEGER, symbol TEXT, time TEXT, volume REAL,
  price REAL, profit REAL, commission REAL, swap REAL, reason TEXT);
@@ -55,10 +55,12 @@ CREATE TABLE IF NOT EXISTS bot_status(
  scan_seconds REAL, scan_rejections TEXT, strategy_diagnostics TEXT, trade_allowed INTEGER DEFAULT 0, scan_groups_open TEXT);
 CREATE TABLE IF NOT EXISTS commands(
  id INTEGER PRIMARY KEY, time TEXT, created_at TEXT, expires_at TEXT, command TEXT, status TEXT, message TEXT, processed_time TEXT);
+CREATE TABLE IF NOT EXISTS telegram_updates(update_id INTEGER PRIMARY KEY, received_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS schema_migrations(name TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS adaptive_gates(
  scope TEXT NOT NULL, name TEXT NOT NULL, disabled_until TEXT NOT NULL, expectancy REAL NOT NULL,
  sample_size INTEGER NOT NULL, reason TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(scope,name));
+CREATE TABLE IF NOT EXISTS weekend_control(id INTEGER PRIMARY KEY CHECK(id=1),disabled_until TEXT,expectancy REAL,sample_size INTEGER,updated_at TEXT);
 '''
 
 class Database:
@@ -74,7 +76,7 @@ class Database:
             connection.execute('PRAGMA journal_mode=WAL')
             connection.executescript(SCHEMA)
             trade_columns={row['name'] for row in connection.execute('PRAGMA table_info(trades)')}
-            for name, sql_type in {'timeframe':'TEXT','initial_risk':'REAL','initial_volume':'REAL','scale_out_done':'INTEGER DEFAULT 0','peak_favorable_r':'REAL DEFAULT 0','extension_until':'TEXT','extended_minutes':'INTEGER DEFAULT 0','estimated_spread_cost':'REAL DEFAULT 0','estimated_commission_cost':'REAL DEFAULT 0','features':"TEXT NOT NULL DEFAULT '{}'"}.items():
+            for name, sql_type in {'timeframe':'TEXT','initial_risk':'REAL','initial_volume':'REAL','scale_out_done':'INTEGER DEFAULT 0','peak_favorable_r':'REAL DEFAULT 0','extension_until':'TEXT','extended_minutes':'INTEGER DEFAULT 0','estimated_spread_cost':'REAL DEFAULT 0','estimated_commission_cost':'REAL DEFAULT 0','features':"TEXT NOT NULL DEFAULT '{}'",'mode':"TEXT NOT NULL DEFAULT 'main'"}.items():
                 if name not in trade_columns: connection.execute(f'ALTER TABLE trades ADD COLUMN {name} {sql_type}')
             connection.execute('UPDATE trades SET initial_volume=volume WHERE initial_volume IS NULL')
             partial_columns={row['name'] for row in connection.execute('PRAGMA table_info(partial_closes)')}
@@ -124,6 +126,19 @@ class Database:
             return result.rowcount
     def get_open_trades(self):
         with self.connect() as connection: return [dict(row) for row in connection.execute("SELECT * FROM trades WHERE status='open' ORDER BY open_time")]
+    def count_mode_trades_since(self,mode,start,open_only=False):
+        stamp=start.isoformat() if hasattr(start,'isoformat') else str(start)
+        clause="status='open'" if open_only else 'open_time>=?'
+        if mode=='exploration':
+            modes="mode IN ('exploration','weekend_exploration')"; params=() if open_only else (stamp,)
+            clause=f'{modes} AND {clause}'
+            sql=f'SELECT COUNT(*) FROM trades WHERE {clause}'
+        else:
+            params=(str(mode),) if open_only else (str(mode),stamp)
+            sql=f'SELECT COUNT(*) FROM trades WHERE mode=? AND {clause}'
+        with self.connect() as connection:
+            row=connection.execute(sql,params).fetchone()
+            return int(row[0])
     def count_symbol_trades_since(self,symbol,since,magic=None):
         stamp=since.isoformat() if hasattr(since,'isoformat') else str(since)
         with self.connect() as connection:
@@ -172,7 +187,7 @@ class Database:
             return [dict(row) for row in connection.execute("SELECT id,ticket,symbol,direction,strategy,profit,commission,swap,close_reason FROM trades WHERE status='closed' AND id>? ORDER BY id",(int(last_id),))]
     def get_recent_brain_outcomes(self,limit=100,magic=None):
         import json
-        query="SELECT ticket,profit,commission,swap,features FROM trades WHERE status='closed' AND features IS NOT NULL"
+        query="SELECT ticket,profit,commission,swap,features FROM trades WHERE status='closed' AND mode='main' AND features IS NOT NULL"
         params=[]
         if magic is not None: query+=' AND magic=?'; params.append(int(magic))
         query+=' ORDER BY close_time DESC LIMIT ?'; params.append(max(int(limit),int(limit)*10))
@@ -273,7 +288,7 @@ class Database:
         now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
         disabled=[]
         with self.connect() as connection:
-            where="status='closed'"; params=[]
+            where="status='closed' AND mode='main'"; params=[]
             if magic is not None: where+=' AND magic=?'; params.append(int(magic))
             closed=[dict(row) for row in connection.execute(f'SELECT ticket,strategy,asset_group,close_time,COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0) AS net FROM trades WHERE {where} ORDER BY close_time DESC,id DESC',params)]
             partial={int(row['ticket']):float(row['pnl'] or 0) for row in connection.execute('SELECT ticket,SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)) pnl FROM partial_closes GROUP BY ticket')}
@@ -298,6 +313,19 @@ class Database:
                 connection.execute('INSERT INTO bot_events(time,level,source,message) VALUES (?,?,?,?)',(now.isoformat(),'WARNING','risk',message))
                 disabled.append({'scope':scope,'name':name,'disabled_until':expiry,'expectancy':expectancy,'sample_size':len(values),'reason':message})
         return disabled
+    def weekend_gate(self,now=None,window=20,disable_days=7):
+        """Disable weekend entries for a week after 20 recent weekend trades lose expectancy."""
+        now=now or datetime.now(timezone.utc)
+        now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+        with self.connect() as connection:
+            prior=connection.execute('SELECT * FROM weekend_control WHERE id=1').fetchone()
+            if prior and prior['disabled_until'] and prior['disabled_until']>now.isoformat(): return dict(prior)
+            rows=connection.execute("SELECT profit,commission,swap FROM trades WHERE status='closed' AND mode IN ('weekend','weekend_exploration') ORDER BY close_time DESC LIMIT ?",(int(window),)).fetchall()
+            outcomes=[sum(float(row[key] or 0) for key in ('profit','commission','swap')) for row in rows]
+            expectancy=sum(outcomes)/len(outcomes) if outcomes else 0.0
+            disabled_until=(now+timedelta(days=int(disable_days))).isoformat() if len(outcomes)>=int(window) and expectancy<0 else None
+            connection.execute('INSERT INTO weekend_control(id,disabled_until,expectancy,sample_size,updated_at) VALUES (1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET disabled_until=excluded.disabled_until,expectancy=excluded.expectancy,sample_size=excluded.sample_size,updated_at=excluded.updated_at',(disabled_until,expectancy,len(outcomes),now.isoformat()))
+            return dict(connection.execute('SELECT * FROM weekend_control WHERE id=1').fetchone())
     def get_partial_pnl_since(self,dt):
         stamp=dt.isoformat() if hasattr(dt,'isoformat') else str(dt)
         with self.connect() as connection:
@@ -330,13 +358,18 @@ class Database:
             return dict(row) if row else None
     def insert_command(self,command,ttl_seconds=60):
         created=datetime.now(timezone.utc); expires=created+timedelta(seconds=int(ttl_seconds))
-        if command not in {'close_all','pause','resume','stop','close_all_stop'}: raise ValueError('Unsupported bot command')
+        if command not in {'close_all','pause','resume','stop','close_all_stop','status','today','positions','health'}: raise ValueError('Unsupported bot command')
         with self.connect() as connection:
             connection.execute('BEGIN IMMEDIATE')
             active=connection.execute("SELECT id FROM commands WHERE command=? AND status IN ('pending','running') ORDER BY id LIMIT 1",(str(command),)).fetchone()
             if active: raise ValueError(f'A {command} command is already pending or running')
             cursor=connection.execute('INSERT INTO commands(time,created_at,expires_at,command,status,message) VALUES (?,?,?,?,?,?)',(created.isoformat(),created.isoformat(),expires.isoformat(),str(command),'pending',''))
             return cursor.lastrowid
+    def record_telegram_update(self,update_id):
+        """Atomically deduplicate a Telegram update before queueing its action."""
+        with self.connect() as connection:
+            cursor=connection.execute('INSERT OR IGNORE INTO telegram_updates(update_id,received_at) VALUES (?,?)',(int(update_id),datetime.now(timezone.utc).isoformat()))
+            return cursor.rowcount==1
     def get_recent_commands(self,limit=20):
         with self.connect() as connection: return [dict(row) for row in connection.execute('SELECT id,created_at,expires_at,command,status,message,processed_time FROM commands ORDER BY id DESC LIMIT ?',(int(limit),))]
     def get_pending_commands(self,now=None,bot_started_at=None):

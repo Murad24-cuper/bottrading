@@ -33,27 +33,37 @@ def get_latest_snapshot(path=None):
     return rows[0] if rows else None
 
 def get_day_summary(start_utc,end_utc,path=None):
-    closed=_rows(path,"SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) AS pnl,COUNT(*) AS trades FROM trades WHERE status='closed' AND close_time>=? AND close_time<?",(start_utc,end_utc))
-    partial=_rows(path,"SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) AS pnl,COALESCE(SUM(CASE WHEN profit+COALESCE(commission,0)+COALESCE(swap,0)>0 THEN profit+COALESCE(commission,0)+COALESCE(swap,0) ELSE 0 END),0) AS taken,COALESCE(SUM(CASE WHEN profit+COALESCE(commission,0)+COALESCE(swap,0)<0 THEN -(profit+COALESCE(commission,0)+COALESCE(swap,0)) ELSE 0 END),0) AS lost FROM partial_closes WHERE time>=? AND time<?",(start_utc,end_utc))
-    floats=_rows(path,"SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) AS pnl FROM trades WHERE status='open'")
-    winning=_rows(path,"SELECT COALESCE(SUM(profit+COALESCE(commission,0)+COALESCE(swap,0)),0) AS amount FROM trades WHERE status='closed' AND close_time>=? AND close_time<? AND profit+COALESCE(commission,0)+COALESCE(swap,0)>0",(start_utc,end_utc))
-    losing=_rows(path,"SELECT COALESCE(SUM(-(profit+COALESCE(commission,0)+COALESCE(swap,0))),0) AS amount FROM trades WHERE status='closed' AND close_time>=? AND close_time<? AND profit+COALESCE(commission,0)+COALESCE(swap,0)<0",(start_utc,end_utc))
-    wins=_rows(path,"SELECT COUNT(*) AS n FROM trades WHERE status='closed' AND close_time>=? AND close_time<? AND profit+COALESCE(commission,0)+COALESCE(swap,0)>0",(start_utc,end_utc))
-    losses=_rows(path,"SELECT COUNT(*) AS n FROM trades WHERE status='closed' AND close_time>=? AND close_time<? AND profit+COALESCE(commission,0)+COALESCE(swap,0)<0",(start_utc,end_utc))
+    closed=_rows(path,"SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) AS pnl,COUNT(*) AS trades FROM trades WHERE status='closed' AND mode='main' AND close_time>=? AND close_time<?",(start_utc,end_utc))
+    partial=_rows(path,"SELECT COALESCE(SUM(COALESCE(p.profit,0)+COALESCE(p.commission,0)+COALESCE(p.swap,0)),0) AS pnl,COALESCE(SUM(CASE WHEN p.profit+COALESCE(p.commission,0)+COALESCE(p.swap,0)>0 THEN p.profit+COALESCE(p.commission,0)+COALESCE(p.swap,0) ELSE 0 END),0) AS taken,COALESCE(SUM(CASE WHEN p.profit+COALESCE(p.commission,0)+COALESCE(p.swap,0)<0 THEN -(p.profit+COALESCE(p.commission,0)+COALESCE(p.swap,0)) ELSE 0 END),0) AS lost FROM partial_closes p JOIN trades t ON t.ticket=p.ticket WHERE t.mode='main' AND p.time>=? AND p.time<?",(start_utc,end_utc))
+    floats=_rows(path,"SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) AS pnl FROM trades WHERE status='open' AND mode='main'")
+    winning=_rows(path,"SELECT COALESCE(SUM(profit+COALESCE(commission,0)+COALESCE(swap,0)),0) AS amount FROM trades WHERE status='closed' AND mode='main' AND close_time>=? AND close_time<? AND profit+COALESCE(commission,0)+COALESCE(swap,0)>0",(start_utc,end_utc))
+    losing=_rows(path,"SELECT COALESCE(SUM(-(profit+COALESCE(commission,0)+COALESCE(swap,0))),0) AS amount FROM trades WHERE status='closed' AND mode='main' AND close_time>=? AND close_time<? AND profit+COALESCE(commission,0)+COALESCE(swap,0)<0",(start_utc,end_utc))
+    wins=_rows(path,"SELECT COUNT(*) AS n FROM trades WHERE status='closed' AND mode='main' AND close_time>=? AND close_time<? AND profit+COALESCE(commission,0)+COALESCE(swap,0)>0",(start_utc,end_utc))
+    losses=_rows(path,"SELECT COUNT(*) AS n FROM trades WHERE status='closed' AND mode='main' AND close_time>=? AND close_time<? AND profit+COALESCE(commission,0)+COALESCE(swap,0)<0",(start_utc,end_utc))
     row=closed[0] if closed else {'pnl':0,'trades':0}; part=partial[0] if partial else {'pnl':0,'taken':0,'lost':0}; floating=floats[0]['pnl'] if floats else 0; win_count=wins[0]['n'] if wins else 0; loss_count=losses[0]['n'] if losses else 0
     count=win_count+loss_count
     return {'closed_pnl':float(row['pnl'])+float(part['pnl']),'floating_pnl':float(floating),'net_pnl':float(row['pnl'])+float(part['pnl'])+float(floating),'trades':int(row['trades']),'wins':int(win_count),'losses':int(loss_count),'win_rate':win_count/count if count else 0.0,'taken':(float(winning[0]['amount']) if winning else 0.0)+float(part['taken']),'lost':(float(losing[0]['amount']) if losing else 0.0)+float(part['lost'])}
 
 def get_open_positions(path=None):
-    return _rows(path,"SELECT ticket,symbol,direction,volume,open_time,open_price,sl,tp,profit,commission,swap,strategy,magic,extended_minutes,features FROM trades WHERE status='open' ORDER BY open_time")
+    return _rows(path,"SELECT ticket,symbol,direction,volume,open_time,open_price,sl,tp,profit,commission,swap,strategy,magic,extended_minutes,features FROM trades WHERE status='open' AND mode='main' ORDER BY open_time")
 
 def get_closed_trades(start_utc,end_utc,path=None):
-    rows=_rows(path,"SELECT close_time,symbol,direction,volume,open_price,close_price,sl,tp,profit,commission,swap,close_reason,strategy FROM trades WHERE status='closed' AND close_time>=? AND close_time<? ORDER BY close_time DESC",(start_utc,end_utc))
+    rows=_rows(path,"SELECT close_time,symbol,direction,volume,open_price,close_price,sl,tp,profit,commission,swap,close_reason,strategy FROM trades WHERE status='closed' AND mode='main' AND close_time>=? AND close_time<? ORDER BY close_time DESC",(start_utc,end_utc))
     for row in rows: row['net_profit']=float(row.get('profit') or 0)+float(row.get('commission') or 0)+float(row.get('swap') or 0)
     return rows
 
+def get_exploration_trades(start_utc,end_utc,path=None):
+    """Return isolated demo exploration trades for the dedicated dashboard section."""
+    rows=_rows(path,"SELECT open_time,close_time,symbol,direction,volume,profit,commission,swap,strategy,status,close_reason FROM trades WHERE mode IN ('exploration','weekend_exploration') AND ((open_time>=? AND open_time<?) OR (close_time>=? AND close_time<?) OR status='open') ORDER BY open_time DESC",(start_utc,end_utc,start_utc,end_utc))
+    for row in rows: row['net_profit']=sum(float(row.get(key) or 0) for key in ('profit','commission','swap'))
+    return rows
+
+def get_weekend_control(path=None):
+    rows=_rows(path,'SELECT disabled_until,expectancy,sample_size,updated_at FROM weekend_control WHERE id=1')
+    return rows[0] if rows else None
+
 def get_today_diversity(start_utc,end_utc,path=None):
-    rows=_rows(path,"SELECT symbol,asset_group,COUNT(*) AS trades FROM trades WHERE open_time>=? AND open_time<? GROUP BY symbol,asset_group",(start_utc,end_utc))
+    rows=_rows(path,"SELECT symbol,asset_group,COUNT(*) AS trades FROM trades WHERE mode='main' AND open_time>=? AND open_time<? GROUP BY symbol,asset_group",(start_utc,end_utc))
     from ..symbols import underlying_key
     symbols={underlying_key(row['symbol']) for row in rows}
     groups={row.get('asset_group') or 'other' for row in rows}
@@ -100,7 +110,7 @@ def get_top_skip_reasons_since(since_utc,path=None,limit=5):
 def get_feature_impact(path=None):
     """Return closed-trade feature observations for the analysis tab."""
     from ..analysis.feature_impact import analyze_feature_impact
-    return analyze_feature_impact(_rows(path,"SELECT profit,commission,swap,features FROM trades WHERE status='closed' ORDER BY close_time"))
+    return analyze_feature_impact(_rows(path,"SELECT profit,commission,swap,features FROM trades WHERE status='closed' AND mode='main' ORDER BY close_time"))
 
 def get_signals_period(start_utc,end_utc,path=None,limit=5000):
     rows=_rows(path,'SELECT time,symbol,direction,entry,sl,tp,strategy,confidence,taken FROM signals WHERE time>=? AND time<? ORDER BY time DESC LIMIT ?',(start_utc,end_utc,int(limit)))
@@ -124,7 +134,7 @@ def get_daily_pnl(path=None,days=30):
 
 def get_performance_report(start_utc,end_utc,path=None):
     """Return trade metrics and breakdowns for a UTC interval."""
-    trades=_rows(path,"SELECT id,ticket,symbol,asset_group,strategy,close_reason,close_time,profit,commission,swap,estimated_spread_cost FROM trades WHERE status='closed' AND close_time>=? AND close_time<? ORDER BY close_time",(start_utc,end_utc))
+    trades=_rows(path,"SELECT id,ticket,symbol,asset_group,strategy,close_reason,close_time,profit,commission,swap,estimated_spread_cost FROM trades WHERE status='closed' AND mode='main' AND close_time>=? AND close_time<? ORDER BY close_time",(start_utc,end_utc))
     partials=_rows(path,'SELECT ticket,profit,commission,swap FROM partial_closes WHERE time>=? AND time<?',(start_utc,end_utc))
     partial_by_ticket={}; partial_cost_by_ticket={}
     for row in partials:
