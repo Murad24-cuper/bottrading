@@ -43,7 +43,12 @@ def detect_server_utc_offset(mt5, now_utc: datetime | None = None,
             difference = stamp - now.timestamp()
             hours = round(difference / 3600)
             age=now.timestamp()-(stamp-hours*3600)
-            if abs(difference - hours * 3600) <= tolerance_seconds and -tolerance_seconds<=age<=max_tick_age_seconds:
+            # A closed-market tick can be many hours behind UTC. Rounding that
+            # gap as an offset (for example -44h on Sunday) shifts every quote
+            # into the future. Real broker UTC offsets fit within this bound.
+            if (-14 <= hours <= 14 and
+                    abs(difference - hours * 3600) <= tolerance_seconds and
+                    -tolerance_seconds <= age <= max_tick_age_seconds):
                 return timedelta(hours=hours)
         except (AttributeError, TypeError, ValueError, OverflowError):
             continue

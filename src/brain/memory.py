@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime,timezone,timedelta
 import numpy as np
 
-def situation_vector(candles: dict, context: dict | None=None) -> np.ndarray:
+def situation_vector(candles: dict, context: dict | None=None, direction: str | None=None) -> np.ndarray:
     """Encode recent closed-bar returns and context without using future rows."""
     values=[]
     for timeframe,count in (('M5',48),('M15',32)):
@@ -21,6 +21,9 @@ def situation_vector(candles: dict, context: dict | None=None) -> np.ndarray:
         try: value=float(raw)
         except (TypeError,ValueError): value=0.0
         values.append(float(np.clip(value,-5,5)) if np.isfinite(value) else 0.0)
+    minutes=context.get('minutes_to_next_event')
+    values.append(float(np.clip(float(minutes)/1440.0,0.0,7.0)) if minutes is not None and np.isfinite(float(minutes)) else 7.0)
+    values.append(1.0 if direction=='buy' else -1.0 if direction=='sell' else 0.0)
     return np.asarray(values,dtype=np.float32)
 
 def fit_pca(training_vectors: np.ndarray, components: int=28) -> dict:

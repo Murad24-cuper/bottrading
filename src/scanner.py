@@ -291,14 +291,19 @@ class MarketScanner:
                         continue
                 feature_snapshot=dict(features); observations=dict(features.get('observations',{}))
                 observations['signal_context']=context_for_signal(cycle_context,symbol,signal.direction,group)
+                from .news import minutes_to_next_high_impact
+                minutes_to_event=minutes_to_next_high_impact(symbol,datetime.now(timezone.utc),self._news_events)
+                observations['news_context']={'minutes_to_next_event':minutes_to_event}
                 feature_snapshot['observations']=observations
+                feature_snapshot['news_context']=observations['news_context']
                 from .brain.checklist import evaluate as evaluate_brain_checklist
                 from .brain.decide import decide as decide_brain
                 brain_cfg=self.settings.config.get('brain',{})
                 brain_checklist=evaluate_brain_checklist(features,signal.direction,brain_cfg.get('checklist',{}).get('weights',{}),observations,signal.entry_hint,signal.tp_price)
                 from .brain.memory import query_memory,situation_vector
                 brain_rows=self._brain_rows.get(group,[])
-                query_vector=situation_vector(candles,observations['signal_context'])
+                query_context={**observations['signal_context'],'minutes_to_next_event':minutes_to_event}
+                query_vector=situation_vector(candles,query_context,signal.direction)
                 if self._brain_pca is not None:
                     from .brain.memory import apply_pca
                     query_vector=apply_pca(query_vector,self._brain_pca)[0]

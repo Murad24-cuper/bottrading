@@ -53,6 +53,13 @@ def event_matches_symbol(event: CalendarEvent, symbol: str) -> bool:
     return any(alias in name or name in alias for alias in CURRENCY_SYMBOLS.get(event.currency, ()))
 
 
+def minutes_to_next_high_impact(symbol: str, now_utc: datetime, events: list[CalendarEvent]) -> float | None:
+    """Return minutes to the next mapped high-impact event, or None when unavailable."""
+    now=now_utc.replace(tzinfo=timezone.utc) if now_utc.tzinfo is None else now_utc.astimezone(timezone.utc)
+    upcoming=[event for event in events if event.importance=='HIGH' and event.time>=now and event_matches_symbol(event,symbol)]
+    return (min(event.time for event in upcoming)-now).total_seconds()/60 if upcoming else None
+
+
 def entry_block_reason(symbol: str, now_utc: datetime, events: list[CalendarEvent], updated_at: datetime | None, stale_after_hours: float = 2.0) -> str:
     """Block around high-impact events, with a conservative stale-feed window."""
     now = now_utc.replace(tzinfo=timezone.utc) if now_utc.tzinfo is None else now_utc.astimezone(timezone.utc)

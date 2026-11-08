@@ -20,7 +20,10 @@ def test_situation_vector_has_stable_size_from_closed_bar_history():
     index=pd.date_range('2026-01-01',periods=100,freq='5min',tz='UTC')
     frame=pd.DataFrame({'close':np.linspace(100,110,100),'high':np.linspace(100.1,110.1,100),'low':np.linspace(99.9,109.9,100)},index=index)
     vector=situation_vector({'M5':frame,'M15':frame})
-    assert vector.shape==(88,) and np.isfinite(vector).all()
+    assert vector.shape==(90,) and np.isfinite(vector).all()
+    buy=situation_vector({'M5':frame,'M15':frame},{'minutes_to_next_event':60},'buy')
+    sell=situation_vector({'M5':frame,'M15':frame},{'minutes_to_next_event':60},'sell')
+    assert buy[-1]==1 and sell[-1]==-1 and buy[-2]==sell[-2]
 
 def test_prepared_memory_vectorizes_queries_without_future_or_near_symbol_rows():
     now=datetime(2026,1,10,tzinfo=timezone.utc); rows=[]

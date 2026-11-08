@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from src.news import CalendarEvent, entry_block_reason, event_matches_symbol, parse_calendar
+from src.news import CalendarEvent, entry_block_reason, event_matches_symbol, parse_calendar, minutes_to_next_high_impact
 
 
 def test_high_impact_event_blocks_mapped_instrument_only_inside_window():
@@ -22,3 +22,9 @@ def test_calendar_parser_normalizes_utc_and_skips_invalid_rows(tmp_path):
     events,updated=parse_calendar(path)
     assert len(events)==1 and events[0].time.tzinfo==timezone.utc
     assert event_matches_symbol(events[0],'US500Cash')
+
+def test_minutes_until_next_high_impact_uses_mapped_currency():
+    now=datetime(2026,11,9,13,0,tzinfo=timezone.utc)
+    events=[CalendarEvent(now+timedelta(minutes=23),'USD','HIGH','CPI'),CalendarEvent(now+timedelta(minutes=2),'GBP','LOW','Survey')]
+    assert minutes_to_next_high_impact('US500Cash',now,events)==23
+    assert minutes_to_next_high_impact('GER40Cash',now,events) is None
