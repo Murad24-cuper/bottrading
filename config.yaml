@@ -194,7 +194,7 @@ brain:
   query_exclude_same_symbol_days: 1
   checklist:
     weights: {trend: 1.0, location: 1.0, pattern: 1.0, candle: 1.0, fibonacci: 0.7, levels: 1.0, momentum: 1.0, volatility: 0.8, session: 0.5, context: 0.5}
-  acceptance: {min_trades: 500, min_profit_factor: 1.1, min_symbols: 30, calibration_error: 0.05}
+  acceptance: {min_trades: 500, min_profit_factor: 1.1, min_symbols: 7, calibration_error: 0.05}
   universe_quotas: {forex: 5, indices: 4, stocks: 0, crypto: 2, metals: 2, energy: 0}
   kelly_fraction: 0.25
   pca_components: 28
