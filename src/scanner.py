@@ -83,11 +83,15 @@ def select_diverse_movers(ranked, groups, minimum_per_group=5, limit=40, traded_
         selected.append(symbol)
     return selected
 
+def weekend_index_names(symbols, groups):
+    """Return the discovered index symbols included in an active universe."""
+    return sorted({str(symbol) for symbol in symbols if groups.get(symbol) == 'indices'})
+
 class MarketScanner:
     def __init__(self,mt5,settings,db,symbol_service=None):
         self.mt5,self.settings,self.db=mt5,settings,db
         self.symbols=symbol_service or SymbolService(mt5,settings)
-        self._cache={}; self._cursor=0; self._strategies=load_strategies(settings); self.last_universe_size=0
+        self._cache={}; self._cursor=0; self._strategies=load_strategies(settings); self.last_universe_size=0; self._weekend_index_signature=None
         self._volatility_cache={}; self._spread_cache={}; self.last_scan_stats={}; self.last_strategy_diagnostics={}; self._news_events=[]; self._news_updated=None; self._news_loaded_at=0.0; self._news_notice_at=0.0; self._news_logged_updated=None
         self._brain_rows=self._load_brain_rows()
         self._brain_pca=None
@@ -167,6 +171,14 @@ class MarketScanner:
         owned=[p for p in (self.mt5.positions_get() or []) if int(p.magic)==self.settings.magic_number] if hasattr(self.mt5,'positions_get') else []
         open_symbols={str(p.symbol) for p in owned}
         universe=list(dict.fromkeys([*candidates,*sorted(open_symbols)])); self.last_universe_size=len(universe)
+        now_utc=datetime.now(timezone.utc)
+        if now_utc.weekday()>=5 and self.settings.config.get('weekend',{}).get('enabled',False):
+            groups={symbol:self.symbols.get_asset_group(symbol) for symbol in universe}
+            weekend_indices=weekend_index_names(universe,groups)
+            if tuple(weekend_indices)!=self._weekend_index_signature:
+                message=', '.join(weekend_indices) if weekend_indices else 'yoxdur'
+                self.db.log_event('INFO','scanner',f'Həftəsonu açıq indekslər aşkarlandı: {message}')
+                self._weekend_index_signature=tuple(weekend_indices)
         stage1=[]; rejection=Counter(); snapshots={}; movement=[]; move_rejections=Counter(); quote_open_groups=Counter()
         budget=float(cfg['max_seconds_per_cycle']); stage1_budget=budget*0.55; start=self._cursor%max(1,len(universe)); visited=0
         minutes=int(cfg['movement_timeframe_minutes']); m1_count=max(10,minutes)

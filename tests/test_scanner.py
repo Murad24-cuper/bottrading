@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from src.db import Database
 from src.models import Signal
-from src.scanner import Candidate,MarketScanner,adaptive_top_movers,expected_value_score,rank_candidates,select_diverse_movers
+from src.scanner import Candidate,MarketScanner,adaptive_top_movers,expected_value_score,rank_candidates,select_diverse_movers,weekend_index_names
 
 def candidate(symbol,score):
     signal=Signal(symbol,'buy','M1',10,9,12,.8,'test')
@@ -27,6 +27,11 @@ def test_diverse_movers_round_robin_groups_and_prefer_untraded_underlying():
     selected=select_diverse_movers(ranked,groups,1,4,{'EURUSD'})
     assert {groups[s] for s in selected[:3]}=={'forex','indices','crypto'}
     assert selected[0]!='EURUSD'
+
+def test_weekend_index_names_reports_only_discovered_index_symbols():
+    symbols=['BTCUSD','US30Cash','US500Cash','ETHUSD']
+    groups={'BTCUSD':'crypto','US30Cash':'indices','US500Cash':'indices','ETHUSD':'crypto'}
+    assert weekend_index_names(symbols,groups)==['US30Cash','US500Cash']
 
 def test_repeat_penalty_is_in_expected_risk_units():
     item=candidate('EURUSD',.5); item.risk_money=2
