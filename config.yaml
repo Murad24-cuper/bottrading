@@ -208,6 +208,9 @@ brain:
   rounds: 5
   weekend_memory_file: weekend_reference.parquet
   retrain_day_utc: 6
+self_learning:
+  bandit_enabled: true       # Thompson sampling changes scan priority only; risk settings remain locked
+  bandit_history_trades: 1000 # Recent closed main-mode outcomes used per weekly scan priority update
   retrain_hour_utc: 2
   live_drift_window: 100
   live_max_calibration_error: 0.1

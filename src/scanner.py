@@ -20,6 +20,7 @@ from .levels import key_levels
 from .sessions import session_context
 from .market_context import build_market_context,context_for_signal
 from .symbols import underlying_key
+from .brain.bandit import arm_key, sample_arm_priorities
 
 @dataclass
 class Candidate:
@@ -378,7 +379,31 @@ class MarketScanner:
                 candidate=Candidate(symbol,group,strategy.name,signal,signal.confidence,volume,risk_money,reward_money,cost,score,feature_snapshot,spec,reason)
                 candidate.signal_row_id=self._write_signal(signal,cost['cost'],reason,score,feature_snapshot); results.append(candidate)
         self.last_strategy_diagnostics={name:dict(counts) for name,counts in strategy_diagnostics.items()}
-        best=rank_candidates([c for c in results if not c.skip_reason],underlying_counts,group_counts,float(cfg.get('repeat_penalty',0.15)),float(cfg.get('group_repeat_penalty',0.05)))
+        eligible=[c for c in results if not c.skip_reason]
+        if self.settings.config.get('self_learning',{}).get('bandit_enabled',True) and eligible:
+            session_name=session_context(None).get('session','off-hours')
+            arm_for=lambda item:arm_key(item.strategy,item.asset_group,session_name)
+            arms=list(dict.fromkeys(arm_for(item) for item in eligible))
+            try:
+                with self.db.connect() as connection:
+                    closed=connection.execute("SELECT strategy,asset_group,open_time,COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0) net FROM trades WHERE status='closed' AND mode='main' ORDER BY close_time DESC LIMIT ?",(max(1,int(self.settings.config.get('self_learning',{}).get('bandit_history_trades',1000))),)).fetchall()
+                history=[]
+                for row in closed:
+                    try:
+                        opened=datetime.fromisoformat(str(row['open_time']).replace('Z','+00:00'))
+                        hour=opened.astimezone(timezone.utc).hour
+                    except (ValueError,TypeError): continue
+                    hist_session='London-NY overlap' if 12<=hour<16 else 'London' if 7<=hour<12 else 'New York' if 16<=hour<21 else 'Asia' if hour<7 else 'off-hours'
+                    history.append({'arm':arm_key(row['strategy'],row['asset_group'],hist_session),'win':float(row['net'])>0})
+                priorities=sample_arm_priorities(history,arms)
+                for item in eligible:
+                    share=priorities.get(arm_for(item),1/max(1,len(arms)))
+                    item.features.setdefault('self_learning',{})['bandit_share']=share
+                    item.features['self_learning']['bandit_arm']=arm_for(item)
+                    item.score*=1.0+share
+            except Exception as exc:
+                self.db.log_event('WARNING','scanner',f'Bandit priority unavailable; baseline ranking used: {type(exc).__name__}: {exc}')
+        best=rank_candidates(eligible,underlying_counts,group_counts,float(cfg.get('repeat_penalty',0.15)),float(cfg.get('group_repeat_penalty',0.05)))
         winners={c.symbol:c for c in best}
         for item in results:
             if item.symbol in winners and winners[item.symbol] is not item: item.skip_reason='superseded by higher-scoring signal for symbol'
