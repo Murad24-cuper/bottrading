@@ -19,7 +19,7 @@ class CalendarEvent:
 
 
 CURRENCY_SYMBOLS = {
-    "USD": ("EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "US500", "NAS100", "US30", "GOLD", "BTCUSD", "ETHUSD"),
+    "USD": ("EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "US500", "NAS100", "US30", "GOLD"),
     "EUR": ("EURUSD", "GER40"),
     "GBP": ("GBPUSD",),
     "JPY": ("USDJPY",),

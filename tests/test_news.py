@@ -13,7 +13,7 @@ def test_high_impact_event_blocks_mapped_instrument_only_inside_window():
 def test_stale_calendar_uses_conservative_currency_time_window():
     now=datetime(2026,11,9,13,0,tzinfo=timezone.utc)
     assert entry_block_reason('US30Cash',now,[],now-timedelta(hours=3))
-    assert entry_block_reason('BTCUSD',now,[],now-timedelta(hours=3))
+    assert entry_block_reason('BTCUSD',now,[],now-timedelta(hours=3))==''
 
 
 def test_calendar_parser_normalizes_utc_and_skips_invalid_rows(tmp_path):

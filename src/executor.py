@@ -84,7 +84,8 @@ class Executor:
         try:
             costs=expected_cost if isinstance(expected_cost,dict) else {}
             import json
-            self.db.insert_trade(ticket=ticket,symbol=signal.symbol,asset_group=self._asset_group(signal.symbol),direction=signal.direction,volume=volume,initial_volume=volume,open_time=now,open_price=result.price,sl=signal.sl_price,tp=signal.tp_price,profit=0,commission=0,swap=0,strategy=signal.strategy_name,reason=signal.reason,magic=self.settings.magic_number,status='open',timeframe=signal.timeframe,initial_risk=abs(float(result.price)-float(signal.sl_price)),scale_out_done=0,peak_favorable_r=0,estimated_spread_cost=float(costs.get('spread_cost',0) or 0),estimated_commission_cost=float(costs.get('commission',0) or 0),features=json.dumps(features or {},sort_keys=True,default=str))
+            trade_features=dict(features or {}); trade_mode=str(trade_features.pop('trade_mode','main'))
+            self.db.insert_trade(ticket=ticket,symbol=signal.symbol,asset_group=self._asset_group(signal.symbol),direction=signal.direction,volume=volume,initial_volume=volume,open_time=now,open_price=result.price,sl=signal.sl_price,tp=signal.tp_price,profit=0,commission=0,swap=0,strategy=signal.strategy_name,reason=signal.reason,magic=self.settings.magic_number,status='open',timeframe=signal.timeframe,initial_risk=abs(float(result.price)-float(signal.sl_price)),scale_out_done=0,peak_favorable_r=0,estimated_spread_cost=float(costs.get('spread_cost',0) or 0),estimated_commission_cost=float(costs.get('commission',0) or 0),features=json.dumps(trade_features,sort_keys=True,default=str),mode=trade_mode)
         except Exception as exc:
             # The broker position is open; surface the persistence failure loudly for reconciliation.
             self._event(f'CRITICAL: opened ticket {ticket} but could not write trade row: {exc}','ERROR')
@@ -282,6 +283,35 @@ class Executor:
             if 0<=minutes<=risk.no_entry_before_close_minutes:
                 actions.append(self.close_position(position.ticket,'session_close'))
         return actions
+    def enforce_news_positions(self,events,now_utc=None):
+        """Protect owned positions before mapped high-impact events; never alter manual trades."""
+        from .news import event_matches_symbol
+        now=now_utc or datetime.now(timezone.utc)
+        now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+        actions=[]
+        for position in (self.mt5.positions_get() or []):
+            if int(position.magic)!=self.settings.magic_number: continue
+            upcoming=[event for event in events if str(event.importance).upper()=='HIGH' and event_matches_symbol(event,position.symbol) and timedelta(0)<=event.time-now<=timedelta(minutes=15)]
+            if not upcoming: continue
+            event=min(upcoming,key=lambda item:item.time); minutes=(event.time-now).total_seconds()/60
+            is_buy=position.type==self.mt5.POSITION_TYPE_BUY
+            tick=self.mt5.symbol_info_tick(position.symbol); info=self.mt5.symbol_info(position.symbol)
+            if tick is None or info is None: continue
+            current=float(tick.bid if is_buy else tick.ask); entry=float(position.price_open)
+            in_profit=current>entry if is_buy else current<entry
+            if in_profit:
+                try:
+                    cost=market_data.get_cost_estimate(self.mt5,position.symbol,float(position.volume))['cost']
+                    tick_value=float(info.trade_tick_value or info.trade_tick_value_profit or 0); tick_size=float(info.trade_tick_size or 0)
+                    distance=(float(cost)*tick_size/max(tick_value,1e-12)) if tick_size>0 and tick_value>0 else 0.0
+                    stop=entry+distance if is_buy else entry-distance
+                    protective=stop>float(position.sl or 0) if is_buy else (not position.sl or stop<float(position.sl))
+                    valid=stop<current if is_buy else stop>current
+                    if protective and valid: self.modify_sl_tp(position.ticket,stop,float(position.tp or 0))
+                except Exception as exc: self._event(f'News breakeven protection failed ticket={position.ticket}: {exc}','WARNING')
+            elif minutes<=5:
+                actions.append(self.close_position(position.ticket,'news'))
+        return actions
     def _history(self,ticket):
         try: return list(self.mt5.history_deals_get(position=int(ticket)) or [])
         except Exception:
@@ -296,7 +326,7 @@ class Executor:
             reason=self._close_reason([deal],forced='partial_tp')
         self.db.insert_partial_close(deal_ticket=deal_ticket or None,ticket=int(row['ticket']),symbol=row['symbol'],time=mt5_epoch_to_utc(deal.time,self.mt5).isoformat(),volume=float(getattr(deal,'volume',0) or 0),price=float(getattr(deal,'price',0) or 0),profit=float(getattr(deal,'profit',0) or 0),commission=float(getattr(deal,'commission',0) or 0),swap=float(getattr(deal,'swap',0) or 0),reason=reason)
     def _close_reason(self,deals,forced=None,row=None):
-        if forced in {'partial_tp','trail','early_exit','momentum_lost','stagnant','time','session_close','manual','kill','weekly_stop'}: return forced
+        if forced in {'partial_tp','trail','early_exit','momentum_lost','stagnant','time','session_close','news','manual','kill','weekly_stop'}: return forced
         m=self.mt5
         for deal in reversed(deals):
             reason=getattr(deal,'reason',None)
