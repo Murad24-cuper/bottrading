@@ -15,7 +15,8 @@ def main():
     notifier.queue.join()
     if notifier.failures:
         status=notifier.last_http_status
-        print(f'Telegram test failed: HTTP {status}' if status is not None else 'Telegram test failed: no HTTP status (network/API unreachable)')
+        description=notifier.last_error_description or 'Təsvir mövcud deyil.'
+        print(f'Telegram test failed: HTTP {status}; description: {description}' if status is not None else f'Telegram test failed: no HTTP status; description: {description}')
         return 1
     print(f'Test bildirişi Telegram-a göndərildi · HTTP {notifier.last_http_status}.')
     return 0

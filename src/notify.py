@@ -16,7 +16,7 @@ class TelegramNotifier:
         self.post=post
         self.clock=clock or (lambda:datetime.now(timezone.utc))
         self.queue=Queue(); self._last={}; self._lock=Lock(); self._thread=None
-        self.failures=0; self.last_http_status=None
+        self.failures=0; self.last_http_status=None; self.last_error_description=None
         if self.enabled:
             self._thread=Thread(target=self._worker,name='telegram-notifier',daemon=True); self._thread.start()
 
@@ -52,7 +52,10 @@ class TelegramNotifier:
                 response=post(url,json={'chat_id':self.chat_id,'text':message},timeout=5)
                 self.last_http_status=int(getattr(response,'status_code',200))
                 if self.last_http_status<400: return True
-            except Exception:
+                try: self.last_error_description=str(response.json().get('description') or 'Telegram returned an error')
+                except Exception: self.last_error_description='Telegram returned an error without a readable description'
+            except Exception as exc:
+                self.last_error_description=f'{type(exc).__name__}: network/API request failed'
                 continue
         return False
 
