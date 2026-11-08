@@ -37,6 +37,8 @@ def evaluate_test_period(rows: pd.DataFrame, config: dict) -> dict:
     if summary['groups_positive']<2 or summary['dominant_group_share']>.8: reasons.append('results depend too heavily on one asset group')
     ablation={name:_summary(data[data[name].astype(bool)]) for name in ('checklist_only','memory_only','both')}
     current=_summary(data[data['current_rule'].astype(bool)])
+    if not data['current_rule'].astype(bool).any():
+        reasons.append('no current rule-based strategy baseline was supplied for the same test period')
     return {'passed':not reasons,'reasons':reasons,'calibration':buckets,'max_calibration_error':max_error,'selected':summary,'ablation':ablation,'current_rule':current}
 
 def render_report(result: dict) -> str:
