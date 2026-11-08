@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from time import perf_counter
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from collections import Counter, defaultdict
 import math
 import json
@@ -88,8 +88,15 @@ class MarketScanner:
         self.mt5,self.settings,self.db=mt5,settings,db
         self.symbols=symbol_service or SymbolService(mt5,settings)
         self._cache={}; self._cursor=0; self._strategies=load_strategies(settings); self.last_universe_size=0
-        self._volatility_cache={}; self._spread_cache={}; self.last_scan_stats={}; self.last_strategy_diagnostics={}; self._news_events=[]; self._news_updated=None; self._news_loaded_at=0.0; self._news_notice_at=0.0
+        self._volatility_cache={}; self._spread_cache={}; self.last_scan_stats={}; self.last_strategy_diagnostics={}; self._news_events=[]; self._news_updated=None; self._news_loaded_at=0.0; self._news_notice_at=0.0; self._news_logged_updated=None
         self._brain_rows=self._load_brain_rows()
+        self._brain_pca=None
+        pca_path=(getattr(self.settings,'data_dir',self.settings.root/'data')/'brain'/'pca.json')
+        if pca_path.is_file():
+            try:
+                payload=json.loads(pca_path.read_text(encoding='utf-8'))
+                self._brain_pca={'mean':__import__('numpy').asarray(payload['mean'],dtype='float32'),'components':__import__('numpy').asarray(payload['components'],dtype='float32')}
+            except Exception as exc: self.db.log_event('WARNING','brain',f'PCA transform unavailable; reference memory disabled: {type(exc).__name__}')
     def _load_news_calendar(self,now):
         """Refresh the local terminal calendar cache at most once a minute."""
         import time
@@ -104,6 +111,13 @@ class MarketScanner:
             self._news_events,self._news_updated=[],None
             self.db.log_event('WARNING','news',f'Calendar file could not be read: {type(exc).__name__}')
         stale=self._news_updated is None or (now-self._news_updated).total_seconds()>float(self.settings.config['news'].get('stale_after_hours',2))*3600
+        if not stale and self._news_updated!=self._news_logged_updated:
+            from .news import CURRENCY_SYMBOLS
+            upcoming=[event for event in self._news_events if now<=event.time<=now+timedelta(hours=24)]
+            for event in upcoming[:20]:
+                symbols=', '.join(CURRENCY_SYMBOLS.get(event.currency,()))
+                self.db.log_event('INFO','news',f"Yaxın xəbər · {event.time.isoformat()} · {event.currency} · {event.importance} · {event.name} · əlaqəli alətlər: {symbols}")
+            self._news_logged_updated=self._news_updated
         if stale and time.monotonic()-self._news_notice_at>=1800:
             self._news_notice_at=time.monotonic()
             self.db.log_event('WARNING','news','Economic calendar missing or older than two hours; conservative 12:30-14:30 UTC entry filter is active for USD/EUR/GBP/JPY instruments')
@@ -120,7 +134,8 @@ class MarketScanner:
             frame=__import__('pandas').read_parquet(path)
             required={'time','symbol','asset_group','vector','win','net_r'}
             if not required.issubset(frame.columns): raise ValueError(f'missing {sorted(required-set(frame.columns))}')
-            return {str(group):rows.to_dict('records') for group,rows in frame.groupby('asset_group')}
+            from .brain.memory import prepare_memory
+            return {str(group):prepare_memory(rows.to_dict('records')) for group,rows in frame.groupby('asset_group')}
         except Exception as exc:
             self.db.log_event('WARNING','brain',f'Brain reference memory unavailable; shadow score has no neighbours: {exc}')
             return {}
@@ -283,12 +298,27 @@ class MarketScanner:
                 brain_checklist=evaluate_brain_checklist(features,signal.direction,brain_cfg.get('checklist',{}).get('weights',{}),observations,signal.entry_hint,signal.tp_price)
                 from .brain.memory import query_memory,situation_vector
                 brain_rows=self._brain_rows.get(group,[])
-                brain_memory=query_memory(situation_vector(candles,observations['signal_context']),brain_rows,datetime.now(timezone.utc),symbol,int(brain_cfg.get('k_neighbors',300)),int(brain_cfg.get('query_exclude_same_symbol_days',1))) if brain_rows else {'count':0,'probability':None,'avg_win_r':0.0,'avg_loss_r':0.0,'cases':[],'mean_distance':None}
+                query_vector=situation_vector(candles,observations['signal_context'])
+                if self._brain_pca is not None:
+                    from .brain.memory import apply_pca
+                    query_vector=apply_pca(query_vector,self._brain_pca)[0]
+                brain_memory=query_memory(query_vector,brain_rows,datetime.now(timezone.utc),symbol,int(brain_cfg.get('k_neighbors',300)),int(brain_cfg.get('query_exclude_same_symbol_days',1))) if brain_rows else {'count':0,'probability':None,'avg_win_r':0.0,'avg_loss_r':0.0,'cases':[],'mean_distance':None}
                 feature_snapshot['brain']={'checklist':brain_checklist,'memory':brain_memory,'decision':decide_brain(brain_checklist,brain_memory,brain_cfg),'suggested_risk_pct':0.0,'mode':'shadow' if brain_cfg.get('shadow',True) else 'disabled'}
+                exploration_cfg=self.settings.config.get('demo_exploration',{})
+                demo_mode=getattr(account,'trade_mode',None)==getattr(self.mt5,'ACCOUNT_TRADE_MODE_DEMO',0)
+                exploration_enabled=bool(exploration_cfg.get('enabled',False) and demo_mode)
                 if not confidence_allowed(signal.confidence,float(cfg.get('min_confidence',0.0))):
-                    reason='confidence below scanner.min_confidence'; self._write_signal(signal,0,reason,features=feature_snapshot); strategy_diagnostics[strategy.name]['confidence_below_minimum']+=1; continue
-                if not strategy_mtf_allowed(strategy.name,candles,signal.direction,enabled=cfg.get('require_mtf_agreement',True),fast=int(cfg.get('mtf_ema_fast',5)),slow=int(cfg.get('mtf_ema_slow',13)),min_agree=int(cfg.get('mtf_min_agree',3))):
-                    reason='M1/M5/M15 direction disagreement'; self._write_signal(signal,0,reason,features=feature_snapshot); strategy_diagnostics[strategy.name]['mtf_disagreement']+=1; continue
+                    if not exploration_enabled or not confidence_allowed(signal.confidence,float(exploration_cfg.get('min_confidence',.45))):
+                        reason='confidence below scanner.min_confidence'; self._write_signal(signal,0,reason,features=feature_snapshot); strategy_diagnostics[strategy.name]['confidence_below_minimum']+=1; continue
+                    feature_snapshot['exploration']={'eligible':True,'soft_failures':['confidence below scanner.min_confidence']}
+                mtf_args={'enabled':cfg.get('require_mtf_agreement',True),'fast':int(cfg.get('mtf_ema_fast',5)),'slow':int(cfg.get('mtf_ema_slow',13))}
+                main_mtf=strategy_mtf_allowed(strategy.name,candles,signal.direction,min_agree=int(cfg.get('mtf_min_agree',3)),**mtf_args)
+                if not main_mtf:
+                    explore_mtf=strategy_mtf_allowed(strategy.name,candles,signal.direction,min_agree=int(exploration_cfg.get('mtf_min_agree',2)),**mtf_args)
+                    if exploration_enabled and explore_mtf:
+                        feature_snapshot.setdefault('exploration',{'eligible':True,'soft_failures':[]})['soft_failures'].append('main MTF agreement threshold not met')
+                    else:
+                        reason='M1/M5/M15 direction disagreement'; self._write_signal(signal,0,reason,features=feature_snapshot); strategy_diagnostics[strategy.name]['mtf_disagreement']+=1; continue
                 if 'M1' not in candles:
                     horizon=int(self.settings.config['risk']['move_horizon_minutes'])
                     self._write_signal(signal,0,f'M1 history missing for {horizon}-minute target',features=feature_snapshot); continue

@@ -12,7 +12,7 @@ from ..scanner import expected_value_score
 from ..strategies import load_strategies
 from .. import indicators as ind
 from ..trade_rules import (adverse_exit_score, continuation_metrics, may_extend,
-                           mtf_direction_agrees, scale_out_volume, should_exit_early,
+                           strategy_mtf_allowed, weekend_mode_active, scale_out_volume, should_exit_early,
                            stop_protects_profit, stop_target_from_atr, spread_within_median,
                            spread_within_expected_move, stagnation_due)
 
@@ -24,8 +24,8 @@ class BacktestResult:
     equity_curve:list[dict]
 
 class Backtester:
-    def __init__(self,settings,symbol_specs=None,equity=None,strategies=None):
-        self.settings=settings; self.specs=symbol_specs or {}; self.start_equity=float(equity if equity is not None else settings.config['backtest']['start_equity'])
+    def __init__(self,settings,symbol_specs=None,equity=None,strategies=None,entry_window=None):
+        self.settings=settings; self.specs=symbol_specs or {}; self.start_equity=float(equity if equity is not None else settings.config['backtest']['start_equity']); self.entry_window=entry_window
         self.strategies=strategies if strategies is not None else load_strategies(settings)
     def _point(self,symbol,spec): return float(spec.get('point_size',spec.get('point',spec.get('trade_tick_size',1e-5))) or 1e-5)
     def _spread_points(self,row):
@@ -45,7 +45,9 @@ class Backtester:
                 frame=frames[tf].copy(); points=float(self.specs.get(symbol,{}).get('point_size',self.specs.get(symbol,{}).get('point',1e-5)) or 1e-5)
                 spread=frame['spread'] if 'spread' in frame else self.settings.config['backtest']['fallback_spread_points']
                 frame['__scalp_atr']=ind.atr(frame,period)
-                frame['__scalp_baseline']=frame['__scalp_atr'].shift(1).rolling(29,min_periods=29).mean()
+                window=int(scalp.params.get('percentile_lookback_bars',7200 if tf=='M1' else 1440))
+                percentile=float(scalp.params.get('atr_percentile',.70))
+                frame['__scalp_percentile_threshold']=frame['__scalp_atr'].shift(1).rolling(window,min_periods=max(100,window//2)).quantile(percentile)
                 frame['__scalp_spread_price']=spread*points
                 frames[tf]=frame
         base_tf={}; timeline=set()
@@ -104,7 +106,10 @@ class Backtester:
                     signal=queued['signal']; entry_base=float(row.open); entry=entry_base+spread_price if signal.direction=='buy' else entry_base
                     entry+=slippage*point if signal.direction=='buy' else -slippage*point
                     adjusted=replace(signal,entry_hint=entry)
-                    volume,why=calc_volume(balance+floating_total(),self.settings.risk.risk_per_trade_pct,entry,signal.sl_price,spec)
+                    now=bar_end; weekend=weekend_mode_active(now,self.settings.config)
+                    weekend_cfg=self.settings.config.get('weekend',{})
+                    risk_pct=min(self.settings.risk.risk_per_trade_pct,float(weekend_cfg.get('risk_per_trade_pct',self.settings.risk.risk_per_trade_pct))) if weekend else self.settings.risk.risk_per_trade_pct
+                    volume,why=calc_volume(balance+floating_total(),risk_pct,entry,signal.sl_price,spec)
                     if volume<=0: continue
                     tick_value_loss=float(spec.get('trade_tick_value_loss',spec.get('trade_tick_value',spec.get('tick_value',0))))
                     tick_value_profit=float(spec.get('trade_tick_value_profit',spec.get('trade_tick_value',tick_value_loss)))
@@ -117,11 +122,14 @@ class Backtester:
                     open_dicts=[{**p,'profit':p.get('profit',0)} for p in positions.values()]
                     margin=float(spec.get('margin_per_lot',0))*volume
                     eq=balance+floating_total(); account=SimpleNamespace(balance=balance,equity=eq,margin=sum(float(p.get('margin',0)) for p in positions.values()))
-                    now=bar_end
                     cooldown=int(getattr(self.settings.risk,'symbol_cooldown_minutes',0)); last_close=symbol_last_close.get(symbol)
                     cooldown_active=bool(cooldown and last_close and now-last_close<timedelta(minutes=cooldown))
                     trades_today=symbol_trade_counts.get((symbol,now.date()),0)
-                    allowed,_=check_trade_allowed(adjusted,account,open_dicts,daily_pnl.get(now.date(),0),weekly_pnl.get((now-isoweekday_delta(now)).date(),0),self.settings,cost_est,queued['group'],now,margin,volume,spec,cooldown_active,trades_today)
+                    gate_settings=self.settings
+                    if weekend:
+                        risk_cfg=dict(self.settings.config['risk']); risk_cfg['max_open_positions']=min(int(risk_cfg['max_open_positions']),int(weekend_cfg.get('max_open_positions',3)))
+                        gate_settings=SimpleNamespace(config={**self.settings.config,'risk':risk_cfg},risk=self.settings.risk,root=self.settings.root)
+                    allowed,_=check_trade_allowed(adjusted,account,open_dicts,daily_pnl.get(now.date(),0),weekly_pnl.get((now-isoweekday_delta(now)).date(),0),gate_settings,cost_est,queued['group'],now,margin,volume,spec,cooldown_active,trades_today)
                     if not allowed or target_money<=0 or expected_value_score(signal.confidence,target_money,risk_money,cost_est['cost'])<=0: continue
                     entry_commission=commission*volume; balance-=entry_commission
                     cost_tick_value=float(spec.get('trade_tick_value',tick_value_loss))
@@ -213,6 +221,7 @@ class Backtester:
                                 net=close_position(symbol,pos,bar_end,close,reason,spread_price); daily_pnl[bar_end.date()]=daily_pnl.get(bar_end.date(),0)+net; monday=(bar_end-timedelta(days=bar_end.weekday())).date(); weekly_pnl[monday]=weekly_pnl.get(monday,0)+net; positions.pop(symbol)
                 # Generate at the close. Each strategy runs only when its own trigger bar advances.
                 for strategy in self.strategies:
+                    if self.entry_window and not (self.entry_window[0]<=bar_end<self.entry_window[1]): continue
                     group=self.specs.get(symbol,{}).get('asset_group','other')
                     if group not in getattr(strategy,'allowed_groups',[group]): continue
                     window=int(self.settings.config['risk'].get('gating_window',20)); disable_hours=float(self.settings.config['risk'].get('gating_disable_hours',24))
@@ -246,14 +255,16 @@ class Backtester:
                     if sig is None or symbol in positions: continue
                     scanner_cfg=self.settings.config.get('scanner',{}); risk_cfg=self.settings.config['risk']
                     if float(sig.confidence)<float(scanner_cfg.get('min_confidence',0.0)): continue
-                    if scanner_cfg.get('require_mtf_agreement',False) and not mtf_direction_agrees(supplied,sig.direction,fast=int(scanner_cfg.get('mtf_ema_fast',5)),slow=int(scanner_cfg.get('mtf_ema_slow',13)),min_agree=int(scanner_cfg.get('mtf_min_agree',3))): continue
+                    if not strategy_mtf_allowed(strategy.name,supplied,sig.direction,enabled=scanner_cfg.get('require_mtf_agreement',False),fast=int(scanner_cfg.get('mtf_ema_fast',5)),slow=int(scanner_cfg.get('mtf_ema_slow',13)),min_agree=int(scanner_cfg.get('mtf_min_agree',3))): continue
                     m1=data[symbol].get('M1')
                     if 'sl_move_mult' in risk_cfg and 'tp_move_mult' in risk_cfg:
                         if m1 is None or 'M1' not in supplied: continue
                         m1_history=supplied['M1']; atr_value=float(ind.atr(m1_history).iloc[-1])
                         if not math.isfinite(atr_value) or atr_value<=0: continue
                         spread_price=self._spread_points(row)*self._point(symbol,self.specs.get(symbol,{}))
-                        sig.sl_price,sig.tp_price=stop_target_from_atr(float(sig.entry_hint),sig.direction,atr_value,spread_price,float(risk_cfg['sl_move_mult']),float(risk_cfg['tp_move_mult']),float(risk_cfg['move_horizon_minutes']))
+                        weekend=weekend_mode_active(bar_end,self.settings.config)
+                        horizon=float(self.settings.config.get('weekend',{}).get('move_horizon_minutes',60)) if weekend else float(risk_cfg['move_horizon_minutes'])
+                        sig.sl_price,sig.tp_price=stop_target_from_atr(float(sig.entry_hint),sig.direction,atr_value,spread_price,float(risk_cfg['sl_move_mult']),float(risk_cfg['tp_move_mult']),horizon)
                     if 'max_spread_vs_median' in scanner_cfg:
                         if m1 is None: continue
                         median_bars=int(float(scanner_cfg.get('spread_median_lookback_hours',24))*60)
