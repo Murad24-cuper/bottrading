@@ -1,9 +1,11 @@
-# Serverdə işə salma və idarəetmə
+# Serverdə işə salma və idarəetmə (hazırda passiv)
 
-Bot və panel EC2 serverində işləyir. Serverdə MT5 terminalı Wine ilə açılır;
-Windows kompüterində botu və terminalı eyni vaxtda işlətməyin. Hesab `DEMO`
-olmalı və `.env`-də `ALLOW_REAL=false` qalmalıdır. `.env` yalnız serverdə
-`/opt/tradingbot/.env` yolundadır; onu git-ə və Docker image-ə daxil etməyin.
+Aktiv iş rejimi yerli Windows MT5-dir (`runtime.location: local`); serverə köçürmə ləğv edilib və serverdə bot konteyneri, MT5 faylları, Wine prefiksi və `.env` saxlanmır. Bu sənəd və `deploy/linux/` faylları gələcəkdə ayrıca qərar verilərsə istifadə üçün repoda saxlanılır. Hazırda bu server əmrlərini işlətməyin.
+
+Gələcək server rejimində bot və panel EC2-də işləyəcək, MT5 isə Wine ilə
+açılacaq. Köçürmə aktiv ediləndə hesab `DEMO` olmalı və `.env`-də
+`ALLOW_REAL=false` qalmalıdır. `.env` serverdə `/opt/tradingbot/.env`
+yolunda saxlanmalı, git-ə və Docker image-ə daxil edilməməlidir.
 
 ## Panel
 

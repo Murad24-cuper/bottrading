@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 from src.config import assert_runtime_location,load_settings
 from src.db import Database
 from src.logger import get_logger
+from src.process_utils import pid_is_running
 from src.supervisor import clear_stale_pid_lock, run_restart_supervisor, heartbeat_is_stale, hang_watchdog_should_terminate, write_hang_report, detached_python_executable
 from scripts.run_bot import install_crash_handlers
 from src.paths import project_paths
@@ -32,13 +33,7 @@ def utc_now() -> datetime:
 
 
 def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except PermissionError:
-        return True
-    except OSError:
-        return False
+    return pid_is_running(pid)
 
 def _process_memory_mb(pid: int) -> float|None:
     """Read process working-set size with the Windows API, without psutil."""

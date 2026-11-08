@@ -6,12 +6,11 @@ import os,sqlite3,sys,yaml
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from src.paths import project_paths
+from src.process_utils import pid_is_running
 from src.dashboard.presentation import translate_message
 
 def pid_running(pid):
-    if not pid: return False
-    try: os.kill(int(pid),0); return True
-    except (OSError,ValueError,ProcessLookupError): return False
+    return pid_is_running(pid)
 
 def read_pid(path):
     try: return int(Path(path).read_text(encoding='utf-8').split()[0])

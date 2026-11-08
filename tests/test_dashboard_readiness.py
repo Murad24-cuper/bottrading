@@ -11,7 +11,11 @@ def test_readiness_requires_all_six_conditions(tmp_path):
     db.insert_equity_snapshot(time='2026-11-01T00:00:00+00:00',equity=100,balance=100,margin=0,free_margin=100,open_positions=0)
     checks=readiness_checks(start,end,path)
     assert len(checks)==6 and all(ok for _,ok in checks)
-    db.log_event('CRITICAL','test','failure')
+    with db.connect() as connection:
+        connection.execute(
+            'INSERT INTO bot_events(time,level,source,message) VALUES (?,?,?,?)',
+            ('2026-11-04T00:00:00+00:00','CRITICAL','test','failure'),
+        )
     assert not readiness_checks(start,end,path)[-1][1]
 
 
