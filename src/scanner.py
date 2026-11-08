@@ -12,7 +12,7 @@ from .features import build_features
 from .risk import calc_volume
 from .strategies import load_strategies
 from .symbols import SymbolService
-from .trade_rules import confidence_allowed, mtf_direction_agrees, stop_target_from_atr, spread_within_median, spread_within_expected_move
+from .trade_rules import confidence_allowed, strategy_mtf_allowed, stop_target_from_atr, spread_within_median, spread_within_expected_move, weekend_mode_active
 from .patterns.chart import detect_chart_patterns
 from .patterns.candles import detect_candlestick_patterns
 from .patterns.fibonacci import fibonacci_retracement
@@ -88,8 +88,25 @@ class MarketScanner:
         self.mt5,self.settings,self.db=mt5,settings,db
         self.symbols=symbol_service or SymbolService(mt5,settings)
         self._cache={}; self._cursor=0; self._strategies=load_strategies(settings); self.last_universe_size=0
-        self._volatility_cache={}; self._spread_cache={}; self.last_scan_stats={}; self.last_strategy_diagnostics={}
+        self._volatility_cache={}; self._spread_cache={}; self.last_scan_stats={}; self.last_strategy_diagnostics={}; self._news_events=[]; self._news_updated=None; self._news_loaded_at=0.0; self._news_notice_at=0.0
         self._brain_rows=self._load_brain_rows()
+    def _load_news_calendar(self,now):
+        """Refresh the local terminal calendar cache at most once a minute."""
+        import time
+        if not self.settings.config.get('news',{}).get('enabled',False): return
+        if time.monotonic()-self._news_loaded_at<60: return
+        from .news import parse_calendar,terminal_calendar_path
+        self._news_loaded_at=time.monotonic()
+        try:
+            path=terminal_calendar_path(self.mt5)
+            self._news_events,self._news_updated=parse_calendar(path) if path else ([],None)
+        except Exception as exc:
+            self._news_events,self._news_updated=[],None
+            self.db.log_event('WARNING','news',f'Calendar file could not be read: {type(exc).__name__}')
+        stale=self._news_updated is None or (now-self._news_updated).total_seconds()>float(self.settings.config['news'].get('stale_after_hours',2))*3600
+        if stale and time.monotonic()-self._news_notice_at>=1800:
+            self._news_notice_at=time.monotonic()
+            self.db.log_event('WARNING','news','Economic calendar missing or older than two hours; conservative 12:30-14:30 UTC entry filter is active for USD/EUR/GBP/JPY instruments')
     def _load_brain_rows(self):
         """Load optional historical memory; absence keeps the brain shadow-only."""
         data_dir=getattr(self.settings,'data_dir',None)
@@ -127,6 +144,7 @@ class MarketScanner:
         return cached
     def scan_once(self):
         started=perf_counter(); cfg=self.settings.config['scanner']
+        self._load_news_calendar(datetime.now(timezone.utc))
         active_gates=self.db.get_active_adaptive_gates() if hasattr(self.db,'get_active_adaptive_gates') else []
         disabled_strategies={row['name'] for row in active_gates if row['scope']=='strategy'}
         disabled_groups={row['name'] for row in active_gates if row['scope']=='group'}
@@ -220,7 +238,9 @@ class MarketScanner:
             strategies=[s for s in strategies if s.name not in disabled_strategies]
             needed=sorted({tf for strategy in strategies for tf in strategy.required_timeframes} | ({'M1','M5','M15'} if cfg.get('require_mtf_agreement',True) else set()))
             if not needed: continue
-            candles={tf:self._bars(symbol,tf,int(cfg['candle_count'])) for tf in needed}
+            volatility_enabled=any(strategy.name=='volatility_scalp' for strategy in strategies)
+            m1_count=max(int(cfg['candle_count']),int(self.settings.config.get('strategies',{}).get('volatility_scalp',{}).get('params',{}).get('percentile_lookback_bars',7200))) if volatility_enabled else int(cfg['candle_count'])
+            candles={tf:self._bars(symbol,tf,m1_count if tf=='M1' else int(cfg['candle_count'])) for tf in needed}
             candles={tf:df for tf,df in candles.items() if df is not None and len(df)>=60}
             if not candles: continue
             analysed.append(symbol)
@@ -245,6 +265,15 @@ class MarketScanner:
                 signal=strategy.generate_signal(symbol,candles)
                 if signal is None:
                     strategy_diagnostics[strategy.name][getattr(strategy,'last_skip_reason','conditions_not_met')]+=1; continue
+                news_cfg=self.settings.config.get('news',{})
+                if news_cfg.get('enabled',False):
+                    from .news import entry_block_reason
+                    news_reason=entry_block_reason(symbol,datetime.now(timezone.utc),self._news_events,self._news_updated,float(news_cfg.get('stale_after_hours',2)))
+                    if news_reason:
+                        reason=f'news filter: {news_reason}'
+                        self._write_signal(signal,0,reason)
+                        strategy_diagnostics[strategy.name]['news_filter']+=1
+                        continue
                 feature_snapshot=dict(features); observations=dict(features.get('observations',{}))
                 observations['signal_context']=context_for_signal(cycle_context,symbol,signal.direction,group)
                 feature_snapshot['observations']=observations
@@ -258,7 +287,7 @@ class MarketScanner:
                 feature_snapshot['brain']={'checklist':brain_checklist,'memory':brain_memory,'decision':decide_brain(brain_checklist,brain_memory,brain_cfg),'suggested_risk_pct':0.0,'mode':'shadow' if brain_cfg.get('shadow',True) else 'disabled'}
                 if not confidence_allowed(signal.confidence,float(cfg.get('min_confidence',0.0))):
                     reason='confidence below scanner.min_confidence'; self._write_signal(signal,0,reason,features=feature_snapshot); strategy_diagnostics[strategy.name]['confidence_below_minimum']+=1; continue
-                if cfg.get('require_mtf_agreement',True) and not mtf_direction_agrees(candles,signal.direction,fast=int(cfg.get('mtf_ema_fast',5)),slow=int(cfg.get('mtf_ema_slow',13)),min_agree=int(cfg.get('mtf_min_agree',3))):
+                if not strategy_mtf_allowed(strategy.name,candles,signal.direction,enabled=cfg.get('require_mtf_agreement',True),fast=int(cfg.get('mtf_ema_fast',5)),slow=int(cfg.get('mtf_ema_slow',13)),min_agree=int(cfg.get('mtf_min_agree',3))):
                     reason='M1/M5/M15 direction disagreement'; self._write_signal(signal,0,reason,features=feature_snapshot); strategy_diagnostics[strategy.name]['mtf_disagreement']+=1; continue
                 if 'M1' not in candles:
                     horizon=int(self.settings.config['risk']['move_horizon_minutes'])
@@ -273,14 +302,17 @@ class MarketScanner:
                 signal.entry_hint=float(tick.ask if signal.direction=='buy' else tick.bid)
                 spread=max(0.0,float(tick.ask)-float(tick.bid))
                 risk_cfg=self.settings.config['risk']
-                signal.sl_price,signal.tp_price=stop_target_from_atr(float(signal.entry_hint),signal.direction,m1_atr,spread,float(risk_cfg['sl_move_mult']),float(risk_cfg['tp_move_mult']),float(risk_cfg['move_horizon_minutes']))
+                weekend=weekend_mode_active(datetime.now(timezone.utc),self.settings.config)
+                move_horizon=float(self.settings.config.get('weekend',{}).get('move_horizon_minutes',60)) if weekend else float(risk_cfg['move_horizon_minutes'])
+                signal.sl_price,signal.tp_price=stop_target_from_atr(float(signal.entry_hint),signal.direction,m1_atr,spread,float(risk_cfg['sl_move_mult']),float(risk_cfg['tp_move_mult']),move_horizon)
                 if signal.sl_price is None or signal.tp_price is None or signal.entry_hint is None:
                     self._write_signal(signal,0,'signal missing entry, SL, or TP',features=feature_snapshot); continue
                 if signal.direction=='buy' and not signal.sl_price<signal.entry_hint<signal.tp_price:
                     self._write_signal(signal,0,'invalid stop/target side',features=feature_snapshot); continue
                 if signal.direction=='sell' and not signal.tp_price<signal.entry_hint<signal.sl_price:
                     self._write_signal(signal,0,'invalid stop/target side',features=feature_snapshot); continue
-                volume,volume_reason=calc_volume(account.equity,self.settings.risk.risk_per_trade_pct,signal.entry_hint,signal.sl_price,spec)
+                risk_pct=min(self.settings.risk.risk_per_trade_pct,float(self.settings.config.get('weekend',{}).get('risk_per_trade_pct',self.settings.risk.risk_per_trade_pct))) if weekend else self.settings.risk.risk_per_trade_pct
+                volume,volume_reason=calc_volume(account.equity,risk_pct,signal.entry_hint,signal.sl_price,spec)
                 if volume<=0:
                     self._write_signal(signal,0,volume_reason,features=feature_snapshot); continue
                 cost=market_data.get_cost_estimate(self.mt5,symbol,volume)

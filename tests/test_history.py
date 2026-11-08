@@ -74,3 +74,20 @@ def test_incremental_refresh_rotates_one_symbol_timeframe_on_same_mt5_session(tm
     assert (calls[0][4]-calls[0][3]).days==1
     assert (calls[1][4]-calls[1][3]).days==7
     assert first['cursor']==1 and second['cursor']==2
+
+def test_incremental_refresh_backfills_oldest_missing_chunk(tmp_path,monkeypatch):
+    import json
+    import src.history as history
+    data_dir=tmp_path/'data'; brain=data_dir/'brain'; brain.mkdir(parents=True)
+    (brain/'universe.json').write_text(json.dumps({'symbols':[{'symbol':'EURUSD'}]}),encoding='utf-8')
+    history_dir=data_dir/'history'; history_dir.mkdir()
+    first=pd.Timestamp('2026-10-01T00:00:00Z')
+    pd.DataFrame({'open':[1],'high':[1],'low':[1],'close':[1],'tick_volume':[1],'spread':[1]},index=pd.DatetimeIndex([first],name='time')).to_parquet(history_dir/'EURUSD_M1.parquet')
+    settings=SimpleNamespace(root=tmp_path,data_dir=data_dir,config={'history':{'data_dir':'data/history','ranges_months':{'M1':12},'incremental_refresh_enabled':True,'incremental_timeframes':['M1'],'incremental_batch_days':{'M1':7}}})
+    calls=[]
+    monkeypatch.setattr(history,'download_history',lambda mt5,symbols,timeframes,start,end,settings:calls.append((start,end)) or {symbols[0]:{timeframes[0]:pd.DataFrame(index=[])}})
+    now=datetime(2026,11,1,tzinfo=timezone.utc)
+    refresh_incremental_batch(object(),settings,now)
+    start,end=calls[0]
+    assert end==first.to_pydatetime()
+    assert (end-start).days==7

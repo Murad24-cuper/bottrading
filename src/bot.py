@@ -5,6 +5,7 @@ from datetime import datetime,timezone,timedelta
 from pathlib import Path
 import logging,os,signal,time,re,json
 from collections import Counter
+from types import SimpleNamespace
 from .config import Settings
 from .db import Database
 from .executor import Executor
@@ -16,6 +17,7 @@ from .scanner import MarketScanner
 from .symbols import SymbolService
 from .symbols import underlying_group,underlying_key
 from .time_utils import mt5_epoch_to_utc, server_clock_drift_seconds
+from .trade_rules import weekend_mode_active
 from .notify import TelegramNotifier
 
 log=get_logger(__name__)
@@ -173,6 +175,16 @@ class TradingBot:
         service=SymbolService(mt5,self.settings)
         if self.scanner is None: self.scanner=MarketScanner(mt5,self.settings,self.db,service)
         if self.executor is None: self.executor=Executor(mt5,self.settings,self.db,service)
+    def _management_settings(self,now):
+        """Use the longer weekend holding horizon only while weekend policy is active."""
+        if not weekend_mode_active(now,self.settings.config): return self.settings
+        weekend=self.settings.config.get('weekend',{})
+        risk=SimpleNamespace(**self.settings.risk.__dict__)
+        risk.max_hold_minutes=int(weekend.get('move_horizon_minutes',60))
+        config=dict(self.settings.config); risk_config=dict(config['risk'])
+        risk_config['max_hold_extended_minutes']=int(weekend.get('max_hold_extended_minutes',120))
+        config['risk']=risk_config
+        return SimpleNamespace(config=config,risk=risk,root=self.settings.root)
     def _account_type(self):
         account=self.client.mt5.account_info()
         if account is None: raise RuntimeError(f'account_info failed: {self.client.mt5.last_error()}')
@@ -279,7 +291,14 @@ class TradingBot:
                 with self.db.connect() as connection: connection.execute('UPDATE signals SET confidence=? WHERE id=?',(adjusted_confidence,candidate.signal_row_id))
         state=get_account_state(self.client.mt5); positions=self._owned_positions()
         spec=candidate.symbol_spec
-        volume,volume_reason=calc_volume(state.equity,self.settings.risk.risk_per_trade_pct,signal.entry_hint,signal.sl_price,spec)
+        weekend=weekend_mode_active(now,self.settings.config)
+        weekend_cfg=self.settings.config.get('weekend',{})
+        risk_pct=min(self.settings.risk.risk_per_trade_pct,float(weekend_cfg.get('risk_per_trade_pct',self.settings.risk.risk_per_trade_pct))) if weekend else self.settings.risk.risk_per_trade_pct
+        gate_settings=self.settings
+        if weekend:
+            risk_config=dict(self.settings.config['risk']); risk_config['max_open_positions']=min(int(risk_config['max_open_positions']),int(weekend_cfg.get('max_open_positions',3)))
+            gate_settings=SimpleNamespace(config={**self.settings.config,'risk':risk_config},root=self.settings.root)
+        volume,volume_reason=calc_volume(state.equity,risk_pct,signal.entry_hint,signal.sl_price,spec)
         if volume<=0:
             self._signal_update(candidate,False,volume_reason); return False
         order_type=self.client.mt5.ORDER_TYPE_BUY if signal.direction=='buy' else self.client.mt5.ORDER_TYPE_SELL
@@ -308,7 +327,7 @@ class TradingBot:
             session_closing=bool(upcoming and 0<=(upcoming[0]-now).total_seconds()/60<=self.settings.risk.no_entry_before_close_minutes)
         trades_today=self.db.count_trades_since(day_start,self.settings.magic_number)+len(self._cycle_reservations)
         group_trades_today=(self.db.count_group_trades_since(day_start,candidate.asset_group,self.settings.magic_number) if hasattr(self.db,'count_group_trades_since') else 0)+sum(r['position'].get('asset_group')==candidate.asset_group for r in self._cycle_reservations)
-        allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,self.settings,candidate.cost,candidate.asset_group,now,margin+reserved_margin,volume,spec,cooldown_active,symbol_trades_today,session_closing,trades_today,group_trades_today)
+        allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,gate_settings,candidate.cost,candidate.asset_group,now,margin+reserved_margin,volume,spec,cooldown_active,symbol_trades_today,session_closing,trades_today,group_trades_today)
         if not allowed:
             if why=='daily loss limit reached': self._notify('daily_loss','🛑 Gündəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.')
             if why=='weekly loss limit reached': self._notify('weekly_loss','🛑 Həftəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.')
@@ -378,7 +397,7 @@ class TradingBot:
         self._components(); account=self._account_type(); state=get_account_state(self.client.mt5); self._startup(state)
         self._check_clock(now)
         health_ok=self._health(now)
-        self.executor.sync_positions(); getattr(self.executor,'enforce_adverse_move_exit',lambda *_:None)(self.settings); self.executor.enforce_time_stop(self.settings); self.executor.enforce_session_close(self.settings,now)
+        self.executor.sync_positions(); getattr(self.executor,'enforce_adverse_move_exit',lambda *_:None)(self.settings); self.executor.enforce_time_stop(self._management_settings(now)); self.executor.enforce_session_close(self.settings,now)
         self._notify_closed_losses()
         pnl_today,pnl_week=self._pnl_periods(now)
         open_rows={int(row['ticket']):row for row in self.db.get_open_trades()}

@@ -252,3 +252,13 @@ def test_bot_lock_release_tolerates_external_cleanup(tmp_path):
     lock=BotLock(tmp_path/'data'/'bot.lock'); lock.acquire(); lock.path.unlink()
     lock.release()
     assert not lock.held
+
+def test_weekend_management_uses_configured_horizon_and_extension(tmp_path):
+    settings=SimpleNamespace(config={'live':{'mode':'shadow'},'notify':{},'weekend':{'enabled':True,'move_horizon_minutes':60,'max_hold_extended_minutes':120},'risk':{'max_hold_extended_minutes':60},'scanner':{}},root=tmp_path,risk=SimpleNamespace(max_hold_minutes=20))
+    bot=TradingBot(settings,client=SimpleNamespace(mt5=None),db=Database(tmp_path/'weekend.db'))
+    sunday=datetime(2026,11,8,12,tzinfo=timezone.utc)
+    result=bot._management_settings(sunday)
+    assert result.risk.max_hold_minutes==60
+    assert result.config['risk']['max_hold_extended_minutes']==120
+    monday=bot._management_settings(datetime(2026,11,9,12,tzinfo=timezone.utc))
+    assert monday is settings

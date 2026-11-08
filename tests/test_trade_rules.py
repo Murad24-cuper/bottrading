@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from src.trade_rules import adverse_exit_score, confidence_allowed, mtf_direction_agrees, scale_out_volume, should_exit_early, stop_only_tightens, stagnation_due, stop_protects_profit, continuation_metrics, stop_target_from_atr, spread_within_median, spread_within_expected_move, may_extend
+from src.trade_rules import adverse_exit_score, confidence_allowed, mtf_direction_agrees, strategy_mtf_allowed, weekend_mode_active, scale_out_volume, should_exit_early, stop_only_tightens, stagnation_due, stop_protects_profit, continuation_metrics, stop_target_from_atr, spread_within_median, spread_within_expected_move, may_extend
 
 
 def _frame(direction='buy', bars=80):
@@ -26,6 +26,18 @@ def test_mtf_two_of_three_agreement_accepts_one_disagreement():
     assert mtf_direction_agrees(candles,'buy',min_agree=2)
     assert not mtf_direction_agrees(candles,'buy',min_agree=3)
     assert not mtf_direction_agrees({'M1':candles['M1']},'buy',min_agree=2)
+
+def test_mean_reversion_bypasses_only_generic_direction_agreement():
+    candles={tf:_frame('sell') for tf in ('M1','M5','M15')}
+    assert strategy_mtf_allowed('mean_reversion',candles,'buy',min_agree=2)
+    assert not strategy_mtf_allowed('trend_pullback',candles,'buy',min_agree=2)
+
+def test_weekend_policy_activates_only_for_enabled_weekend_utc():
+    from datetime import datetime,timezone
+    cfg={'weekend':{'enabled':True}}
+    assert weekend_mode_active(datetime(2026,11,8,12,tzinfo=timezone.utc),cfg)
+    assert not weekend_mode_active(datetime(2026,11,9,12,tzinfo=timezone.utc),cfg)
+    assert not weekend_mode_active(datetime(2026,11,8,12,tzinfo=timezone.utc),{'weekend':{'enabled':False}})
 
 
 def test_stop_target_from_atr_uses_configured_horizon():

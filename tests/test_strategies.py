@@ -35,3 +35,20 @@ def test_volatility_scalp_uses_precomputed_backtest_features(monkeypatch):
     result=VolatilityScalpStrategy({'lookback_bars':100}).generate_signal('EURUSD',{'M1':candles,'M5':candles})
 
     assert isinstance(result,Signal) and result.direction=='buy'
+
+def test_volatility_scalp_uses_relative_atr_percentile(monkeypatch):
+    from src.strategies.volatility_scalp import VolatilityScalpStrategy
+    import src.strategies.volatility_scalp as module
+    candles=make_candles(220)
+    candles.loc[candles.index[-1],'close']=candles.close.iloc[-2]+.05
+    values=np.full(len(candles),.01); values[-1]=.1
+    monkeypatch.setattr(module.ind,'atr',lambda *_args,**_kwargs:pd.Series(values,index=candles.index))
+    result=VolatilityScalpStrategy({'percentile_lookback_bars':200,'atr_percentile':.70,'target_atr':.4,'stop_atr':.3,'max_spread_target_ratio':.35}).generate_signal('EURUSD',{'M1':candles})
+    assert isinstance(result,Signal) and result.direction=='buy'
+
+def test_mean_reversion_uses_its_own_reversal_gate_instead_of_generic_mtf():
+    from src.trade_rules import strategy_mtf_allowed
+    falling=pd.DataFrame({'close':np.linspace(100,90,80)},index=pd.date_range('2026-01-01',periods=80,freq='min',tz='UTC'))
+    frames={'M1':falling,'M5':falling,'M15':falling}
+    assert strategy_mtf_allowed('mean_reversion',frames,'buy',enabled=True,min_agree=2)
+    assert not strategy_mtf_allowed('trend_pullback',frames,'buy',enabled=True,min_agree=2)

@@ -2,8 +2,15 @@
 from __future__ import annotations
 import math
 import decimal
+from datetime import timezone
 import pandas as pd
 from . import indicators as ind
+
+
+def weekend_mode_active(now_utc,config):
+    """Weekend policy is enabled only on Saturday/Sunday UTC."""
+    now=now_utc.replace(tzinfo=timezone.utc) if now_utc.tzinfo is None else now_utc.astimezone(timezone.utc)
+    return bool(config.get('weekend',{}).get('enabled',False)) and now.weekday()>=5
 
 
 def mtf_direction_agrees(candles: dict[str, pd.DataFrame], direction: str, timeframes=('M1', 'M5', 'M15'), fast=5, slow=13, min_agree=None) -> bool:
@@ -21,6 +28,14 @@ def mtf_direction_agrees(candles: dict[str, pd.DataFrame], direction: str, timef
         if direction == 'buy' and close > fast_ema > slow_ema: agreed+=1
         elif direction == 'sell' and close < fast_ema < slow_ema: agreed+=1
     return agreed>=required
+
+
+def strategy_mtf_allowed(strategy_name: str, candles: dict[str, pd.DataFrame], direction: str,
+                         enabled: bool=True, fast: int=5, slow: int=13, min_agree: int=3) -> bool:
+    """Apply generic trend alignment except to range-reversion entries, which validate M1 reversal internally."""
+    if not enabled or strategy_name=='mean_reversion':
+        return True
+    return mtf_direction_agrees(candles,direction,fast=fast,slow=slow,min_agree=min_agree)
 
 
 def stop_target_from_atr(entry: float, direction: str, atr: float, spread: float, sl_mult: float, tp_mult: float, horizon_minutes: float) -> tuple[float, float]:

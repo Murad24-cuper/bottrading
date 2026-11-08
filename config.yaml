@@ -85,8 +85,8 @@ strategies:
   trend_pullback:
     enabled: true
     groups: [forex, metals, indices]
-    timeframes: [M1, M5, M15]
-    params: {trend_ema_fast: 20, trend_ema_slow: 50, adx_min: 18, pullback_atr: 0.45, stop_atr: 1.5, reward_risk: 1.8}
+    timeframes: [M1, M5, M15, H1]
+    params: {trend_ema_fast: 20, trend_ema_slow: 50, adx_min: 18, adx_min_by_group: {forex: 18, indices: 16, metals: 16}, slope_atr_min: 0.05, pullback_atr: 0.45, stop_atr: 1.5, reward_risk: 1.8}
   mean_reversion:
     enabled: true
     groups: [forex, metals, indices, energy, crypto, stocks]
@@ -101,7 +101,8 @@ strategies:
     enabled: true
     groups: [forex, metals, indices, energy, crypto]
     timeframes: [M1, M5, M15]
-    params: {atr_period: 14, volatility_ratio: 1.1, target_atr: 0.4, stop_atr: 0.65, max_spread_target_ratio: 0.35, lookback_bars: 100}
+    groups: [forex, metals, indices, energy, crypto, stocks]
+    params: {atr_period: 14, atr_percentile: 0.70, percentile_lookback_bars: 7200, target_atr: 0.4, stop_atr: 0.65, max_spread_target_ratio: 0.35}
 loop:
   interval_seconds: 15            # Period target; work time is subtracted from this interval
 scanner:
@@ -151,6 +152,12 @@ notify:
   big_loss_usd: 5.0              # Notify on a single larger net loss
   daily_summary_utc: "21:00"     # Daily summary time in UTC
   rate_limit_minutes: 5          # Per-event notification cooldown
+news:
+  enabled: true
+  blackout_minutes_before: 15
+  blackout_minutes_after: 15
+  stale_after_hours: 2
+  calendar_filename: calendar_events.csv
 dashboard:
   real_balance_default: 100      # Starting value for the small-account simulation
   real_risk_pct_default: 1.0     # Planned risk percent used in that simulation
@@ -199,11 +206,18 @@ history:
   incremental_refresh_enabled: true
   incremental_timeframes: [M1, M5, M15, H1]
   incremental_batch_days: {M1: 1, M5: 7, M15: 14, H1: 30}
-  incremental_refresh_every_cycles: 4
+  incremental_refresh_every_cycles: 1 # One bounded symbol/timeframe request per live cycle
+  incremental_budget_seconds: 1.5 # MT5 request size is bounded to the configured batch size
   ranges_months: {M1: 12, M5: 36, M15: 36, H1: 60}
   max_storage_gb: 5
   max_bars_per_request: 80000 # Stay below the MT5 terminal's history response ceiling
   liquid_aliases: [EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, US500, NAS100, US30, GER40, GOLD, BTCUSD, ETHUSD, GOLD24-7]
+weekend:
+  enabled: true
+  risk_per_trade_pct: 0.15
+  max_open_positions: 3
+  move_horizon_minutes: 60
+  max_hold_extended_minutes: 120
 backtest:
   start_equity: 1000
   commission_per_lot_per_side: 0.0

@@ -126,7 +126,7 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
     return result
 
 def refresh_incremental_batch(mt5,settings,now=None):
-    """Update one persisted brain-universe symbol/timeframe through the bot's MT5 session."""
+    """Fetch one bounded update or historical backfill chunk through the bot's MT5 session."""
     cfg=settings.config.get('history',{})
     if not cfg.get('incremental_refresh_enabled',False): return None
     universe_path=Path(settings.data_dir)/'brain'/'universe.json'
@@ -143,7 +143,25 @@ def refresh_incremental_batch(mt5,settings,now=None):
     end=now or datetime.now(timezone.utc)
     end=end.replace(tzinfo=timezone.utc) if end.tzinfo is None else end.astimezone(timezone.utc)
     days=max(1,int(cfg.get('incremental_batch_days',{}).get(timeframe,7)))
-    result=download_history(mt5,[symbol],[timeframe],end-timedelta(days=days),end,settings)
+    months=max(1,int(cfg.get('ranges_months',{}).get(timeframe,12)))
+    target_start=end-timedelta(days=30.4375*months)
+    base=Path(cfg.get('data_dir','data/history'))
+    if not base.is_absolute(): base=Path(getattr(settings,'root',Path.cwd()))/base
+    cached=history_path(base,symbol,timeframe)
+    request_end=end
+    if cached.is_file():
+        try:
+            frame=pd.read_parquet(cached)
+            index=frame.index if isinstance(frame.index,pd.DatetimeIndex) else pd.to_datetime(frame['time'],utc=True)
+            oldest=pd.Timestamp(index.min()).to_pydatetime()
+            if oldest.tzinfo is None: oldest=oldest.replace(tzinfo=timezone.utc)
+            else: oldest=oldest.astimezone(timezone.utc)
+            if oldest>target_start:
+                request_end=oldest
+        except (OSError,ValueError,KeyError,TypeError):
+            pass
+    request_start=max(target_start,request_end-timedelta(days=days))
+    result=download_history(mt5,[symbol],[timeframe],request_start,request_end,settings)
     cursor_path.parent.mkdir(parents=True,exist_ok=True)
     temp=cursor_path.with_suffix('.tmp')
     temp.write_text(json.dumps({'cursor':(cursor+1)%len(pairs),'updated_at':end.isoformat()}),encoding='utf-8')
