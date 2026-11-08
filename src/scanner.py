@@ -332,7 +332,12 @@ class MarketScanner:
                 signal.entry_hint=float(tick.ask if signal.direction=='buy' else tick.bid)
                 spread=max(0.0,float(tick.ask)-float(tick.bid))
                 risk_cfg=self.settings.config['risk']
-                weekend=weekend_mode_active(datetime.now(timezone.utc),self.settings.config)
+                now=datetime.now(timezone.utc)
+                try:
+                    forex=self.symbols.resolve_alias('EURUSD')
+                    forex_open=bool(forex and self.symbols.market_should_be_open(forex,now))
+                except Exception: forex_open=False
+                weekend=weekend_mode_active(now,self.settings.config,forex_open)
                 move_horizon=float(self.settings.config.get('weekend',{}).get('move_horizon_minutes',60)) if weekend else float(risk_cfg['move_horizon_minutes'])
                 signal.sl_price,signal.tp_price=stop_target_from_atr(float(signal.entry_hint),signal.direction,m1_atr,spread,float(risk_cfg['sl_move_mult']),float(risk_cfg['tp_move_mult']),move_horizon)
                 if signal.sl_price is None or signal.tp_price is None or signal.entry_hint is None:

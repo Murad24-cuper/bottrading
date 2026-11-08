@@ -36,6 +36,12 @@ class Backtester:
         return value
     def run(self,history:dict[str,dict[str,pd.DataFrame]]) -> BacktestResult:
         data={sym:{tf:frame.sort_index() for tf,frame in frames.items() if tf in TF_DELTA and frame is not None and not frame.empty} for sym,frames in history.items()}
+        forex_name=next((name for name in data if 'EURUSD' in name.upper()),None)
+        def forex_session_open(stamp):
+            frame=data.get(forex_name,{}).get('M1') if forex_name else None
+            if frame is None or frame.empty: return False
+            index=frame.index.searchsorted(pd.Timestamp(stamp),side='right')-1
+            return index>=0 and pd.Timestamp(stamp)-frame.index[index]<=pd.Timedelta(minutes=2)
         scalpers=[strategy for strategy in self.strategies if strategy.name=='volatility_scalp']
         if scalpers:
             scalp=scalpers[0]; period=int(scalp.params.get('atr_period',14))
@@ -106,7 +112,7 @@ class Backtester:
                     signal=queued['signal']; entry_base=float(row.open); entry=entry_base+spread_price if signal.direction=='buy' else entry_base
                     entry+=slippage*point if signal.direction=='buy' else -slippage*point
                     adjusted=replace(signal,entry_hint=entry)
-                    now=bar_end; weekend=weekend_mode_active(now,self.settings.config)
+                    now=bar_end; weekend=weekend_mode_active(now,self.settings.config,forex_session_open(now))
                     weekend_cfg=self.settings.config.get('weekend',{})
                     risk_pct=min(self.settings.risk.risk_per_trade_pct,float(weekend_cfg.get('risk_per_trade_pct',self.settings.risk.risk_per_trade_pct))) if weekend else self.settings.risk.risk_per_trade_pct
                     volume,why=calc_volume(balance+floating_total(),risk_pct,entry,signal.sl_price,spec)
@@ -262,7 +268,7 @@ class Backtester:
                         m1_history=supplied['M1']; atr_value=float(ind.atr(m1_history).iloc[-1])
                         if not math.isfinite(atr_value) or atr_value<=0: continue
                         spread_price=self._spread_points(row)*self._point(symbol,self.specs.get(symbol,{}))
-                        weekend=weekend_mode_active(bar_end,self.settings.config)
+                        weekend=weekend_mode_active(bar_end,self.settings.config,forex_session_open(bar_end))
                         horizon=float(self.settings.config.get('weekend',{}).get('move_horizon_minutes',60)) if weekend else float(risk_cfg['move_horizon_minutes'])
                         sig.sl_price,sig.tp_price=stop_target_from_atr(float(sig.entry_hint),sig.direction,atr_value,spread_price,float(risk_cfg['sl_move_mult']),float(risk_cfg['tp_move_mult']),horizon)
                     if 'max_spread_vs_median' in scanner_cfg:

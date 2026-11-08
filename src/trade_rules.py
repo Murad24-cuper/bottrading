@@ -7,10 +7,10 @@ import pandas as pd
 from . import indicators as ind
 
 
-def weekend_mode_active(now_utc,config):
-    """Weekend policy is enabled only on Saturday/Sunday UTC."""
+def weekend_mode_active(now_utc,config,forex_open=False):
+    """Use weekend policy on weekends until the broker's forex session reopens."""
     now=now_utc.replace(tzinfo=timezone.utc) if now_utc.tzinfo is None else now_utc.astimezone(timezone.utc)
-    return bool(config.get('weekend',{}).get('enabled',False)) and now.weekday()>=5
+    return bool(config.get('weekend',{}).get('enabled',False)) and now.weekday()>=5 and not forex_open
 
 
 def mtf_direction_agrees(candles: dict[str, pd.DataFrame], direction: str, timeframes=('M1', 'M5', 'M15'), fast=5, slow=13, min_agree=None) -> bool:

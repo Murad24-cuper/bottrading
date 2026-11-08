@@ -77,6 +77,15 @@ class TradingBot:
     def _now(self):
         value=self.clock()
         return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    def _weekend_mode(self,now):
+        forex_open=False
+        symbols=getattr(self.scanner,'symbols',None)
+        if symbols is not None:
+            try:
+                forex=symbols.resolve_alias('EURUSD')
+                forex_open=bool(forex and symbols.market_should_be_open(forex,now))
+            except Exception: forex_open=False
+        return weekend_mode_active(now,self.settings.config,forex_open)
     def _set_status(self,status='running',equity=None):
         stats=getattr(self.scanner,'last_scan_stats',{}) if self.scanner else {}
         self.db.upsert_bot_status(time=self._now().isoformat(),cycle=self.cycle_number,mode=self.live['mode'],status=status,account_type=self._last_account_type,equity=equity,last_error=self.last_error,mt5_connected=int(not self._connection_down),trade_allowed=int(self._trade_allowed),scan_total=stats.get('total_symbols',0),scan_scanned=stats.get('symbols_scanned',0),scan_complete=int(bool(stats.get('scan_complete',False))),scan_stage1_passed=stats.get('stage1_passed',0),scan_top_n=stats.get('top_movers',0),scan_signals=stats.get('signals',0),scan_seconds=stats.get('scan_seconds',0),scan_rejections=json.dumps(stats.get('stage1_rejections',{}),sort_keys=True),strategy_diagnostics=json.dumps(stats.get('strategy_diagnostics',{}),sort_keys=True),scan_groups_open=json.dumps(stats.get('groups_open',{}),sort_keys=True))
@@ -179,7 +188,7 @@ class TradingBot:
         if self.executor is None: self.executor=Executor(mt5,self.settings,self.db,service)
     def _management_settings(self,now):
         """Use the longer weekend holding horizon only while weekend policy is active."""
-        if not weekend_mode_active(now,self.settings.config): return self.settings
+        if not self._weekend_mode(now): return self.settings
         weekend=self.settings.config.get('weekend',{})
         risk=SimpleNamespace(**self.settings.risk.__dict__)
         risk.max_hold_minutes=int(weekend.get('move_horizon_minutes',60))
@@ -304,7 +313,7 @@ class TradingBot:
                 with self.db.connect() as connection: connection.execute('UPDATE signals SET confidence=? WHERE id=?',(adjusted_confidence,candidate.signal_row_id))
         state=get_account_state(self.client.mt5); positions=self._owned_positions()
         spec=candidate.symbol_spec
-        weekend=weekend_mode_active(now,self.settings.config)
+        weekend=self._weekend_mode(now)
         weekend_cfg=self.settings.config.get('weekend',{})
         weekend_gate=self.db.weekend_gate(now,20,7) if weekend and hasattr(self.db,'weekend_gate') else {}
         if weekend_gate.get('disabled_until') and weekend_gate['disabled_until']>now.isoformat():

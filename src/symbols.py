@@ -140,7 +140,9 @@ class SymbolService:
   now=now_utc or datetime.now(timezone.utc)
   now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
   universe=self.settings.config['universe']
-  weekend=now.weekday()>=5
+  forex=self.resolve_alias('EURUSD') if now.weekday()>=5 else None
+  forex_open=bool(forex and self.market_should_be_open(forex,now))
+  weekend=now.weekday()>=5 and not forex_open
   names=universe.get('weekend_symbols',[]) if weekend else universe.get('focus_symbols',[])
   resolved=[self.resolve_alias(str(name)) for name in names]
   resolved=[name for name in resolved if name]

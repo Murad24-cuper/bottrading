@@ -36,6 +36,7 @@ def test_weekend_policy_activates_only_for_enabled_weekend_utc():
     from datetime import datetime,timezone
     cfg={'weekend':{'enabled':True}}
     assert weekend_mode_active(datetime(2026,11,8,12,tzinfo=timezone.utc),cfg)
+    assert not weekend_mode_active(datetime(2026,11,8,22,tzinfo=timezone.utc),cfg,forex_open=True)
     assert not weekend_mode_active(datetime(2026,11,9,12,tzinfo=timezone.utc),cfg)
     assert not weekend_mode_active(datetime(2026,11,8,12,tzinfo=timezone.utc),{'weekend':{'enabled':False}})
 
