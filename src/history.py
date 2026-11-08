@@ -14,34 +14,30 @@ def _safe_name(symbol): return re.sub(r'[^A-Za-z0-9_.-]','_',symbol)
 def history_path(directory,symbol,timeframe): return Path(directory)/f'{_safe_name(symbol)}_{timeframe}.parquet'
 
 def _rates(mt5,symbol,timeframe,start,end,chunk_days=7,max_bars=80000):
-    """Read history using near-limit chunks, recursively falling back to 7 days."""
+    """Read bounded chunks, keep available bars, and log unavailable intervals."""
     tf=getattr(mt5,'TIMEFRAME_'+timeframe)
     def fetch(a,b):
         rows=mt5.copy_rates_range(symbol,tf,a,b)
         return None if rows is None else pd.DataFrame(rows)
-    try: rows=fetch(start,end)
-    except Exception: rows=None
-    if rows is None:
-        print(f'{symbol} {timeframe}: full-range request failed ({mt5.last_error()}); retrying in bounded chunks')
-        safe_days=max(chunk_days,int(max_bars*TF_MINUTES[timeframe]/1440))
-        def fetch_chunk(a,b):
-            try: part=fetch(a,b)
-            except Exception as exc:
-                print(f'{symbol} {timeframe}: chunk {a.isoformat()}..{b.isoformat()} failed: {exc}')
-                part=None
-            if part is not None:
-                return [part] if not part.empty else []
-            if (b-a).total_seconds()<=chunk_days*86400:
-                print(f'{symbol} {timeframe}: chunk {a.isoformat()}..{b.isoformat()} unavailable ({mt5.last_error()})')
-                return []
-            midpoint=a+(b-a)/2
-            return fetch_chunk(a,midpoint)+fetch_chunk(midpoint,b)
-        frames=[]; cursor=start; step=timedelta(days=safe_days)
-        while cursor<end:
-            chunk_end=min(cursor+step,end)
-            frames.extend(fetch_chunk(cursor,chunk_end))
-            cursor=chunk_end
-        rows=pd.concat(frames,ignore_index=True) if frames else pd.DataFrame()
+    max_days=max(1,int(int(max_bars)*TF_MINUTES[timeframe]/1440))
+    step_days=max(1,min(int(chunk_days),max_days))
+    def fetch_chunk(a,b):
+        try: part=fetch(a,b)
+        except Exception as exc:
+            part=None; failure=f'{type(exc).__name__}: {exc}'
+        else: failure=str(mt5.last_error()) if part is None else ''
+        if part is not None: return [part] if not part.empty else []
+        if (b-a).total_seconds()<=7*86400:
+            print(f'{symbol} {timeframe}: unavailable chunk {a.isoformat()}..{b.isoformat()} ({failure})')
+            return []
+        midpoint=a+(b-a)/2
+        return fetch_chunk(a,midpoint)+fetch_chunk(midpoint,b)
+    frames=[]; cursor=start; step=timedelta(days=step_days)
+    while cursor<end:
+        chunk_end=min(cursor+step,end)
+        frames.extend(fetch_chunk(cursor,chunk_end))
+        cursor=chunk_end
+    rows=pd.concat(frames,ignore_index=True) if frames else pd.DataFrame()
     if rows.empty: return pd.DataFrame(columns=['open','high','low','close','tick_volume','spread'],index=pd.DatetimeIndex([],tz='UTC',name='time'))
     rows['time']=pd.to_datetime(rows['time'],unit='s',utc=True)-server_utc_offset(mt5)
     return rows.set_index('time')[['open','high','low','close','tick_volume','spread']].sort_index()
@@ -82,10 +78,6 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
                 margin=mt5.order_calc_margin(getattr(mt5,'ORDER_TYPE_BUY',0),symbol,1.0,float(tick.ask))
                 if margin is not None: metadata[symbol]['margin_per_lot']=float(margin)
         for tf in timeframes:
-            start=date_from
-            if start is None: start=end-timedelta(days=30.4375*int(months_cfg.get(tf,12)))
-            if start.tzinfo is None: start=start.replace(tzinfo=timezone.utc)
-            start=start.astimezone(timezone.utc)
             path=base/f'{_safe_name(symbol)}_{tf}.parquet'; path.parent.mkdir(parents=True,exist_ok=True)
             if path.exists():
                 existing=pd.read_parquet(path)
@@ -94,15 +86,20 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
                     existing['time']=pd.to_datetime(existing.time,utc=True); existing=existing.set_index('time')
                 existing.index=pd.to_datetime(existing.index,utc=True); existing=existing.sort_index()
             else: existing=pd.DataFrame()
-            ranges=[]
+            weekend_names={str(name) for name in full_config.get('universe',{}).get('weekend_symbols',[])}
+            range_source=history_cfg.get('weekend_ranges_months',months_cfg) if symbol in weekend_names else months_cfg
+            start=date_from
+            if start is None: start=end-timedelta(days=30.4375*int(range_source.get(tf,12)))
+            if start.tzinfo is None: start=start.replace(tzinfo=timezone.utc)
+            start=start.astimezone(timezone.utc)
             if existing.empty: ranges=[(start,end)]
             else:
-                first=existing.index.min().to_pydatetime(); last=existing.index.max().to_pydatetime()
-                step=timedelta(minutes=TF_MINUTES[tf])
+                first=existing.index.min().to_pydatetime(); last=existing.index.max().to_pydatetime(); step=timedelta(minutes=TF_MINUTES[tf])
+                ranges=[]
                 if start<first: ranges.append((start,min(end,first)))
-                after=last+step
-                if after<end: ranges.append((max(start,after),end))
-            new=[_rates(mt5,symbol,tf,a,b,max_bars=int(history_cfg.get('max_bars_per_request',80000))) for a,b in ranges if a<b]
+                if last+step<end: ranges.append((max(start,last+step),end))
+            chunk_days=int(history_cfg.get('download_chunk_days',{}).get(tf,7))
+            new=[_rates(mt5,symbol,tf,a,b,chunk_days=chunk_days,max_bars=int(history_cfg.get('max_bars_per_request',80000))) for a,b in ranges if a<b]
             parts=[frame for frame in (existing,*new) if not frame.empty]
             combined=pd.concat(parts).sort_index() if parts else pd.DataFrame(columns=['open','high','low','close','tick_volume','spread'],index=pd.DatetimeIndex([],tz='UTC',name='time'))
             if not combined.empty: combined=combined[~combined.index.duplicated(keep='last')]

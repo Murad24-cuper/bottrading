@@ -41,8 +41,8 @@ def test_long_history_range_retries_in_chunks_and_keeps_available_bars(tmp_path)
     start=datetime(2025,1,1,tzinfo=timezone.utc); end=datetime(2025,1,16,tzinfo=timezone.utc)
     result=download_history(mt5,['EURUSD'],['M1'],start,end,settings)
 
-    assert len(mt5.calls)==4
-    assert len(result['EURUSD']['M1'])==2
+    assert len(mt5.calls)==3
+    assert len(result['EURUSD']['M1'])==3
     assert result['EURUSD']['M1'].index.is_monotonic_increasing
 
 def test_history_uses_large_safe_chunks_before_seven_day_fallback():
@@ -54,8 +54,8 @@ def test_history_uses_large_safe_chunks_before_seven_day_fallback():
             stamp=int(start.timestamp())
             return np.array([(stamp,1.,2.,.5,1.5,100,1)],dtype=[('time','i8'),('open','f8'),('high','f8'),('low','f8'),('close','f8'),('tick_volume','i8'),('spread','i8')])
     mt5=LargeChunkMT5(); start=datetime(2024,1,1,tzinfo=timezone.utc); end=datetime(2026,1,1,tzinfo=timezone.utc)
-    result=_rates(mt5,'BTCUSD','M5',start,end,max_bars=80000)
-    assert len(mt5.calls)==4 # Initial request plus three near-limit chunks.
+    result=_rates(mt5,'BTCUSD','M5',start,end,chunk_days=300,max_bars=80000)
+    assert len(mt5.calls)==3 # The two-year request is split into 300-day bounded pieces.
     assert len(result)==3
 
 def test_incremental_refresh_rotates_one_symbol_timeframe_on_same_mt5_session(tmp_path,monkeypatch):
