@@ -334,8 +334,7 @@ class MarketScanner:
                 risk_cfg=self.settings.config['risk']
                 now=datetime.now(timezone.utc)
                 try:
-                    forex=self.symbols.resolve_alias('EURUSD')
-                    forex_open=bool(forex and self.symbols.market_should_be_open(forex,now))
+                    forex_open=self.symbols.forex_session_open(now)
                 except Exception: forex_open=False
                 weekend=weekend_mode_active(now,self.settings.config,forex_open)
                 move_horizon=float(self.settings.config.get('weekend',{}).get('move_horizon_minutes',60)) if weekend else float(risk_cfg['move_horizon_minutes'])

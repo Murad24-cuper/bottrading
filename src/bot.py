@@ -82,8 +82,7 @@ class TradingBot:
         symbols=getattr(self.scanner,'symbols',None)
         if symbols is not None:
             try:
-                forex=symbols.resolve_alias('EURUSD')
-                forex_open=bool(forex and symbols.market_should_be_open(forex,now))
+                forex_open=symbols.forex_session_open(now)
             except Exception: forex_open=False
         return weekend_mode_active(now,self.settings.config,forex_open)
     def _set_status(self,status='running',equity=None):

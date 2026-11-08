@@ -140,6 +140,12 @@ def test_market_open_check_uses_recurring_weekend_closures():
     assert service.market_should_be_open('EURUSD',datetime(2026,10,30,20,30,tzinfo=timezone.utc))
     assert not service.market_should_be_open('EURUSD',datetime(2026,10,30,22,00,tzinfo=timezone.utc))
 
+def test_forex_reopen_requires_fresh_tradable_quote():
+    service=make_service(['EURUSD'])
+    service.market_should_be_open=lambda symbol,now:True
+    service.is_tradable=lambda symbol,now_utc=None:(False,'stale tick / market closed')
+    assert not service.forex_session_open(datetime(2026,11,8,19,tzinfo=timezone.utc))
+
 def test_session_close_is_inferred_in_utc_from_repeated_hourly_gaps():
     import pandas as pd
     from datetime import timedelta

@@ -60,6 +60,12 @@ class SymbolService:
     closed_at=datetime(day.year,day.month,day.day,minute//60,minute%60,tzinfo=timezone.utc)
     if closed_at<=now<closed_at+timedelta(hours=gap_hours): return False
   return True
+ def forex_session_open(self,now_utc=None):
+  """Treat the weekly forex session as open only with a fresh tradable EURUSD quote."""
+  symbol=self.resolve_alias('EURUSD')
+  if not symbol or not self.market_should_be_open(symbol,now_utc): return False
+  try: return self.is_tradable(symbol,now_utc=now_utc)[0]
+  except TypeError: return self.is_tradable(symbol)[0]
  def next_session_close(self,symbol,now_utc=None,min_gap_hours=0.0):
   """Infer the next close from recurring gaps in the broker's H1 history."""
   from .sessions import next_session_close
@@ -140,8 +146,7 @@ class SymbolService:
   now=now_utc or datetime.now(timezone.utc)
   now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
   universe=self.settings.config['universe']
-  forex=self.resolve_alias('EURUSD') if now.weekday()>=5 else None
-  forex_open=bool(forex and self.market_should_be_open(forex,now))
+  forex_open=self.forex_session_open(now) if now.weekday()>=5 else False
   weekend=now.weekday()>=5 and not forex_open
   names=universe.get('weekend_symbols',[]) if weekend else universe.get('focus_symbols',[])
   resolved=[self.resolve_alias(str(name)) for name in names]
