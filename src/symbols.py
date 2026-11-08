@@ -135,21 +135,54 @@ class SymbolService:
   spread=(t.ask-t.bid)/i.point
   if lim is not None and spread>lim: return False,'spread exceeds limit'
   return True,'tradable'
+ def active_logical_universe(self, now_utc=None):
+  """Return configured weekday focus symbols or the weekend instruments."""
+  now=now_utc or datetime.now(timezone.utc)
+  now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+  universe=self.settings.config['universe']
+  weekend=now.weekday()>=5
+  names=universe.get('weekend_symbols',[]) if weekend else universe.get('focus_symbols',[])
+  resolved=[self.resolve_alias(str(name)) for name in names]
+  resolved=[name for name in resolved if name]
+  if weekend and universe.get('weekend_include_open_indices',True):
+   for item in self.list_all_symbols():
+    if self.get_asset_group(item.name)!='indices' or not self.market_should_be_open(item.name,now):
+     continue
+    tick=self.mt5.symbol_info_tick(item.name)
+    stamp=(getattr(tick,'time_msc',0)/1000 if tick and getattr(tick,'time_msc',0) else getattr(tick,'time',0) if tick else 0)
+    if stamp:
+     from .time_utils import mt5_epoch_to_utc
+     age=(now-mt5_epoch_to_utc(stamp,self.mt5)).total_seconds()
+     if -5<=age<=float(universe.get('weekend_index_tick_freshness_seconds',180)):
+      resolved.append(item.name)
+  return list(dict.fromkeys(resolved))
  def get_candidates(self,select=True):
-  """Return all included broker names, selecting each into Market Watch."""
+  """Return only the active configured universe plus any open-symbol management candidates."""
   import time
-  if self._candidate_cache and time.monotonic()-self._candidate_loaded<int(self.settings.config['universe']['refresh_minutes'])*60:
+  now=datetime.now(timezone.utc)
+  cache_key=(now.weekday()>=5,now.hour)
+  if (self._candidate_cache and getattr(self,'_candidate_cache_key',None)==cache_key
+      and time.monotonic()-self._candidate_loaded<int(self.settings.config['universe']['refresh_minutes'])*60):
    return list(self._candidate_cache)
-  preferred=self.select_liquid_symbols()
   u=self.settings.config['universe']; out=[]
-  for item in self.list_all_symbols():
-   name=item.name
-   if name in u['exclude_symbols'] or self.get_asset_group(name) not in u['include_groups']: continue
-   if u.get('exclude_dated_futures',True) and is_dated_future(name): continue
+  if 'focus_symbols' not in u:
+   preferred=self.select_liquid_symbols(); legacy=[]
+   for item in self.list_all_symbols():
+    name=item.name
+    if name in u.get('exclude_symbols',[]) or self.get_asset_group(name) not in u.get('include_groups',[]): continue
+    if u.get('exclude_dated_futures',True) and is_dated_future(name): continue
+    if select and not self.mt5.symbol_select(name,True): continue
+    legacy.append(name)
+   preferred=[name for name in preferred if name in legacy]
+   self._candidate_cache=list(dict.fromkeys([*preferred,*legacy])); self._candidate_loaded=time.monotonic(); self._candidate_cache_key=cache_key
+   return list(self._candidate_cache)
+  for name in self.active_logical_universe(now):
+   if name in u.get('exclude_symbols',[]) or (u.get('exclude_dated_futures',True) and is_dated_future(name)):
+    continue
    if select and not self.mt5.symbol_select(name,True): continue
    out.append(name)
-  preferred=[name for name in preferred if name in out]
-  self._candidate_cache=list(dict.fromkeys([*preferred,*out])); self._candidate_loaded=time.monotonic()
+  self._candidate_cache=list(dict.fromkeys(out)); self._candidate_cache_key=cache_key
+  self._candidate_loaded=time.monotonic()
   return list(self._candidate_cache)
  def get_universe(self):
   return [name for name in self.get_candidates() if self.is_tradable(name)[0]]

@@ -63,6 +63,30 @@ def test_dated_futures_can_be_included_when_explicitly_configured():
     service = make_service(['US500-DEC26'], exclude_dated=False)
     assert service.get_universe() == ['US500-DEC26']
 
+def test_focus_universe_resolves_only_ten_configured_logical_symbols():
+    names=['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','US500Cash','US100Cash','US30Cash','GER40Cash','GOLD','BTCUSD']
+    service=make_service(names)
+    service.settings.config['universe'].update({
+        'focus_symbols':['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','US500','NAS100','US30','GER40','GOLD'],
+        'symbol_aliases':{'US500':['US500'],'NAS100':['US100'],'US30':['US30'],'GER40':['GER40']},
+    })
+    found=service.active_logical_universe(datetime(2026,11,9,12,tzinfo=timezone.utc))
+    assert found==['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','US500Cash','US100Cash','US30Cash','GER40Cash','GOLD']
+
+def test_weekend_universe_is_crypto_gold247_plus_fresh_open_indices(monkeypatch):
+    service=make_service(['BTCUSD','ETHUSD','GOLD24-7','US500Cash','US30Cash'])
+    service.settings.config['universe'].update({
+        'weekend_symbols':['BTCUSD','ETHUSD','GOLD24-7'],
+        'symbol_aliases':{'BTCUSD':['BTCUSD'],'ETHUSD':['ETHUSD'],'GOLD24-7':['GOLD24-7']},
+        'weekend_include_open_indices':True,
+    })
+    service.market_should_be_open=lambda symbol,now: symbol=='US500Cash'
+    now=datetime(2026,11,8,12,tzinfo=timezone.utc)
+    import src.time_utils
+    monkeypatch.setattr(src.time_utils,'mt5_epoch_to_utc',lambda stamp,mt5:now)
+    found=service.active_logical_universe(now)
+    assert found==['BTCUSD','ETHUSD','GOLD24-7','US500Cash']
+
 def test_configured_liquid_symbols_are_selected_first_for_rotation():
     service=make_service(['US500Cash','US400Cash'])
     service.settings.config['history']['liquid_aliases']=['US400Cash']

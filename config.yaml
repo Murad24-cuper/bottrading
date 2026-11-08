@@ -11,7 +11,7 @@ risk:
   max_open_positions: 20         # Total concurrent positions
   max_positions_per_group: 6     # Correlation guard per asset group
   max_positions_per_currency: 3  # Net directional positions per FX/metals currency
-  max_positions_per_underlying_group: 3 # Concurrent positions per underlying group
+  max_positions_per_underlying_group: 2 # Correlated US indices and other underlying groups
   symbol_cooldown_minutes: 20    # Fixed cooldown; never shortened by scanner vacancies
   max_trades_per_symbol_per_day: 4 # Maximum daily opens per underlying (UTC day)
   max_group_share_today: 0.4     # Group cap after at least 10 daily trades
@@ -67,11 +67,15 @@ universe:
     EURJPY: [EURJPY]
     GBPJPY: [GBPJPY]
     US30: [US30]
+    US500: [US500, SPX500, SP500]
     NAS100: [US100, NAS100, USTEC]
     GER40: [GER40, DAX]
     OIL: [OIL, WTI, USOIL]
     BTCUSD: [BTCUSD, BTC]
     ETHUSD: [ETHUSD, ETH]
+  focus_symbols: [EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, US500, NAS100, US30, GER40, GOLD]
+  weekend_symbols: [BTCUSD, ETHUSD, GOLD24-7]
+  weekend_include_open_indices: true
 
 timeframes: [M1, M5, M15]
 magic_number: 20260001
@@ -196,10 +200,10 @@ history:
   incremental_timeframes: [M1, M5, M15, H1]
   incremental_batch_days: {M1: 1, M5: 7, M15: 14, H1: 30}
   incremental_refresh_every_cycles: 4
-  ranges_months: {M1: 6, M5: 24, M15: 24, H1: 36}
+  ranges_months: {M1: 12, M5: 36, M15: 36, H1: 60}
   max_storage_gb: 5
   max_bars_per_request: 80000 # Stay below the MT5 terminal's history response ceiling
-  liquid_aliases: [GOLD, SILVER, EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, EURJPY, GBPJPY, US30, NAS100, GER40, OIL, BTCUSD, ETHUSD]
+  liquid_aliases: [EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, US500, NAS100, US30, GER40, GOLD, BTCUSD, ETHUSD, GOLD24-7]
 backtest:
   start_equity: 1000
   commission_per_lot_per_side: 0.0

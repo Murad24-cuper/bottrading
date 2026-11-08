@@ -30,7 +30,7 @@ def test_default_config_loads_for_offline_work(monkeypatch):
     assert settings.risk.max_open_positions==20
     assert settings.risk.max_margin_usage_pct==50
     assert settings.config['scanner']['max_seconds_per_cycle']>0
-    assert settings.config['history']['ranges_months']=={'M1':6,'M5':24,'M15':24,'H1':36}
+    assert settings.config['history']['ranges_months']=={'M1':12,'M5':36,'M15':36,'H1':60}
 
 def test_config_rejects_zero_risk_percentage(tmp_path,monkeypatch):
     import yaml
