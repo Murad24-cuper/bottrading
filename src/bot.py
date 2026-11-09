@@ -300,6 +300,7 @@ class TradingBot:
         elif (self.settings.root/'STOP').exists(): reason='kill switch active'
         elif self.consecutive_errors>=int(self.live['max_cycle_errors']) or self.trading_disabled: reason='consecutive cycle error limit reached'
         elif not live_mode: reason='shadow mode'
+        elif self.settings.config.get('live',{}).get('normal_trading_disabled',False) and not exploration_eligible: reason='normal strategy entries disabled; no tested edge qualifies'
         elif not allowed_strategy and not exploration_eligible: reason='strategy not allowed live'
         elif self._entries_health_blocked or not self._trade_allowed: reason='MT5 health or algorithmic trading permission blocks new entries'
         elif not allow_entries: reason='new trades disabled after cycle errors'

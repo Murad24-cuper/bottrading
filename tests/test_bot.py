@@ -90,6 +90,14 @@ def test_demo_exploration_candidate_is_sized_and_tagged_separately(tmp_path):
     assert item.features['trade_mode']=='exploration'
     assert executor.opened[0][1]<=1.0
 
+def test_case_b_disables_normal_strategy_entries_even_when_allowlisted(tmp_path):
+    bot,db,_,_,_,executor,item=make_bot(tmp_path,'trade',['breakout'])
+    bot.settings.config['live']['normal_trading_disabled']=True
+    bot.cycle()
+    assert executor.opened==[]
+    with db.connect() as connection:
+        assert connection.execute('SELECT skip_reason FROM signals WHERE id=?',(item.signal_row_id,)).fetchone()[0]=='normal strategy entries disabled; no tested edge qualifies'
+
 def test_exploration_can_collect_demo_data_through_adaptive_strategy_gate(tmp_path):
     bot,db,_,_,_,executor,item=make_bot(tmp_path,'trade',[])
     bot.settings.config['demo_exploration']={'enabled':True,'risk_per_trade_pct':.1,'max_open_positions':5,'max_trades_per_day':40,'min_confidence':.45,'mtf_min_agree':2}
