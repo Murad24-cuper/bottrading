@@ -39,6 +39,11 @@ CREATE TABLE IF NOT EXISTS signals(
  id INTEGER PRIMARY KEY, time TEXT, symbol TEXT, strategy TEXT, direction TEXT,
  timeframe TEXT, confidence REAL, entry REAL, sl REAL, tp REAL, expected_cost REAL, score REAL DEFAULT 0,
  taken INTEGER, skip_reason TEXT, features TEXT NOT NULL DEFAULT '{}');
+CREATE TABLE IF NOT EXISTS spread_samples(
+ time TEXT NOT NULL, symbol TEXT NOT NULL, timeframe TEXT NOT NULL,
+ hour_utc INTEGER NOT NULL, spread_price REAL NOT NULL,
+ PRIMARY KEY(time,symbol,timeframe));
+CREATE INDEX IF NOT EXISTS idx_spread_cell ON spread_samples(symbol,timeframe,hour_utc,time);
 CREATE TABLE IF NOT EXISTS daily_stats(
  date TEXT PRIMARY KEY, start_balance REAL, end_balance REAL, pnl REAL, trades_count INTEGER,
  wins INTEGER, losses INTEGER, max_drawdown REAL, invested_margin_peak REAL);
@@ -285,6 +290,21 @@ class Database:
                     return int(prior['id'])
             self._insert(connection,'signals',values)
             return connection.execute('SELECT last_insert_rowid()').fetchone()[0]
+    def record_spread_sample(self,*,time,symbol,timeframe,hour_utc,spread_price):
+        if not 0<=int(hour_utc)<=23 or float(spread_price)<0: raise ValueError('invalid spread sample')
+        with self.connect() as connection:
+            connection.execute('INSERT OR IGNORE INTO spread_samples(time,symbol,timeframe,hour_utc,spread_price) VALUES (?,?,?,?,?)',
+                               (str(time),str(symbol),str(timeframe),int(hour_utc),float(spread_price)))
+    def get_spread_cell(self,symbol,timeframe,hour_utc,since,until=None):
+        """Return median spread price and count for a UTC hour cell."""
+        import statistics
+        start=since.isoformat() if hasattr(since,'isoformat') else str(since)
+        end=until.isoformat() if hasattr(until,'isoformat') else (str(until) if until else datetime.now(timezone.utc).isoformat())
+        with self.connect() as connection:
+            rows=connection.execute('SELECT spread_price FROM spread_samples WHERE symbol=? AND timeframe=? AND hour_utc=? AND time>=? AND time<=? ORDER BY time',
+                                    (str(symbol),str(timeframe),int(hour_utc),start,end)).fetchall()
+        values=[float(row[0]) for row in rows]
+        return {'median_spread_price':statistics.median(values) if values else None,'samples':len(values)}
     def insert_partial_close(self,**values):
         values.setdefault('time',datetime.now(timezone.utc).isoformat())
         columns=list(values)

@@ -171,7 +171,25 @@ class MarketScanner:
             info=self.mt5.symbol_info(symbol); point=float(self.settings.config['scanner'].get('timeframe_point_sizes',{}).get(symbol) or (info.point if info and info.point else 0.0))
             cached=cached.copy(); cached['spread_points']=cached['spread']; cached['point_size']=point; cached['spread_price']=cached['spread']*point
             self._cache[key]=cached
+        self._record_spread_sample(symbol,timeframe)
         return cached
+    def _record_spread_sample(self,symbol,timeframe):
+        """Persist one observed spread per symbol/timeframe at the configured cadence."""
+        import time
+        cfg=self.settings.config.get('cost_model',{})
+        if not cfg.get('enabled',False) or not hasattr(self.db,'record_spread_sample'): return
+        now_mono=time.monotonic(); key=(symbol,timeframe)
+        if now_mono-self._spread_cache.get(key,0.0)<float(cfg.get('sample_interval_seconds',60)): return
+        self._spread_cache[key]=now_mono
+        try:
+            tick=self.mt5.symbol_info_tick(symbol); info=self.mt5.symbol_info(symbol)
+            if tick is None or info is None or not float(getattr(info,'point',0) or 0): return
+            spread=max(0.0,float(tick.ask)-float(tick.bid))
+            now=datetime.now(timezone.utc)
+            self.db.record_spread_sample(time=now.isoformat(),symbol=symbol,timeframe=timeframe,
+                                         hour_utc=now.hour,spread_price=spread)
+        except Exception as exc:
+            self.db.log_event('WARNING','cost_model',f'Spread sample failed for {symbol} {timeframe}: {type(exc).__name__}')
     def scan_once(self):
         started=perf_counter(); cfg=self.settings.config['scanner']
         self._load_news_calendar(datetime.now(timezone.utc))
@@ -380,12 +398,40 @@ class MarketScanner:
                 cost=market_data.get_cost_estimate(self.mt5,symbol,volume)
                 risk_money=market_data.price_distance_to_money(self.mt5,symbol,abs(signal.entry_hint-signal.sl_price),volume)
                 reward_money=market_data.price_distance_to_money(self.mt5,symbol,abs(signal.tp_price-signal.entry_hint),volume)
+                cost_gate_reason=''
+                cost_cfg=self.settings.config.get('cost_model',{})
+                if cost_cfg.get('enabled',False):
+                    since=now-timedelta(hours=float(cost_cfg.get('lookback_hours',24)))
+                    cell=self.db.get_spread_cell(symbol,signal.timeframe,now.hour,since,now) if hasattr(self.db,'get_spread_cell') else {'samples':0,'median_spread_price':None}
+                    feature_snapshot['cost_map']={'hour_utc':now.hour,'samples':cell['samples'],'median_spread_price':cell['median_spread_price']}
+                    if int(cell['samples'])<int(cost_cfg.get('min_samples_per_cell',5)):
+                        cost_gate_reason='cost map cell not calibrated'
+                    elif not cost.get('commission_known',False):
+                        cost_gate_reason='cost map commission unknown'
+                    elif cost_cfg.get('one_bar_delay',False):
+                        cost_gate_reason='one-bar delay cost unavailable'
+                    else:
+                        from .costs import estimate_round_trip_cost
+                        tick_size=float(spec.get('trade_tick_size') or spec.get('tick_size') or 0)
+                        tick_value=float(spec.get('trade_tick_value_loss') or spec.get('trade_tick_value') or spec.get('tick_value') or 0)
+                        point_size=float(spec.get('point') or spec.get('point_size') or 0)
+                        try:
+                            mapped=estimate_round_trip_cost(spread_price=float(cell['median_spread_price']),
+                                stop_distance=abs(signal.entry_hint-signal.sl_price),tick_size=tick_size,
+                                tick_value=tick_value,volume=volume,
+                                commission_per_lot_round_trip=float(cost.get('commission',0))/volume,
+                                slippage_points=float(cost_cfg.get('slippage_points',0)),point_size=point_size)
+                            feature_snapshot['cost_map']['median_cost_stop_ratio']=mapped['cost_stop_ratio']
+                            if mapped['cost_stop_ratio']>=float(cost_cfg.get('max_stop_ratio',.1)):
+                                cost_gate_reason='median hourly costs exceed 10% of stop risk'
+                        except (TypeError,ValueError,ZeroDivisionError):
+                            cost_gate_reason='cost map contract data unavailable'
                 feature_snapshot['brain']['risk_money']=risk_money
                 from .brain.sizing import fractional_kelly_risk_pct
                 feature_snapshot['brain']['decision']=decide_brain(brain_checklist,brain_memory,brain_cfg,float(cost.get('cost',0))/max(risk_money,1e-12))
                 feature_snapshot['brain']['suggested_risk_pct']=fractional_kelly_risk_pct(float(brain_memory['probability']),float(brain_memory['avg_win_r']),float(brain_cfg.get('kelly_fraction',.25))) if brain_memory['probability'] is not None else 0.0
                 score=expected_value_score(signal.confidence,reward_money,risk_money,cost['cost'])
-                reason='expected value is non-positive' if score<=0 else ('below scanner.min_score' if score<float(cfg['min_score']) else '')
+                reason=cost_gate_reason or ('expected value is non-positive' if score<=0 else ('below scanner.min_score' if score<float(cfg['min_score']) else ''))
                 candidate=Candidate(symbol,group,strategy.name,signal,signal.confidence,volume,risk_money,reward_money,cost,score,feature_snapshot,spec,reason)
                 candidate.signal_row_id=self._write_signal(signal,cost['cost'],reason,score,feature_snapshot); results.append(candidate)
         self.last_strategy_diagnostics={name:dict(counts) for name,counts in strategy_diagnostics.items()}

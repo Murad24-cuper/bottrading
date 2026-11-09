@@ -31,6 +31,16 @@ def test_repeated_rejected_signals_are_deduplicated_until_reason_changes(tmp_pat
     assert rows[1]['skip_reason']=='cost too high'
 
 
+def test_spread_samples_are_bucketed_by_utc_symbol_timeframe_and_hour(tmp_path):
+    db=Database(tmp_path/'spreads.db')
+    for minute,spread in ((0,.0002),(5,.0004),(10,.0003)):
+        db.record_spread_sample(time=f'2026-11-09T13:{minute:02d}:00+00:00',symbol='EURUSD',timeframe='M5',hour_utc=13,spread_price=spread)
+    cell=db.get_spread_cell('EURUSD','M5',13,'2026-11-09T13:00:00+00:00')
+    assert cell=={'median_spread_price':.0003,'samples':3}
+    assert db.get_spread_cell('EURUSD','M15',13,'2026-11-09T13:00:00+00:00')['samples']==0
+    assert db.get_spread_cell('EURUSD','M5',12,'2026-11-09T13:00:00+00:00')['samples']==0
+
+
 def test_recent_brain_outcomes_include_costs_and_partial_closes(tmp_path):
     import json
     db=Database(tmp_path/'brain-outcomes.db')

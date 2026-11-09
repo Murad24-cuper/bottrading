@@ -162,6 +162,14 @@ news:
   stale_after_hours: 24          # Use blanket window only when both feeds are unavailable for a day
   refresh_hours: 6               # Public calendar cache refresh interval
   calendar_filename: calendar_events.csv
+cost_model:
+  enabled: true
+  lookback_hours: 24           # Use the same UTC hour over the trailing day
+  sample_interval_seconds: 60  # Record one spread sample per symbol/timeframe per minute
+  min_samples_per_cell: 5      # Uncalibrated hour cells refuse new entries
+  max_stop_ratio: 0.10         # Round-trip costs must stay below 10% of stop risk
+  slippage_points: 1.0
+  one_bar_delay: false         # Optional adverse one-bar delay remains off until calibrated
 dashboard:
   real_balance_default: 100      # Starting value for the small-account simulation
   real_risk_pct_default: 1.0     # Planned risk percent used in that simulation

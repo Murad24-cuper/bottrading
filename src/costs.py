@@ -1,0 +1,76 @@
+"""Shared, account-currency round-trip cost arithmetic for offline diagnostics."""
+from __future__ import annotations
+
+from collections import defaultdict
+import math
+
+
+def estimate_round_trip_cost(*, spread_price: float, stop_distance: float,
+                             tick_size: float, tick_value: float, volume: float,
+                             commission_per_lot_round_trip: float | None,
+                             slippage_points: float = 0.0, point_size: float = 0.0,
+                             delay_price: float = 0.0) -> dict:
+    """Return estimated account-currency cost and cost/stop risk.
+
+    Commission is explicitly marked unknown when no broker evidence is supplied;
+    consumers must not treat an unknown estimate as a complete cost model.
+    """
+    values=(spread_price,stop_distance,tick_size,tick_value,volume,slippage_points,point_size,delay_price)
+    if any(not math.isfinite(float(v)) or float(v)<0 for v in values):
+        raise ValueError("cost model inputs must be finite and non-negative")
+    if tick_size<=0 or tick_value<=0 or volume<=0 or stop_distance<=0:
+        raise ValueError("tick size/value, volume and stop distance must be positive")
+    money_per_price=tick_value/tick_size
+    commission_known=commission_per_lot_round_trip is not None
+    commission=float(commission_per_lot_round_trip or 0.0)*volume
+    if commission<0 or not math.isfinite(commission):
+        raise ValueError("round-trip commission must be finite and non-negative")
+    slip_price=2*slippage_points*point_size
+    price_cost=spread_price+slip_price+delay_price
+    spread_slippage=price_cost*money_per_price*volume
+    total=spread_slippage+commission
+    risk=stop_distance*money_per_price*volume
+    return {"cost":total,"spread_slippage":spread_slippage,"commission":commission,
+            "commission_known":commission_known,"cost_stop_ratio":total/risk,
+            "risk_money":risk}
+
+
+def hourly_cost_cells(frames: dict[tuple[str,str],object], specs: dict[str,dict],
+                      commission_per_lot_round_trip: dict[str,float] | None = None,
+                      slippage_points: float = 0.0) -> list[dict]:
+    """Build symbol/timeframe/UTC-hour median cost cells from OHLC spread bars.
+
+    Each frame needs a UTC DatetimeIndex and `spread`; specs need point/tick
+    sizing and an ATR stop multiplier can be supplied as ``stop_mult``.
+    Missing contract data is omitted, never imputed.
+    """
+    commission_per_lot_round_trip=commission_per_lot_round_trip or {}
+    cells=[]
+    for (symbol,timeframe),frame in frames.items():
+        spec=specs.get(symbol,{})
+        point=float(spec.get("point_size",spec.get("point",0)) or 0)
+        tick_size=float(spec.get("trade_tick_size",spec.get("tick_size",0)) or 0)
+        tick_value=float(spec.get("trade_tick_value",spec.get("tick_value",0)) or 0)
+        if not point or not tick_size or not tick_value or "spread" not in frame or frame.empty:
+            continue
+        import pandas as pd
+        index=pd.to_datetime(frame.index,utc=True)
+        spread=pd.to_numeric(frame["spread"],errors="coerce")*point
+        from .indicators import atr
+        atr_values=atr(frame)
+        stop_distance=atr_values*float(spec.get("stop_mult",2.0))
+        rows=defaultdict(list)
+        for i,hour in enumerate(index.hour):
+            if not math.isfinite(float(spread.iloc[i])) or not math.isfinite(float(stop_distance.iloc[i])) or stop_distance.iloc[i]<=0:
+                continue
+            estimate=estimate_round_trip_cost(spread_price=float(spread.iloc[i]),
+                stop_distance=float(stop_distance.iloc[i]),tick_size=tick_size,tick_value=tick_value,
+                volume=1.0,commission_per_lot_round_trip=commission_per_lot_round_trip.get(symbol),
+                slippage_points=slippage_points,point_size=point)
+            rows[int(hour)].append(estimate["cost_stop_ratio"])
+        for hour,ratios in sorted(rows.items()):
+            cells.append({"symbol":symbol,"timeframe":timeframe,"hour_utc":hour,
+                          "samples":len(ratios),"median_cost_stop_ratio":float(pd.Series(ratios).median()),
+                          "commission_known":symbol in commission_per_lot_round_trip,
+                          "passes_10pct":symbol in commission_per_lot_round_trip and float(pd.Series(ratios).median())<.10})
+    return cells

@@ -33,6 +33,19 @@ def test_default_config_loads_for_offline_work(monkeypatch):
     assert settings.config['scanner']['max_seconds_per_cycle']>0
     assert settings.config['history']['ranges_months']=={'M1':12,'M5':36,'M15':36,'H1':60}
 
+
+def test_locked_risk_ceilings_allow_tightening_but_reject_increases():
+    import pytest
+    from src.config import validate_risk_ceilings
+    risk={'risk_per_trade_pct':.25,'daily_loss_limit_pct':3,'weekly_loss_limit_pct':8,
+          'max_open_positions':20,'max_positions_per_group':6,'max_margin_usage_pct':50,
+          'max_total_open_risk_pct':5,'max_cost_to_target_ratio':.3,'min_risk_reward':1.2}
+    validate_risk_ceilings({'risk':risk})
+    tighter={**risk,'risk_per_trade_pct':.1,'max_open_positions':2,'max_margin_usage_pct':20}
+    validate_risk_ceilings({'risk':tighter})
+    for key,value in (('risk_per_trade_pct',.26),('weekly_loss_limit_pct',8.1),('max_total_open_risk_pct',5.1),('min_risk_reward',1.1)):
+        with pytest.raises(ValueError,match='locked'):
+            validate_risk_ceilings({'risk':{**risk,key:value}})
 def test_config_rejects_zero_risk_percentage(tmp_path,monkeypatch):
     import yaml
     monkeypatch.setattr(config_module,'load_dotenv',lambda *args,**kwargs:False)

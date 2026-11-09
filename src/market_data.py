@@ -70,7 +70,7 @@ def get_cost_estimate(mt5,symbol,volume):
     """Return spread plus estimated round-trip commission in account currency."""
     info=mt5.symbol_info(symbol); tick=get_tick(mt5,symbol)
     if info is None: raise RuntimeError(f'symbol_info({symbol}) failed: {mt5.last_error()}')
-    spread_cost=price_distance_to_money(mt5,symbol,tick.ask-tick.bid,volume)
+    spread=float(tick.ask)-float(tick.bid)
     commission_per_lot=None
     try:
         deals=mt5.history_deals_get(datetime.now(timezone.utc)-timedelta(days=30),datetime.now(timezone.utc))
@@ -82,6 +82,10 @@ def get_cost_estimate(mt5,symbol,volume):
         if samples: commission_per_lot=sum(samples)/len(samples)
     except Exception:
         commission_per_lot=None
-    commission_known=commission_per_lot is not None
-    commission=2*commission_per_lot*float(volume) if commission_known else 0.0
-    return {'cost':spread_cost+commission,'spread_cost':spread_cost,'commission':commission,'commission_known':commission_known}
+    from .costs import estimate_round_trip_cost
+    tick_size=float(getattr(info,'trade_tick_size',0) or 0); tick_value=float(getattr(info,'trade_tick_value',0) or 0)
+    estimate=estimate_round_trip_cost(spread_price=spread,stop_distance=max(spread,tick_size),
+        tick_size=tick_size,tick_value=tick_value,volume=float(volume),
+        commission_per_lot_round_trip=(2*commission_per_lot if commission_per_lot is not None else None))
+    return {'cost':estimate['cost'],'spread_cost':estimate['spread_slippage'],
+            'commission':estimate['commission'],'commission_known':estimate['commission_known']}

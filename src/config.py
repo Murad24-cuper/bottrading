@@ -8,6 +8,26 @@ import math
 import yaml
 from dotenv import load_dotenv
 
+# Hard safety ceiling. These bounds may be lowered in config but cannot be
+# raised by config files, self-learning, dashboard or Telegram commands.
+LOCKED_RISK_CEILINGS={'risk_per_trade_pct':.25,'daily_loss_limit_pct':3.0,
+    'weekly_loss_limit_pct':8.0,'max_open_positions':20,
+    'max_positions_per_group':6,'max_margin_usage_pct':50.0,
+    'max_total_open_risk_pct':5.0,'max_cost_to_target_ratio':.30,
+    'min_risk_reward':1.2}
+
+def validate_risk_ceilings(config: dict[str,Any]) -> None:
+    """Reject attempts to raise a locked risk ceiling or lower the RR floor."""
+    risk=config.get('risk',{})
+    for key,ceiling in LOCKED_RISK_CEILINGS.items():
+        try: value=float(risk[key])
+        except (KeyError,TypeError,ValueError) as exc: raise ValueError(f'risk.{key} is required by locked risk ceiling') from exc
+        if not math.isfinite(value): raise ValueError(f'risk.{key} must be finite')
+        if key=='min_risk_reward':
+            if value<ceiling: raise ValueError(f'risk.{key} cannot be below locked floor {ceiling}')
+        elif value>ceiling:
+            raise ValueError(f'risk.{key} exceeds locked ceiling {ceiling}')
+
 def assert_runtime_location(config: dict[str, Any], actual: str | None = None) -> None:
     """Refuse to start a bot from a machine not selected by config."""
     expected=config.get('runtime',{}).get('location','local')
@@ -82,13 +102,14 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     runtime=config.setdefault('runtime',{})
     if not isinstance(runtime,dict) or runtime.get('location','local') not in {'local','server'}:
         raise ValueError('runtime.location must be local or server')
-    required={'account','risk','universe','timeframes','magic_number','executor','strategies','loop','scanner','history','backtest','live','supervisor','mt5','confluence','db_path'}
+    required={'account','risk','universe','timeframes','magic_number','executor','strategies','loop','scanner','history','backtest','live','supervisor','mt5','confluence','cost_model','db_path'}
     missing=required-config.keys()
     if missing: raise ValueError(f'config.yaml is missing keys: {", ".join(sorted(missing))}')
-    for section in ('account','risk','universe','loop','scanner','history','backtest','live','supervisor','mt5','confluence','health','schedule','brain'):
+    for section in ('account','risk','universe','loop','scanner','history','backtest','live','supervisor','mt5','confluence','cost_model','health','schedule','brain'):
         if not isinstance(config[section],dict): raise ValueError(f'{section} must be a mapping')
     if config['account'].get('mode') not in {'demo','real'}: raise ValueError('account.mode must be demo or real')
     raw=config['risk']
+    validate_risk_ceilings(config)
     numeric={'risk_per_trade_pct':(0,100),'daily_loss_limit_pct':(0,100),'weekly_loss_limit_pct':(0,100),'max_margin_usage_pct':(0,100),'min_risk_reward':(0,None),'max_cost_to_target_ratio':(0,None)}
     for key,(low,high) in numeric.items():
         value=raw.get(key)
@@ -152,6 +173,13 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     point_sizes=scanner.get('timeframe_point_sizes',{})
     if not isinstance(point_sizes,dict) or any(not isinstance(value,(int,float)) or value<=0 for value in point_sizes.values()): raise ValueError('scanner.timeframe_point_sizes must map symbols to positive point sizes')
     if not isinstance(config['loop'].get('interval_seconds'),(int,float)) or config['loop']['interval_seconds']<=0: raise ValueError('loop.interval_seconds must be > 0')
+    costs=config['cost_model']
+    if type(costs.get('enabled')) is not bool or type(costs.get('one_bar_delay')) is not bool: raise ValueError('cost_model enabled/delay flags must be boolean')
+    for key in ('lookback_hours','sample_interval_seconds','min_samples_per_cell','max_stop_ratio'):
+        value=costs.get(key)
+        if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0: raise ValueError(f'cost_model.{key} must be positive')
+    if isinstance(costs.get('slippage_points'),bool) or not isinstance(costs.get('slippage_points'),(int,float)) or not math.isfinite(costs['slippage_points']) or costs['slippage_points']<0: raise ValueError('cost_model.slippage_points must be non-negative')
+    if costs['lookback_hours']>24 or costs['max_stop_ratio']>.1: raise ValueError('cost model cannot exceed 24 hours or the 10% stop-cost safety ceiling')
     history=config['history']
     if not isinstance(history.get('ranges_months'),dict) or any(type(v) is not int or v<=0 for v in history['ranges_months'].values()): raise ValueError('history.ranges_months must map timeframes to positive month counts')
     if not isinstance(history.get('liquid_aliases'),list) or not history['liquid_aliases']: raise ValueError('history.liquid_aliases must be a non-empty list')
