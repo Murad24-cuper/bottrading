@@ -272,6 +272,17 @@ class Database:
         values.setdefault('time',datetime.now(timezone.utc).isoformat())
         values.setdefault('score',0.0)
         with self.connect() as connection:
+            # Repeated rejected decisions are state, not new events. Keep one
+            # row until the symbol/strategy/direction/reason tuple changes.
+            if not int(values.get('taken',0)) and str(values.get('skip_reason','')).strip():
+                prior=connection.execute(
+                    "SELECT id FROM signals WHERE symbol=? AND strategy=? AND direction=? AND taken=0 AND skip_reason=? ORDER BY id DESC LIMIT 1",
+                    (values.get('symbol'),values.get('strategy'),values.get('direction'),values.get('skip_reason'))).fetchone()
+                if prior:
+                    columns=[key for key in values if key not in {'symbol','strategy','direction'}]
+                    connection.execute(f"UPDATE signals SET {','.join(key+'=?' for key in columns)} WHERE id=?",
+                                       [values[key] for key in columns]+[int(prior['id'])])
+                    return int(prior['id'])
             self._insert(connection,'signals',values)
             return connection.execute('SELECT last_insert_rowid()').fetchone()[0]
     def insert_partial_close(self,**values):

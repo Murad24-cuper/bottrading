@@ -16,6 +16,21 @@ def test_create_insert_update_and_query_trades(tmp_path):
         assert "features" in {r['name'] for r in conn.execute('PRAGMA table_info(trades)')}
         assert "features" in {r['name'] for r in conn.execute('PRAGMA table_info(signals)')}
 
+def test_repeated_rejected_signals_are_deduplicated_until_reason_changes(tmp_path):
+    db=Database(tmp_path/'signals.db')
+    payload=dict(symbol='EURUSD',strategy='trend_pullback',direction='buy',timeframe='M5',
+                 confidence=.6,entry=1.1,sl=1.09,tp=1.12,expected_cost=.1,taken=0,
+                 skip_reason='adaptive gate active')
+    first=db.insert_signal(time='2026-11-09T10:00:00+00:00',**payload)
+    same=db.insert_signal(time='2026-11-09T10:01:00+00:00',**payload)
+    changed=db.insert_signal(time='2026-11-09T10:02:00+00:00',**{**payload,'skip_reason':'cost too high'})
+    with db.connect() as connection:
+        rows=connection.execute('SELECT id,time,skip_reason FROM signals ORDER BY id').fetchall()
+    assert first==same and changed!=first and len(rows)==2
+    assert rows[0]['time']=='2026-11-09T10:01:00+00:00'
+    assert rows[1]['skip_reason']=='cost too high'
+
+
 def test_recent_brain_outcomes_include_costs_and_partial_closes(tmp_path):
     import json
     db=Database(tmp_path/'brain-outcomes.db')
