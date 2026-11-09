@@ -10,24 +10,54 @@ class MT5CallTimeoutError(TimeoutError):
     """Raised when an MT5 extension call does not return in time."""
 
 class MT5CallProxy:
-    """Run each package call on a daemon worker so the bot loop can time out."""
+    """Run package calls on a single dedicated worker thread with a queue so the bot loop can time out safely."""
     def __init__(self, module, timeout: float, unhealthy=None):
-        self._module=module; self._timeout=float(timeout); self._unhealthy=unhealthy
+        self._module = module
+        self._timeout = float(timeout)
+        self._unhealthy = unhealthy
+        self._is_unhealthy = False
+        self._queue: queue.Queue = queue.Queue()
+        self._worker = threading.Thread(target=self._worker_loop, name='mt5-worker', daemon=True)
+        self._worker.start()
+
+    def is_single_worker(self) -> bool:
+        return True
+
+    def _worker_loop(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                break
+            fn, args, kwargs, res_q = item
+            try:
+                res = fn(*args, **kwargs)
+                res_q.put((True, res))
+            except BaseException as exc:
+                res_q.put((False, exc))
+
     def __getattr__(self, name):
-        value=getattr(self._module,name)
-        if not callable(value): return value
-        def call(*args,**kwargs):
-            result=queue.Queue(maxsize=1)
-            def invoke():
-                try: result.put((True,value(*args,**kwargs)))
-                except BaseException as exc: result.put((False,exc))
-            worker=threading.Thread(target=invoke,name=f'mt5-{name}',daemon=True); worker.start()
-            try: ok,payload=result.get(timeout=self._timeout)
+        value = getattr(self._module, name)
+        if not callable(value):
+            return value
+
+        def call(*args, **kwargs):
+            if self._is_unhealthy:
+                raise MT5CallTimeoutError(f"MT5 session is marked unhealthy; call '{name}' rejected")
+            res_q = queue.Queue(maxsize=1)
+            self._queue.put((value, args, kwargs, res_q))
+            try:
+                ok, payload = res_q.get(timeout=self._timeout)
             except queue.Empty as exc:
-                if self._unhealthy: self._unhealthy(name,self._timeout)
-                raise MT5CallTimeoutError(f'MT5 call {name} exceeded {self._timeout:g}s timeout; terminal marked unhealthy') from exc
-            if ok: return payload
+                self._is_unhealthy = True
+                if self._unhealthy:
+                    self._unhealthy(name, self._timeout)
+                raise MT5CallTimeoutError(
+                    f'MT5 call {name} exceeded {self._timeout:g}s timeout; terminal marked unhealthy'
+                ) from exc
+            if ok:
+                return payload
             raise payload
+
         return call
 
 class MT5Client:
@@ -76,6 +106,7 @@ class MT5Client:
     def close(self):
         if self.mt5 is not None:
             try: self.mt5.shutdown()
+            except Exception: pass
             finally: self.mt5=None; self._module=None; self._unhealthy=False
     def __enter__(self): return self.connect()
     def __exit__(self,*exc): self.close()
