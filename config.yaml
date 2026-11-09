@@ -236,13 +236,14 @@ self_learning:
 history:
   data_dir: data/history
   incremental_refresh_enabled: true
-  incremental_timeframes: [M1, M5, M15, H1]
-  incremental_batch_days: {M1: 1, M5: 7, M15: 14, H1: 30}
-  download_chunk_days: {M1: 7, M5: 28, M15: 90, H1: 180}
+  incremental_timeframes: [M1, M5, M15, H1, H4, D1]
+  incremental_batch_days: {M1: 1, M5: 7, M15: 14, H1: 30, H4: 180, D1: 365}
+  download_chunk_days: {M1: 7, M5: 28, M15: 90, H1: 180, H4: 365, D1: 730}
   incremental_refresh_every_cycles: 1 # One bounded symbol/timeframe request per live cycle
   incremental_budget_seconds: 1.5 # MT5 request size is bounded to the configured batch size
-  ranges_months: {M1: 12, M5: 36, M15: 36, H1: 60}
-  weekend_ranges_months: {M1: 6, M5: 24, M15: 24}
+  ranges_months: {M1: 12, M5: 36, M15: 36, H1: 60, H4: 120, D1: 240}
+  weekend_ranges_months: {M1: 6, M5: 24, M15: 24, H4: 60, D1: 120}
+  weekend_timeframes: [M1, M5, M15, H4, D1]
   max_storage_gb: 5
   max_bars_per_request: 80000 # Stay below the MT5 terminal's history response ceiling
   liquid_aliases: [EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, US500, NAS100, US30, GER40, GOLD, BTCUSD, ETHUSD, GOLD24-7, Altcoins_INDX, Crypto_10]

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 from src.history import download_history,_rates,refresh_incremental_batch,build_history_manifest,_write_history_manifest
+from src.history import TF_MINUTES
 
 class FakeMT5:
     TIMEFRAME_M1=1
@@ -16,6 +17,12 @@ class FakeMT5:
         times=pd.date_range(start,end,freq='min',tz='UTC') if start.tzinfo is None else pd.date_range(start,end,freq='min')
         return np.array([(int(t.timestamp()),1.,2.,.5,1.5,100,1) for t in times],dtype=[('time','i8'),('open','f8'),('high','f8'),('low','f8'),('close','f8'),('tick_volume','i8'),('spread','i8')])
     def last_error(self): return (0,'ok')
+
+def test_native_slow_timeframes_are_supported_without_synthetic_resampling():
+    assert TF_MINUTES['H4']==240 and TF_MINUTES['D1']==1440
+    from src.backtest.engine import TF_DELTA
+    assert TF_DELTA['H4'].total_seconds()==4*3600
+    assert TF_DELTA['D1'].total_seconds()==24*3600
 
 def test_history_download_and_incremental_cache(tmp_path):
     mt5=FakeMT5(); settings=SimpleNamespace(root=tmp_path,config={'history':{'data_dir':'data/history','ranges_months':{'M1':3}}})

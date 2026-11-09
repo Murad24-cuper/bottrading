@@ -16,7 +16,7 @@ from ..trade_rules import (adverse_exit_score, continuation_metrics, may_extend,
                            stop_protects_profit, stop_target_from_atr, spread_within_median,
                            spread_within_expected_move, stagnation_due)
 
-TF_DELTA={'M1':timedelta(minutes=1),'M5':timedelta(minutes=5),'M15':timedelta(minutes=15),'H1':timedelta(hours=1)}
+TF_DELTA={'M1':timedelta(minutes=1),'M5':timedelta(minutes=5),'M15':timedelta(minutes=15),'H1':timedelta(hours=1),'H4':timedelta(hours=4),'D1':timedelta(days=1)}
 
 @dataclass
 class BacktestResult:
@@ -58,7 +58,7 @@ class Backtester:
                 frames[tf]=frame
         base_tf={}; timeline=set()
         for symbol,frames in data.items():
-            choices=[tf for tf in ('M1','M5','M15','H1') if tf in frames]
+            choices=[tf for tf in ('M1','M5','M15','H1','H4','D1') if tf in frames]
             if choices: base_tf[symbol]=choices[0]; timeline.update(frames[choices[0]].index.to_pydatetime())
         timeline=sorted(timeline)
         session_events={}

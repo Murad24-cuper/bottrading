@@ -9,7 +9,7 @@ import pandas as pd
 from .symbols import SymbolService
 from .time_utils import server_utc_offset
 
-TF_MINUTES={'M1':1,'M5':5,'M15':15,'H1':60}
+TF_MINUTES={'M1':1,'M5':5,'M15':15,'H1':60,'H4':240,'D1':1440}
 
 def _safe_name(symbol): return re.sub(r'[^A-Za-z0-9_.-]','_',symbol)
 def history_path(directory,symbol,timeframe): return Path(directory)/f'{_safe_name(symbol)}_{timeframe}.parquet'

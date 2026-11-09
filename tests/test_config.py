@@ -31,7 +31,7 @@ def test_default_config_loads_for_offline_work(monkeypatch):
     assert settings.risk.max_open_positions==20
     assert settings.risk.max_margin_usage_pct==50
     assert settings.config['scanner']['max_seconds_per_cycle']>0
-    assert settings.config['history']['ranges_months']=={'M1':12,'M5':36,'M15':36,'H1':60}
+    assert settings.config['history']['ranges_months']=={'M1':12,'M5':36,'M15':36,'H1':60,'H4':120,'D1':240}
     assert settings.config['schedule']['daily_backup_keep']==7
     assert settings.config['db']['backup_keep_days']==7
 
