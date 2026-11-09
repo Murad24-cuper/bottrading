@@ -8,6 +8,18 @@ def should_restart_for_memory(memory_mb: float|None, maximum_mb: float) -> bool:
     """Check a reported process working set against its configured ceiling."""
     return memory_mb is not None and float(memory_mb)>float(maximum_mb)
 
+def prune_old_logs(directory,retention_days=14,now=None):
+    """Remove only project log files older than the configured retention."""
+    now=now or datetime.now(timezone.utc)
+    cutoff=now.timestamp()-max(1,int(retention_days))*86400
+    removed=[]
+    for path in Path(directory).glob('*.log*'):
+        try:
+            if path.is_file() and path.stat().st_mtime<cutoff:
+                path.unlink(); removed.append(path.name)
+        except OSError: continue
+    return removed
+
 def run_daily_backup(settings,db,now=None) -> Path|None:
     """Create one SQLite online backup per UTC day and retain the configured count."""
     now=now or datetime.now(timezone.utc); now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)

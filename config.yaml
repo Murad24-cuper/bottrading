@@ -148,7 +148,8 @@ health:
 schedule:
   hourly_minute_utc: 0
   daily_rollover_hour_utc: 0
-  daily_backup_keep: 14
+  daily_backup_keep: 7
+  log_retention_days: 14
   weekly_day_utc: 6
   weekly_hour_utc: 2
 notify:
@@ -182,7 +183,7 @@ db:
   events_retention_days: 30      # Keep operational events for 30 days
   equity_retention_days: 30      # Retain full resolution snapshots for 30 days
   equity_downsample_minutes: 5   # Older snapshots are reduced to one per interval
-  backup_keep_days: 14           # Number of daily database backups to retain
+  backup_keep_days: 7            # Number of daily database backups to retain
   vacuum_weekday_utc: 6          # Sunday UTC, while the bot is idle
 supervisor:
   hang_seconds: 90               # Restart a live child with a stale heartbeat

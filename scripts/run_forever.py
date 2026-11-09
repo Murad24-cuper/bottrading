@@ -19,7 +19,8 @@ from src.process_utils import pid_is_running
 from src.supervisor import clear_stale_pid_lock, run_restart_supervisor, heartbeat_is_stale, hang_watchdog_should_terminate, write_hang_report, detached_python_executable
 from scripts.run_bot import install_crash_handlers
 from src.paths import project_paths
-from src.scheduler import due_scheduler_jobs,run_scheduler_tick,run_daily_backup,should_restart_for_memory
+from src.scheduler import due_scheduler_jobs,run_scheduler_tick,run_daily_backup,should_restart_for_memory,prune_old_logs
+from src.windows_runtime import set_system_awake
 
 log = get_logger('bot.supervisor')
 
@@ -143,7 +144,10 @@ def main() -> int:
                 for task,key in due_scheduler_jobs(utc_now(),settings.config):
                     if db.maintenance_done(task,key): completed.add((task,key))
                 def daily_backup_job(key):
-                    try: run_daily_backup(settings,db,utc_now())
+                    try:
+                        run_daily_backup(settings,db,utc_now())
+                        removed=prune_old_logs(settings.logs_dir,int(settings.config.get('schedule',{}).get('log_retention_days',14)),utc_now())
+                        if removed: emit('INFO',f'Old logs pruned: {len(removed)} files')
                     except Exception as exc: emit('ERROR',f'Daily DB backup failed: {type(exc).__name__}: {exc}')
                 def hourly_history_job(key):
                     emit('INFO','Incremental history refresh runs in small batches through the bot child shared MT5 session')
@@ -162,6 +166,8 @@ def main() -> int:
                 return 124
 
     emit('INFO', f'Supervisor started PID={os.getpid()}')
+    awake=set_system_awake(True)
+    if os.name=='nt' and not awake: emit('WARNING','Windows refused the prevent-sleep request')
     try:
         return run_restart_supervisor(
             run_child, should_stop, emit,
@@ -170,6 +176,7 @@ def main() -> int:
             int(backoff['restart_window_minutes']) * 60,
         )
     finally:
+        if awake: set_system_awake(False)
         try:
             if pid_path.read_text(encoding='utf-8').strip() == str(os.getpid()):
                 pid_path.unlink(missing_ok=True)

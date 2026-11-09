@@ -2,7 +2,7 @@ from datetime import datetime,timezone,timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from src.db import Database
-from src.scheduler import due_scheduler_jobs,run_daily_backup,run_scheduler_tick,should_restart_for_memory
+from src.scheduler import due_scheduler_jobs,run_daily_backup,run_scheduler_tick,should_restart_for_memory,prune_old_logs
 
 def test_daily_backup_is_atomic_per_utc_day_and_idempotent(tmp_path):
     db=Database(tmp_path/'bot.db'); db.log_event('INFO','test','backup source')
@@ -37,3 +37,23 @@ def test_memory_limit_triggers_only_above_ceiling():
     assert not should_restart_for_memory(None,1500)
     assert not should_restart_for_memory(1500,1500)
     assert should_restart_for_memory(1501,1500)
+
+def test_log_retention_removes_only_old_log_files(tmp_path):
+    now=datetime(2026,11,9,tzinfo=timezone.utc)
+    old=tmp_path/'bot.log.3'; old.write_text('old')
+    fresh=tmp_path/'bot.log'; fresh.write_text('fresh')
+    unrelated=tmp_path/'keep.txt'; unrelated.write_text('keep')
+    import os
+    os.utime(old,(now.timestamp()-15*86400,)*2)
+    os.utime(fresh,(now.timestamp(),)*2)
+    assert prune_old_logs(tmp_path,14,now)==['bot.log.3']
+    assert fresh.exists() and unrelated.exists()
+
+def test_system_awake_request_flags_can_be_set_and_cleared():
+    from src.windows_runtime import set_system_awake,ES_CONTINUOUS,ES_SYSTEM_REQUIRED
+    class Kernel:
+        def __init__(self): self.flags=[]
+        def SetThreadExecutionState(self,flags): self.flags.append(flags); return 1
+    kernel=Kernel()
+    assert set_system_awake(True,kernel) and set_system_awake(False,kernel)
+    assert kernel.flags==[ES_CONTINUOUS|ES_SYSTEM_REQUIRED,ES_CONTINUOUS]
