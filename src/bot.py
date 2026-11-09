@@ -66,6 +66,7 @@ class TradingBot:
         self.telegram_commands=TelegramCommandPoller(self.db,ttl_seconds=int(cfg.get('live',{}).get('command_ttl_seconds',60)))
         self._health_failures=0; self._entries_health_blocked=False; self._trade_allowed=False; self._last_daily_summary=''; self._last_maintenance_day=''
         self._data_dir=data_dir; self._brain_drift_checked=0.0
+        self._protection_notified=set()
         self._history_refresh_cycle=0
         self._last_notified_trade_id=self.db.latest_trade_id() if hasattr(self.db,'latest_trade_id') else 0
         self._observed_utc_day=self._now().date()-timedelta(days=1)
@@ -293,8 +294,9 @@ class TradingBot:
         exploration_eligible=bool(exploration_cfg.get('enabled',False) and self._last_account_type=='DEMO' and candidate_features.get('exploration',{}).get('eligible',False))
         allowed_strategy=candidate.strategy in self.live['strategies']
         active_gates=self.db.get_active_adaptive_gates(now) if hasattr(self.db,'get_active_adaptive_gates') else []
-        gate=next((entry for entry in active_gates if (entry['scope']=='strategy' and entry['name']==candidate.strategy) or (entry['scope']=='group' and entry['name']==candidate.asset_group)),None)
-        if gate and not exploration_eligible: reason=f'adaptive gate active: {gate["scope"]}={gate["name"]} until {gate["disabled_until"]}'
+        gate=next((entry for entry in active_gates if (entry['scope']=='global' and entry['name']=='all') or (entry['scope']=='symbol' and entry['name']==candidate.symbol)),None)
+        if gate is None: gate=next((entry for entry in active_gates if (entry['scope']=='strategy' and entry['name']==candidate.strategy) or (entry['scope']=='group' and entry['name']==candidate.asset_group)),None)
+        if gate and (gate['scope'] in {'symbol','global'} or not exploration_eligible): reason=f'adaptive gate active: {gate["scope"]}={gate["name"]} until {gate["disabled_until"]}'
         elif (self.settings.root/'STOP').exists(): reason='kill switch active'
         elif self.consecutive_errors>=int(self.live['max_cycle_errors']) or self.trading_disabled: reason='consecutive cycle error limit reached'
         elif not live_mode: reason='shadow mode'
@@ -304,6 +306,26 @@ class TradingBot:
         else: reason=''
         if reason:
             self._signal_update(candidate,False,reason); return False
+        protection_cfg=self.settings.config.get('protections',{})
+        if protection_cfg.get('enabled',False):
+            from .protections import check_protections
+            cutoff=now-timedelta(hours=float(protection_cfg.get('drawdown_window_hours',24)))
+            trades=self.db.get_recent_symbol_trades(candidate.symbol,100,self.settings.magic_number) if hasattr(self.db,'get_recent_symbol_trades') else []
+            equity=self.db.get_equity_snapshots_since(cutoff) if hasattr(self.db,'get_equity_snapshots_since') else []
+            blocked,protection_reason=check_protections(trades,equity,candidate.symbol,now,protection_cfg)
+            key=(candidate.symbol,protection_reason)
+            if blocked:
+                if protection_reason.startswith('rolling drawdown'):
+                    scope,name='global','all'; until=now+timedelta(hours=float(protection_cfg.get('drawdown_window_hours',24)))
+                elif 'daily loss limit' in protection_reason:
+                    scope,name='symbol',candidate.symbol; until=now.replace(hour=0,minute=0,second=0,microsecond=0)+timedelta(days=1)
+                else:
+                    scope,name='symbol',candidate.symbol; until=now+timedelta(hours=float(protection_cfg.get('cooldown_hours',24)))
+                created=self.db.activate_protection_gate(scope,name,until,protection_reason,now) if hasattr(self.db,'activate_protection_gate') else False
+                if created: self._notify(f'protection_{scope}_{name}',f'🛑 {candidate.symbol}: {protection_reason}. Yeni girişlər fasilə verildi.')
+                self._protection_notified.add(key)
+                self._signal_update(candidate,False,protection_reason); return False
+            self._protection_notified={item for item in self._protection_notified if item[0]!=candidate.symbol}
         from .confluence import apply_confluence
         signal=candidate.signal
         allowed,confluence_reason,adjusted_confidence=apply_confluence(getattr(candidate,'features',{}),signal.direction,signal.confidence,self.settings.config.get('confluence',{}))

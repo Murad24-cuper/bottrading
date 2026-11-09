@@ -231,6 +231,27 @@ class Database:
         params=[first,last]
         if magic is not None: sql+=' AND magic=?'; params.append(int(magic))
         with self.connect() as connection: return [dict(row) for row in connection.execute(sql+' ORDER BY close_time',params)]
+    def get_recent_symbol_trades(self,symbol,limit=100,magic=None):
+        import json
+        sql="SELECT ticket,symbol,close_time,profit,commission,swap,features FROM trades WHERE status='closed' AND symbol=?"
+        params=[str(symbol)]
+        if magic is not None: sql+=' AND magic=?'; params.append(int(magic))
+        sql+=' ORDER BY close_time DESC,id DESC LIMIT ?'; params.append(int(limit))
+        with self.connect() as connection:
+            trades=[dict(row) for row in connection.execute(sql,params)]
+            partial={int(row['ticket']):float(row['pnl'] or 0) for row in connection.execute('SELECT ticket,SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)) pnl FROM partial_closes GROUP BY ticket')}
+        result=[]
+        for row in trades:
+            try: review=json.loads(row.get('features') or '{}').get('process_review',{})
+            except (TypeError,ValueError): review={}
+            row['net']=float(row.get('profit') or 0)+float(row.get('commission') or 0)+float(row.get('swap') or 0)+partial.get(int(row['ticket']),0)
+            row['outcome_r']=review.get('outcome_r')
+            result.append(row)
+        return result
+    def get_equity_snapshots_since(self,since):
+        stamp=since.isoformat() if hasattr(since,'isoformat') else str(since)
+        with self.connect() as connection:
+            return [dict(row) for row in connection.execute('SELECT time,equity FROM equity_snapshots WHERE time>=? ORDER BY time',(stamp,))]
     def get_daily_stats(self,day):
         day=day.isoformat() if hasattr(day,'isoformat') else str(day)
         with self.connect() as connection:
@@ -328,6 +349,19 @@ class Database:
         now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
         with self.connect() as connection:
             return [dict(row) for row in connection.execute('SELECT * FROM adaptive_gates WHERE disabled_until>? ORDER BY scope,name',(now.isoformat(),))]
+    def activate_protection_gate(self,scope,name,disabled_until,reason,now=None):
+        """Persist symbol/global protection pauses in the shared adaptive-gate table."""
+        if scope not in {'symbol','global'}: raise ValueError('protection gate scope must be symbol or global')
+        now=now or datetime.now(timezone.utc)
+        now=now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+        expiry=disabled_until.isoformat() if hasattr(disabled_until,'isoformat') else str(disabled_until)
+        with self.connect() as connection:
+            old=connection.execute('SELECT disabled_until FROM adaptive_gates WHERE scope=? AND name=?',(scope,str(name))).fetchone()
+            if old and str(old['disabled_until'])>now.isoformat(): return False
+            message=f'Protection gate active {scope}={name} until {expiry}: {reason}'
+            connection.execute('INSERT INTO adaptive_gates(scope,name,disabled_until,expectancy,sample_size,reason,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(scope,name) DO UPDATE SET disabled_until=excluded.disabled_until,expectancy=excluded.expectancy,sample_size=excluded.sample_size,reason=excluded.reason,updated_at=excluded.updated_at',(scope,str(name),expiry,0.0,0,message,now.isoformat()))
+            connection.execute('INSERT INTO bot_events(time,level,source,message) VALUES (?,?,?,?)',(now.isoformat(),'WARNING','risk',message))
+            return True
     def refresh_adaptive_gates(self,window=20,disable_hours=24,magic=None,now=None):
         """Disable strategies/groups with negative expectancy over recent closed trades."""
         now=now or datetime.now(timezone.utc)

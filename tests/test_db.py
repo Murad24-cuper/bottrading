@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date,datetime,timezone,timedelta
 import sqlite3
 from src.db import Database
 import pytest
@@ -39,6 +39,18 @@ def test_spread_samples_are_bucketed_by_utc_symbol_timeframe_and_hour(tmp_path):
     assert cell=={'median_spread_price':.0003,'samples':3}
     assert db.get_spread_cell('EURUSD','M15',13,'2026-11-09T13:00:00+00:00')['samples']==0
     assert db.get_spread_cell('EURUSD','M5',12,'2026-11-09T13:00:00+00:00')['samples']==0
+
+
+def test_symbol_and_global_protection_pauses_share_gate_table_and_dedupe_events(tmp_path):
+    db=Database(tmp_path/'protection-gates.db'); now=datetime(2026,11,9,15,tzinfo=timezone.utc)
+    until=now+timedelta(hours=24)
+    assert db.activate_protection_gate('symbol','EURUSD',until,'symbol loss',now) is True
+    assert db.activate_protection_gate('symbol','EURUSD',until,'symbol loss',now) is False
+    assert db.activate_protection_gate('global','all',until,'drawdown',now) is True
+    active={(row['scope'],row['name']) for row in db.get_active_adaptive_gates(now)}
+    assert active=={('symbol','EURUSD'),('global','all')}
+    with db.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM bot_events WHERE source='risk' AND message LIKE 'Protection gate active%'").fetchone()[0]==2
 
 
 def test_recent_brain_outcomes_include_costs_and_partial_closes(tmp_path):

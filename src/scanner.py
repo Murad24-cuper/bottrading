@@ -201,6 +201,8 @@ class MarketScanner:
         active_gates=self.db.get_active_adaptive_gates() if hasattr(self.db,'get_active_adaptive_gates') else []
         disabled_strategies={row['name'] for row in active_gates if row['scope']=='strategy'}
         disabled_groups={row['name'] for row in active_gates if row['scope']=='group'}
+        disabled_symbols={row['name'] for row in active_gates if row['scope']=='symbol'}
+        global_pause=any(row['scope']=='global' and row['name']=='all' for row in active_gates)
         candidates=self.symbols.get_candidates() if hasattr(self.symbols,'get_candidates') else self.symbols.get_universe()
         owned=[p for p in (self.mt5.positions_get() or []) if int(p.magic)==self.settings.magic_number] if hasattr(self.mt5,'positions_get') else []
         open_symbols={str(p.symbol) for p in owned}
@@ -287,6 +289,10 @@ class MarketScanner:
         analysed=[]
         for symbol in top_symbols:
             if analysed and perf_counter()-started>=budget: break
+            if global_pause:
+                rejection['global protection pause']+=1; continue
+            if symbol in disabled_symbols:
+                rejection[f'protection pause: symbol {symbol}']+=1; continue
             if symbol not in open_symbols:
                 try: session_ok,session_reason=self.symbols.is_tradable(symbol)
                 except TypeError: session_ok,session_reason=True,'tradable'

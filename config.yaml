@@ -172,6 +172,13 @@ cost_model:
   max_stop_ratio: 0.10         # Round-trip costs must stay below 10% of stop risk
   slippage_points: 1.0
   one_bar_delay: false         # Optional adverse one-bar delay remains off until calibrated
+protections:
+  enabled: true
+  consecutive_losses: 3
+  cooldown_hours: 24
+  symbol_daily_loss_r: 2.0
+  drawdown_window_hours: 24
+  rolling_drawdown_pct: 2.0
 dashboard:
   real_balance_default: 100      # Starting value for the small-account simulation
   real_risk_pct_default: 1.0     # Planned risk percent used in that simulation

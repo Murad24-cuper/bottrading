@@ -102,10 +102,10 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     runtime=config.setdefault('runtime',{})
     if not isinstance(runtime,dict) or runtime.get('location','local') not in {'local','server'}:
         raise ValueError('runtime.location must be local or server')
-    required={'account','risk','universe','timeframes','magic_number','executor','strategies','loop','scanner','history','backtest','live','supervisor','mt5','confluence','cost_model','db_path'}
+    required={'account','risk','universe','timeframes','magic_number','executor','strategies','loop','scanner','history','backtest','live','supervisor','mt5','confluence','cost_model','protections','db_path'}
     missing=required-config.keys()
     if missing: raise ValueError(f'config.yaml is missing keys: {", ".join(sorted(missing))}')
-    for section in ('account','risk','universe','loop','scanner','history','backtest','live','supervisor','mt5','confluence','cost_model','health','schedule','brain'):
+    for section in ('account','risk','universe','loop','scanner','history','backtest','live','supervisor','mt5','confluence','cost_model','protections','health','schedule','brain'):
         if not isinstance(config[section],dict): raise ValueError(f'{section} must be a mapping')
     if config['account'].get('mode') not in {'demo','real'}: raise ValueError('account.mode must be demo or real')
     raw=config['risk']
@@ -180,6 +180,12 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
         if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0: raise ValueError(f'cost_model.{key} must be positive')
     if isinstance(costs.get('slippage_points'),bool) or not isinstance(costs.get('slippage_points'),(int,float)) or not math.isfinite(costs['slippage_points']) or costs['slippage_points']<0: raise ValueError('cost_model.slippage_points must be non-negative')
     if costs['lookback_hours']>24 or costs['max_stop_ratio']>.1: raise ValueError('cost model cannot exceed 24 hours or the 10% stop-cost safety ceiling')
+    protection=config['protections']
+    if type(protection.get('enabled')) is not bool: raise ValueError('protections.enabled must be boolean')
+    if type(protection.get('consecutive_losses')) is not int or protection['consecutive_losses']<=0: raise ValueError('protections.consecutive_losses must be positive')
+    for key in ('cooldown_hours','symbol_daily_loss_r','drawdown_window_hours','rolling_drawdown_pct'):
+        value=protection.get(key)
+        if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0: raise ValueError(f'protections.{key} must be positive')
     history=config['history']
     if not isinstance(history.get('ranges_months'),dict) or any(type(v) is not int or v<=0 for v in history['ranges_months'].values()): raise ValueError('history.ranges_months must map timeframes to positive month counts')
     if not isinstance(history.get('liquid_aliases'),list) or not history['liquid_aliases']: raise ValueError('history.liquid_aliases must be a non-empty list')
