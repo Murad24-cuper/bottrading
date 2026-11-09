@@ -159,7 +159,8 @@ news:
   enabled: true
   blackout_minutes_before: 15
   blackout_minutes_after: 15
-  stale_after_hours: 2
+  stale_after_hours: 24          # Use blanket window only when both feeds are unavailable for a day
+  refresh_hours: 6               # Public calendar cache refresh interval
   calendar_filename: calendar_events.csv
 dashboard:
   real_balance_default: 100      # Starting value for the small-account simulation

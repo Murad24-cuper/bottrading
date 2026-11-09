@@ -171,9 +171,13 @@ def main():
     st.markdown(f'<div class="status-bar" style="background:{colors[status_kind]}">{status_text}<br><small>Açıq bazarlar: {opened_groups}</small></div>',unsafe_allow_html=True)
     restart_count=queries.get_supervisor_restart_count(today_start,today_end,DB_PATH)
     st.caption(f'Nəzarətçi: {"işləyir" if supervisor_running else "dayanıb"} · Bu gün yenidən başladılma: {restart_count}')
-    news_warning=next((row for row in queries.get_recent_events(DB_PATH,50) if row.get('source')=='news' and row.get('level')=='WARNING' and ('calendar' in row.get('message','').lower() or 'təqvim' in row.get('message','').lower())),None)
+    news_events=[row for row in queries.get_recent_events(DB_PATH,100) if row.get('source')=='news']
+    active_calendar=next((row for row in news_events if 'Calendar source active' in row.get('message','')),None)
+    news_warning=next((row for row in news_events if row.get('level')=='WARNING' and ('calendar' in row.get('message','').lower() or 'təqvim' in row.get('message','').lower())),None)
+    if active_calendar:
+        st.caption(f"Xəbər təqvimi: {active_calendar['message'].split('Calendar source active · ',1)[-1]} · son yenilənmə {local_time(active_calendar['time'])}")
     if news_warning:
-        st.warning('Xəbər təqvimi yoxdur və ya köhnədir. USD/EUR/GBP/JPY ilə əlaqəli alətlərdə 12:30–14:30 UTC aralığında yeni əməliyyatlar bloklanır.')
+        st.warning('MT5 təqvimi və internet təqvimi əlçatan deyil. USD/EUR/GBP/JPY ilə əlaqəli alətlərdə 12:30–14:30 UTC aralığında yeni əməliyyatlar bloklanır.')
     st.markdown('<style>.status-bar{color:white;padding:.75rem 1rem;border-radius:.55rem;font-weight:650;margin:.4rem 0 1rem}.metric-card{padding:1.1rem 1rem;border:1px solid rgba(128,128,128,.25);border-radius:.7rem;min-height:105px}.metric-label{font-size:.95rem;opacity:.8}.metric-value{font-size:1.7rem;font-weight:700;margin-top:.3rem}.metric-detail{font-size:.8rem;opacity:.75;margin-top:.2rem}div[data-testid="stButton"] button{min-height:3rem;font-weight:650}</style>',unsafe_allow_html=True)
 
     tab_main, tab_report, tab_analysis, tab_prepare, tab_detail, tab_brain = st.tabs(['Əsas', 'Hesabat', 'Analiz', 'Hazırlıq', 'Ətraflı', 'Beyin'])

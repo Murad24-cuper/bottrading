@@ -93,7 +93,7 @@ class MarketScanner:
         self.mt5,self.settings,self.db=mt5,settings,db
         self.symbols=symbol_service or SymbolService(mt5,settings)
         self._cache={}; self._cursor=0; self._strategies=load_strategies(settings); self.last_universe_size=0; self._weekend_index_signature=None
-        self._volatility_cache={}; self._spread_cache={}; self.last_scan_stats={}; self.last_strategy_diagnostics={}; self._news_events=[]; self._news_updated=None; self._news_loaded_at=0.0; self._news_notice_at=0.0; self._news_logged_updated=None
+        self._volatility_cache={}; self._spread_cache={}; self.last_scan_stats={}; self.last_strategy_diagnostics={}; self._news_events=[]; self._news_updated=None; self._news_source='not loaded'; self._news_age_hours=None; self._news_loaded_at=0.0; self._news_notice_at=0.0; self._news_logged_updated=None
         self._brain_rows=self._load_brain_rows()
         self._brain_pca=None
         pca_path=(getattr(self.settings,'data_dir',self.settings.root/'data')/'brain'/'pca.json')
@@ -107,25 +107,35 @@ class MarketScanner:
         import time
         if not self.settings.config.get('news',{}).get('enabled',False): return
         if time.monotonic()-self._news_loaded_at<60: return
-        from .news import parse_calendar,terminal_calendar_path
+        from .news import load_calendar,terminal_calendar_path
         self._news_loaded_at=time.monotonic()
         try:
             path=terminal_calendar_path(self.mt5)
-            self._news_events,self._news_updated=parse_calendar(path) if path else ([],None)
+            raw=self.settings.config.get('paths',{}).get('data_dir','data')
+            from pathlib import Path
+            data_dir=Path(raw); data_dir=data_dir if data_dir.is_absolute() else Path(self.settings.root)/data_dir
+            self._news_events,self._news_updated,self._news_source,self._news_age_hours=load_calendar(
+                path,data_dir/'calendar'/'ff_calendar_thisweek.json',now,
+                float(self.settings.config['news'].get('refresh_hours',6)),
+                float(self.settings.config['news'].get('stale_after_hours',24)))
         except Exception as exc:
-            self._news_events,self._news_updated=[],None
+            self._news_events,self._news_updated,self._news_source,self._news_age_hours=[],None,'fallback window',None
             self.db.log_event('WARNING','news',f'Calendar file could not be read: {type(exc).__name__}')
-        stale=self._news_updated is None or (now-self._news_updated).total_seconds()>float(self.settings.config['news'].get('stale_after_hours',2))*3600
+        stale=self._news_source=='fallback window'
+        source_age='unknown' if self._news_age_hours is None else f'{self._news_age_hours:.1f}h'
+        source_marker=(self._news_source,self._news_updated)
+        if not stale and source_marker!=self._news_logged_updated:
+            self.db.log_event('INFO','news',f'Calendar source active · {self._news_source} · age {source_age}')
+            self._news_logged_updated=source_marker
         if not stale and self._news_updated!=self._news_logged_updated:
             from .news import CURRENCY_SYMBOLS
             upcoming=[event for event in self._news_events if now<=event.time<=now+timedelta(hours=24)]
             for event in upcoming[:20]:
                 symbols=', '.join(CURRENCY_SYMBOLS.get(event.currency,()))
                 self.db.log_event('INFO','news',f"Yaxın xəbər · {event.time.isoformat()} · {event.currency} · {event.importance} · {event.name} · əlaqəli alətlər: {symbols}")
-            self._news_logged_updated=self._news_updated
         if stale and time.monotonic()-self._news_notice_at>=1800:
             self._news_notice_at=time.monotonic()
-            self.db.log_event('WARNING','news','Economic calendar missing or older than two hours; conservative 12:30-14:30 UTC entry filter is active for USD/EUR/GBP/JPY instruments')
+            self.db.log_event('WARNING','news','Both calendar sources unavailable or older than 24 hours; conservative 12:30-14:30 UTC entry filter is active for USD/EUR/GBP/JPY instruments')
     def _load_brain_rows(self):
         """Load optional historical memory; absence keeps the brain shadow-only."""
         data_dir=getattr(self.settings,'data_dir',None)
