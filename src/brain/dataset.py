@@ -40,7 +40,7 @@ def build_labeled_outcomes(history_dir: str|Path, symbols: list[str], specs: dic
     focus=set(config['universe'].get('focus_symbols',[]))
     weekend_symbols=set(config['universe'].get('weekend_symbols',[]))
     aliases=config['universe'].get('symbol_aliases',{})
-    logical_for_actual={}
+    logical_for_actual: dict[str, str] = {}
     for logical in (*focus,*weekend_symbols):
         for pattern in aliases.get(logical,[logical]):
             logical_for_actual.setdefault(str(pattern).upper(),logical)

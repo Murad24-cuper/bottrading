@@ -1,6 +1,7 @@
 """Test-period acceptance gate and ablation summaries."""
 from __future__ import annotations
 import math
+from typing import Any
 import pandas as pd
 
 def _summary(rows: pd.DataFrame) -> dict:
@@ -17,7 +18,7 @@ def evaluate_test_period(rows: pd.DataFrame, config: dict) -> dict:
     missing=required-set(rows.columns)
     if missing: return {'passed':False,'reasons':[f'missing columns: {", ".join(sorted(missing))}'],'calibration':[],'selected':{},'ablation':{},'current_rule':{}}
     data=rows.copy(); data=data[pd.to_numeric(data.probability,errors='coerce').between(0,1)&pd.to_numeric(data.net_r,errors='coerce').notna()]
-    buckets=[]
+    buckets: list[dict[str, Any]] = []
     edges=[i/10 for i in range(11)]
     data['bucket']=pd.cut(data.probability,edges,include_lowest=True)
     for name,group in data.groupby('bucket',observed=True):
@@ -25,7 +26,7 @@ def evaluate_test_period(rows: pd.DataFrame, config: dict) -> dict:
             buckets.append({'bucket':str(name),'samples':len(group),'predicted':float(group.probability.mean()),'actual':float(group.actual_win.mean()),'error':abs(float(group.probability.mean())-float(group.actual_win.mean()))})
     selected=data[data['both'].astype(bool)]
     summary=_summary(selected); reasons=[]
-    max_error=max((row['error'] for row in buckets),default=1.0)
+    max_error=max((float(row['error']) for row in buckets),default=1.0)
     acceptance=config.get('acceptance',{})
     if not buckets: reasons.append('no calibration bucket has 200+ test samples')
     elif max_error>=float(acceptance.get('calibration_error',.05)): reasons.append(f'calibration error {max_error:.3f} is not below limit')

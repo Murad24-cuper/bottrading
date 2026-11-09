@@ -21,7 +21,7 @@ def build_market_context(candles: dict[str,dict[str,pd.DataFrame]], asset_groups
         if value is None: continue
         usd.append(value if pair.startswith('USD') else -value)
     strength=float(np.mean(usd)) if usd else None
-    group_values={}
+    group_values: dict[str, list] = {}
     for symbol,frames in candles.items():
         value=_zchange(frames.get('M15'))
         if value is None: continue

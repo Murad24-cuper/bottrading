@@ -16,7 +16,7 @@ def select_universe(rows: list[dict], quotas: dict, limit: int=400) -> list[dict
         if not all(math.isfinite(value) for value in (spread,atr,horizon,activity)) or atr<=0 or spread<0: continue
         ratio=spread/(atr*math.sqrt(horizon)); score=ratio-0.002*math.log1p(max(0.0,activity))
         eligible.append({**row,'cost_to_move_ratio':ratio,'universe_score':score,'reason':f'cost/expected-move={ratio:.4f}; activity={activity:g}'})
-    by_group={}
+    by_group: dict[str, list] = {}
     for row in eligible: by_group.setdefault(row['asset_group'],[]).append(row)
     selected=[]; seen=set()
     for group,quota in quotas.items():

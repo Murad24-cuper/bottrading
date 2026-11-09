@@ -58,7 +58,7 @@ class TradingBot:
         data_dir=getattr(settings,'data_dir',settings.root/'data')
         self.stop_event=False; self._connection_down=False; self.lock=BotLock(data_dir/'bot.lock')
         self._stop_after_cycle=False
-        self._cycle_reservations=[]
+        self._cycle_reservations: list = []
         self.exit_reason=''
         cfg=settings.config
         notify_cfg=cfg.get('notify',{})
@@ -66,7 +66,7 @@ class TradingBot:
         self.telegram_commands=TelegramCommandPoller(self.db,ttl_seconds=int(cfg.get('live',{}).get('command_ttl_seconds',60)))
         self._health_failures=0; self._entries_health_blocked=False; self._trade_allowed=False; self._last_daily_summary=''; self._last_maintenance_day=''
         self._data_dir=data_dir; self._brain_drift_checked=0.0
-        self._protection_notified=set()
+        self._protection_notified: set = set()
         self._history_refresh_cycle=0
         self._last_notified_trade_id=self.db.latest_trade_id() if hasattr(self.db,'latest_trade_id') else 0
         self._observed_utc_day=self._now().date()-timedelta(days=1)

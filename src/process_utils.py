@@ -8,7 +8,7 @@ def pid_is_running(pid: int | str | None, *, windows: bool | None = None,
                    kernel32=None, get_last_error=None) -> bool:
     """Check whether a PID exists without treating Windows error 87 as death."""
     try:
-        value = int(pid)
+        value = int(pid)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return False
     if value <= 0:

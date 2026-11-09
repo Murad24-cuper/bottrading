@@ -11,7 +11,7 @@ PROJECT_ROOT=Path(__file__).resolve().parents[2]
 _data_dir,_log_dir=project_paths(PROJECT_ROOT)
 _config=yaml.safe_load((PROJECT_ROOT/'config.yaml').read_text(encoding='utf-8')) or {}
 _db_path=Path(_config.get('db_path','data/bot.db'))
-DEFAULT_DB_PATH=Path(os.getenv('BOT_DB_PATH')) if os.getenv('BOT_DB_PATH') else (_db_path if _db_path.is_absolute() else PROJECT_ROOT/_db_path)
+DEFAULT_DB_PATH=Path(os.getenv('BOT_DB_PATH') or '') if os.getenv('BOT_DB_PATH') else (_db_path if _db_path.is_absolute() else PROJECT_ROOT/_db_path)
 
 def _read(path):
     db=Path(path or DEFAULT_DB_PATH).resolve()

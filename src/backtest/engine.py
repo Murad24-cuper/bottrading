@@ -56,11 +56,11 @@ class Backtester:
                 frame['__scalp_percentile_threshold']=frame['__scalp_atr'].shift(1).rolling(window,min_periods=max(100,window//2)).quantile(percentile)
                 frame['__scalp_spread_price']=spread*points
                 frames[tf]=frame
-        base_tf={}; timeline=set()
+        base_tf: dict[str, str] = {}; timeline_set: set = set()
         for symbol,frames in data.items():
             choices=[tf for tf in ('M1','M5','M15','H1','H4','D1') if tf in frames]
-            if choices: base_tf[symbol]=choices[0]; timeline.update(frames[choices[0]].index.to_pydatetime())
-        timeline=sorted(timeline)
+            if choices: base_tf[symbol]=choices[0]; timeline_set.update(frames[choices[0]].index.to_pydatetime())
+        timeline: list = sorted(timeline_set)
         session_events={}
         max_session_gap=float(self.settings.config['risk']['max_session_gap_hours'])
         for symbol,tf in base_tf.items():
@@ -72,7 +72,11 @@ class Backtester:
                 if gap>0.5: closures.append((close_at,gap))
             session_events[symbol]=closures
         signal_lookback=int(self.settings.config['backtest'].get('signal_lookback_bars',300))
-        balance=self.start_equity; positions={}; pending={}; trades=[]; curve=[]; last_prices={}; last_signal_bar={}; daily_pnl={}; weekly_pnl={}; symbol_trade_counts={}; symbol_last_close={}; closed_outcomes=defaultdict(list); adaptive_until={}; commission=float(self.settings.config['backtest']['commission_per_lot_per_side']); slippage=float(self.settings.config['backtest']['slippage_points'])
+        balance=self.start_equity
+        positions: dict = {}; pending: dict = {}; trades=[]; curve=[]; last_prices: dict = {}
+        last_signal_bar: dict = {}; daily_pnl: dict = {}; weekly_pnl: dict = {}
+        symbol_trade_counts: dict = {}; symbol_last_close: dict = {}; closed_outcomes=defaultdict(list); adaptive_until: dict = {}
+        commission=float(self.settings.config['backtest']['commission_per_lot_per_side']); slippage=float(self.settings.config['backtest']['slippage_points'])
         account_currency='USD'
         def floating_total(): return sum(float(p.get('profit',0)) for p in positions.values())
         def close_position(symbol,pos,when,price,reason,spread_price,partial=False):
@@ -127,7 +131,7 @@ class Backtester:
                     cost_est={'cost':spread_cost+2*commission*volume,'commission_known':True}
                     open_dicts=[{**p,'profit':p.get('profit',0)} for p in positions.values()]
                     margin=float(spec.get('margin_per_lot',0))*volume
-                    eq=balance+floating_total(); account=SimpleNamespace(balance=balance,equity=eq,margin=sum(float(p.get('margin',0)) for p in positions.values()))
+                    eq=balance+floating_total(); account=SimpleNamespace(balance=balance,equity=eq,margin=sum(float(p.get('margin',0)) for p in positions.values()))  # type: ignore[misc]
                     cooldown=int(getattr(self.settings.risk,'symbol_cooldown_minutes',0)); last_close=symbol_last_close.get(symbol)
                     cooldown_active=bool(cooldown and last_close and now-last_close<timedelta(minutes=cooldown))
                     trades_today=symbol_trade_counts.get((symbol,now.date()),0)
@@ -179,7 +183,7 @@ class Backtester:
                             be=pos['entry_price']+(be_distance if is_buy else -be_distance)
                             if (is_buy and be<close and be>pos['sl']) or (not is_buy and be>close and (pos['sl']==0 or be<pos['sl'])): pos['sl']=be
                             tf='M1' if 'M1' in data[symbol] else pos.get('timeframe') if pos.get('timeframe') in data[symbol] else tf
-                            history_frame=data[symbol].get(tf)
+                            history_frame=data[symbol].get(tf) if tf else None  # type: ignore[arg-type]
                             if history_frame is not None:
                                 known=history_frame.loc[history_frame.index<=open_time]
                                 lookback=int(risk['momentum_lookback_bars'])

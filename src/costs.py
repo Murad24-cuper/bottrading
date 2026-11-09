@@ -3,6 +3,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 import math
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 def estimate_round_trip_cost(*, spread_price: float, stop_distance: float,
@@ -35,7 +39,7 @@ def estimate_round_trip_cost(*, spread_price: float, stop_distance: float,
             "risk_money":risk}
 
 
-def hourly_cost_cells(frames: dict[tuple[str,str],object], specs: dict[str,dict],
+def hourly_cost_cells(frames: dict[tuple[str,str],'pd.DataFrame'], specs: dict[str,dict],
                       commission_per_lot_round_trip: dict[str,float] | None = None,
                       slippage_points: float = 0.0) -> list[dict]:
     """Build symbol/timeframe/UTC-hour median cost cells from OHLC spread bars.
