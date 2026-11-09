@@ -439,7 +439,9 @@ class TradingBot:
                 self._signal_update(candidate,False,'existing bot position has no stop-loss; total open risk cannot be verified'); return False
             info=self.client.mt5.symbol_info(position.symbol) if hasattr(self.client.mt5,'symbol_info') else None
             position_spec=info._asdict() if info is not None and hasattr(info,'_asdict') else (dict(info) if isinstance(info,dict) else {})
-            current_open_risk+=_risk_money(abs(float(position.price_open)-stop),float(position.volume),position_spec)
+            is_buy=getattr(position,'type',0)==getattr(getattr(self.client,'mt5',None),'POSITION_TYPE_BUY',0)
+            risk_dist=max(0.0,float(position.price_open)-stop) if is_buy else max(0.0,stop-float(position.price_open))
+            current_open_risk+=_risk_money(risk_dist,float(position.volume),position_spec)
         reserved_risk=sum(float(row.get('risk_money',0.0)) for row in self._cycle_reservations)
         new_risk=_risk_money(abs(float(signal.entry_hint)-float(signal.sl_price)),volume,spec)
         candidate_features.setdefault('sizing',{}).update({'planned_volume':planned_volume,'stressed_volume':volume,
