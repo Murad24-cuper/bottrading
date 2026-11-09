@@ -4,6 +4,7 @@ from datetime import datetime,timezone,timedelta
 from pathlib import Path
 import re
 import json
+import hashlib
 import pandas as pd
 from .symbols import SymbolService
 from .time_utils import server_utc_offset
@@ -12,6 +13,33 @@ TF_MINUTES={'M1':1,'M5':5,'M15':15,'H1':60}
 
 def _safe_name(symbol): return re.sub(r'[^A-Za-z0-9_.-]','_',symbol)
 def history_path(directory,symbol,timeframe): return Path(directory)/f'{_safe_name(symbol)}_{timeframe}.parquet'
+
+def build_history_manifest(frame,path,symbol,timeframe,source='MT5 terminal'):
+    """Describe exact stored range, missing-bar intervals and file digest."""
+    path=Path(path); index=pd.to_datetime(frame.index,utc=True).sort_values()
+    delta=timedelta(minutes=TF_MINUTES[timeframe]); gaps=[]
+    for before,after in zip(index[:-1],index[1:]):
+        missing=max(0,int((after-before).total_seconds()//delta.total_seconds())-1)
+        if missing:
+            gaps.append({'after_utc':before.isoformat(),'before_utc':after.isoformat(),'missing_bars':missing})
+    digest=None
+    if path.is_file():
+        hasher=hashlib.sha256()
+        with path.open('rb') as source_file:
+            for block in iter(lambda:source_file.read(1024*1024),b''): hasher.update(block)
+        digest=hasher.hexdigest()
+    return {'source':source,'symbol':str(symbol),'timeframe':str(timeframe),
+            'start_utc':index.min().isoformat() if len(index) else None,
+            'end_utc':index.max().isoformat() if len(index) else None,
+            'rows':int(len(index)),'gap_count':len(gaps),'gaps':gaps,
+            'sha256':digest,'file':path.name}
+
+def _write_history_manifest(base,manifest):
+    folder=Path(base)/'manifests'; folder.mkdir(parents=True,exist_ok=True)
+    target=folder/f"{_safe_name(manifest['symbol'])}_{manifest['timeframe']}.json"
+    temporary=target.with_suffix('.json.tmp')
+    temporary.write_text(json.dumps(manifest,indent=2),encoding='utf-8'); temporary.replace(target)
+    return target
 
 def _rates(mt5,symbol,timeframe,start,end,chunk_days=7,max_bars=80000):
     """Read bounded chunks, keep available bars, and log unavailable intervals."""
@@ -115,6 +143,7 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
             temporary.replace(path)
             result[symbol][tf]=combined.loc[(combined.index>=start)&(combined.index<=end)]
             actual=result[symbol][tf]
+            _write_history_manifest(base,build_history_manifest(combined,path,symbol,tf))
             if actual.empty: print(f'{symbol} {tf}: received 0 bars; no actual range available in {start.isoformat()}..{end.isoformat()}')
             else: print(f'{symbol} {tf}: received {len(actual)} bars; actual range {actual.index.min().isoformat()}..{actual.index.max().isoformat()}')
     if metadata:

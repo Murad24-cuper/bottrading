@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
 import pandas as pd
-from src.history import download_history,_rates,refresh_incremental_batch
+from src.history import download_history,_rates,refresh_incremental_batch,build_history_manifest,_write_history_manifest
 
 class FakeMT5:
     TIMEFRAME_M1=1
@@ -26,6 +26,22 @@ def test_history_download_and_incremental_cache(tmp_path):
     assert path.exists() and (tmp_path/'data/history/symbol_specs.json').exists()
     download_history(mt5,['EURUSD'],['M1'],start,end,settings)
     assert len(mt5.calls)==1
+    manifest=tmp_path/'data/history/manifests/EURUSD_M1.json'
+    assert manifest.exists()
+    import json
+    saved=json.loads(manifest.read_text(encoding='utf-8'))
+    assert saved['rows']==4 and saved['sha256'] and saved['source']=='MT5 terminal'
+
+
+def test_manifest_lists_gaps_without_synthesizing_rows(tmp_path):
+    import hashlib
+    frame=pd.DataFrame({'open':[1,2,3]},index=pd.to_datetime(['2026-01-01T00:00:00Z','2026-01-01T00:01:00Z','2026-01-01T00:05:00Z']))
+    path=tmp_path/'EURUSD_M1.parquet'; path.write_bytes(b'parquet placeholder')
+    manifest=build_history_manifest(frame,path,'EURUSD','M1')
+    _write_history_manifest(tmp_path,manifest)
+    assert manifest['rows']==3 and manifest['gap_count']==1
+    assert manifest['gaps'][0]['missing_bars']==3
+    assert manifest['sha256']==hashlib.sha256(path.read_bytes()).hexdigest()
 
 def test_long_history_range_retries_in_chunks_and_keeps_available_bars(tmp_path):
     class ChunkOnlyMT5(FakeMT5):
