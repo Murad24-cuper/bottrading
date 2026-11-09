@@ -11,7 +11,7 @@ def underlying_key(symbol):
  """Remove common broker suffixes and futures expiry from a symbol name."""
  name=_DATED_FUTURE.sub('',str(symbol).strip().upper())
  while True:
-  cleaned=re.sub(r'(?:CASH|#|M)$','',name,flags=re.IGNORECASE)
+  cleaned=re.sub(r'(?:CASH|#|MICRO|MIC|M)$','',name,flags=re.IGNORECASE)
   if cleaned==name: break
   name=cleaned
  return name.rstrip('._-')

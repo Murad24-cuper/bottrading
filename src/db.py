@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS trades(
  strategy TEXT, reason TEXT, magic INTEGER, status TEXT, close_reason TEXT,
  timeframe TEXT, initial_risk REAL, initial_volume REAL, scale_out_done INTEGER DEFAULT 0, peak_favorable_r REAL DEFAULT 0,
  extension_until TEXT, extended_minutes INTEGER DEFAULT 0, estimated_spread_cost REAL DEFAULT 0,
- estimated_commission_cost REAL DEFAULT 0, features TEXT NOT NULL DEFAULT '{}', mode TEXT NOT NULL DEFAULT 'main');
+ estimated_commission_cost REAL DEFAULT 0, features TEXT NOT NULL DEFAULT '{}', mode TEXT NOT NULL DEFAULT 'main',
+ account_id TEXT DEFAULT '346494979');
 CREATE TABLE IF NOT EXISTS partial_closes(
  id INTEGER PRIMARY KEY, deal_ticket INTEGER, ticket INTEGER, symbol TEXT, time TEXT, volume REAL,
  price REAL, profit REAL, commission REAL, swap REAL, reason TEXT);
@@ -153,6 +154,21 @@ class Database:
             if not applied:
                 connection.execute("UPDATE trades SET close_reason='trail' WHERE status='closed' AND close_reason='sl' AND profit>0")
                 connection.execute('INSERT INTO schema_migrations(name,applied_at) VALUES (?,?)',(migration,datetime.now(timezone.utc).isoformat()))
+            mig_acc='account_id_on_trades'
+            applied_acc=connection.execute('SELECT 1 FROM schema_migrations WHERE name=?',(mig_acc,)).fetchone()
+            if not applied_acc:
+                cols=[c[1] for c in connection.execute('PRAGMA table_info(trades)').fetchall()]
+                if 'account_id' not in cols:
+                    connection.execute("ALTER TABLE trades ADD COLUMN account_id TEXT DEFAULT '346494979'")
+                connection.execute("UPDATE trades SET account_id='346494979' WHERE account_id IS NULL OR account_id=''")
+                connection.execute('INSERT INTO schema_migrations(name,applied_at) VALUES (?,?)',(mig_acc,datetime.now(timezone.utc).isoformat()))
+    def reset_account_balance_state(self,old_account_id='346494979'):
+        """Reset per-account state depending on old balance while preserving tagged trades."""
+        with self.connect() as connection:
+            connection.execute("UPDATE trades SET account_id=? WHERE account_id IS NULL OR account_id='' OR account_id='346494979'",(str(old_account_id),))
+            connection.execute('DELETE FROM daily_stats')
+            connection.execute('DELETE FROM weekly_limits')
+            connection.execute('DELETE FROM equity_snapshots')
     @staticmethod
     def _insert(connection,table,values):
         _validate_table(table)

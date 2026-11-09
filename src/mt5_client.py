@@ -78,9 +78,12 @@ class MT5Client:
             if initialized: break
             last_error=self.mt5.last_error(); self.mt5.shutdown()
         else: raise RuntimeError(f'MT5 initialize failed after retry: {last_error}')
-        if not self.mt5.login(self.settings.mt5_login,password=self.settings.mt5_password,server=self.settings.mt5_server):
-            err=self.mt5.last_error(); self.mt5.shutdown(); raise RuntimeError(f'MT5 login failed: {err}')
-        account=self.mt5.account_info()
+        account = self.mt5.account_info()
+        # Use existing terminal session if already logged into an account; otherwise log in with credentials
+        if account is None or getattr(account, 'login', 0) == 0:
+            if not self.mt5.login(self.settings.mt5_login,password=self.settings.mt5_password,server=self.settings.mt5_server):
+                err=self.mt5.last_error(); self.mt5.shutdown(); raise RuntimeError(f'MT5 login failed: {err}')
+            account=self.mt5.account_info()
         if account is None:
             err=self.mt5.last_error(); self.mt5.shutdown(); raise RuntimeError(f'MT5 account_info failed: {err}')
         demo_mode=getattr(self.mt5,'ACCOUNT_TRADE_MODE_DEMO',0)

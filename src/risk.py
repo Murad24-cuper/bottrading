@@ -10,6 +10,9 @@ def calc_volume(equity: float, risk_pct: float, entry: float, sl: float, symbol_
     distance=abs(float(entry)-float(sl))
     tick_value=float(symbol_spec.get('trade_tick_value_loss') or symbol_spec.get('trade_tick_value') or symbol_spec.get('tick_value') or 0)
     tick_size=float(symbol_spec.get('trade_tick_size') or symbol_spec.get('tick_size') or 0)
+    contract_size=float(symbol_spec.get('trade_contract_size') or symbol_spec.get('contract_size') or 0)
+    if tick_value<=0 and contract_size>0 and tick_size>0 and distance>0:
+        tick_value=contract_size*tick_size
     minimum=float(symbol_spec.get('volume_min') or 0); step=float(symbol_spec.get('volume_step') or 0); maximum=float(symbol_spec.get('volume_max') or 0)
     if not all(math.isfinite(x) for x in (distance,tick_value,tick_size)) or distance<=0 or tick_value<=0 or tick_size<=0: return 0,'invalid stop or tick specification'
     if not math.isfinite(equity) or not math.isfinite(risk_pct) or equity<=0 or risk_pct<=0: return 0,'equity and risk percent must be positive'
@@ -33,6 +36,9 @@ def calc_volume_stressed(equity: float, risk_pct: float, entry: float, sl: float
     distance=abs(float(entry)-float(sl))
     tick_value=float(symbol_spec.get('trade_tick_value_loss') or symbol_spec.get('trade_tick_value') or symbol_spec.get('tick_value') or 0)
     tick_size=float(symbol_spec.get('trade_tick_size') or symbol_spec.get('tick_size') or 0)
+    contract_size=float(symbol_spec.get('trade_contract_size') or symbol_spec.get('contract_size') or 0)
+    if tick_value<=0 and contract_size>0 and tick_size>0 and distance>0:
+        tick_value=contract_size*tick_size
     if distance<=0 or tick_value<=0 or tick_size<=0: return 0,'invalid stop or tick specification'
     stressed_spec=dict(symbol_spec)
     stressed_spec['trade_tick_value_loss']=tick_value+float(extra_cost_per_lot)*tick_size/distance
