@@ -33,7 +33,8 @@ not reopened.
 
 Last read-only SQLite checkpoint after the restart was 2026-11-09 15:30 UTC:
 DEMO, equity 1,000.00, mode `trade`, bot status `running`, MT5 connected and
-`trade_allowed`; 10 symbols scanned, 10 movers selected, zero signals. The 41
+`trade_allowed`, hedging margin mode; 10 symbols scanned, 10 movers selected,
+zero signals. The 41
 closed main-mode trades in the database were unchanged from the existing
 readiness report. No new orders were submitted by this task.
 

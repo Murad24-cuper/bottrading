@@ -18,7 +18,8 @@ instrument facts cannot be reported safely from the available persisted data.
 
 | Fact requested | Persisted source available | Result |
 |---|---|---|
-| Account type | `bot_status.account_type` | DEMO at the last persisted checkpoint, 2026-11-09 14:14 UTC; live query not repeated |
+| Account type | `bot_status.account_type` | DEMO at 2026-11-09 15:32 UTC; equity 1,000.00 account currency |
+| Margin mode | MT5 connection log | Hedging, confirmed after the supervised restart at 2026-11-09 15:30 UTC |
 | Server name | none | unavailable |
 | Leverage | none | unavailable |
 | Commission model | estimated trade fields only; not broker schedule | unavailable |
