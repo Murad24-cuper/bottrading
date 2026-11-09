@@ -11,4 +11,5 @@ Tracking responses and fixes for findings in `docs/AUDIT.md`.
 | **CRIT-05** | Partial fill and DB reconciliation | Confirmed & Fixed | Recorded actual filled volume in `open_trade`; updated `sync_positions` and bot `_startup` to reconcile DB open trades against MT5 and close stale DB records. | `tests/test_audit_crit05.py` |
 | **HIGH-01** | Exploration & weekend locked ceiling bypass | Confirmed & Fixed | Extended `validate_risk_ceilings()` to enforce locked ceilings on `demo_exploration` and `weekend` config sections (`risk_per_trade_pct` and `max_open_positions`). | `tests/test_audit_high01.py` |
 | **HIGH-02** | Trailed profit counted as open risk | Confirmed & Fixed | Made open risk distance direction-aware (`max(0, open-stop)` for BUY, `max(0, stop-open)` for SELL) so trailed profits are not counted as portfolio risk. | `tests/test_audit_high02.py` |
+| **HIGH-03** | Chronological purge window data leakage | Confirmed & Fixed | Increased default `purge_minutes` in `chronological_splits()` from 20 to 120 minutes to match `max_hold_extended_minutes` and prevent lookahead data leakage between splits. | `tests/test_audit_high03.py` |
 

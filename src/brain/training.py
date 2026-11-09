@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 
 
-def chronological_splits(times, train_fraction=.60, validation_fraction=.20, purge_minutes=20):
+def chronological_splits(times, train_fraction=.60, validation_fraction=.20, purge_minutes=120):
     """Split unique timestamps chronologically with a max-hold purge between sets."""
     values=sorted({np.datetime64(value.replace(tzinfo=None) if value.tzinfo else value,'ns') for value in times})
     if len(values)<5: raise ValueError('At least five distinct timestamps are required')
