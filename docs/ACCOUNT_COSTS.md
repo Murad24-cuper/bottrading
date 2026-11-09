@@ -8,18 +8,19 @@ store the broker server name, leverage, symbol contract size, swap rates,
 commission schedule, or tick-level spread history. Existing history metadata
 does not contain a complete per-hour spread sample or swap fields either.
 
-The bot is already attached to the one local MT5 terminal. Opening an
-independent MT5 Python session while it is live risks replacing or disturbing
-that terminal connection. The repository has no authenticated read-only RPC
-from the running bot to request `account_info`, `symbol_info`, or tick samples.
-The prompt also forbids reading `.env`; this report does not read it and does
-not infer or echo credentials. For those reasons the requested account and
-instrument facts cannot be reported safely from the available persisted data.
+The supervised child restarted successfully and reconnected to the existing
+MT5 terminal, but the bot has no authenticated read-only request channel or
+snapshot export for `account_info`, `symbol_info`, or deal history. Reading
+these via a separate Python MT5 connection is prohibited because this is the
+single live terminal session. The prompt also forbids reading `.env`; this
+report does not read it and does not infer or echo credentials. For those
+reasons the requested account and instrument facts cannot be obtained safely
+from the available persisted data in this run.
 
 | Fact requested | Persisted source available | Result |
 |---|---|---|
 | Account type | `bot_status.account_type` | DEMO at 2026-11-09 15:32 UTC; equity 1,000.00 account currency |
-| Margin mode | MT5 connection log | Hedging, confirmed after the supervised restart at 2026-11-09 15:30 UTC |
+| Margin mode | MT5 connection log | Hedging, confirmed after the supervised restart at 2026-11-09 19:39 UTC |
 | Server name | none | unavailable |
 | Leverage | none | unavailable |
 | Commission model | estimated trade fields only; not broker schedule | unavailable |
