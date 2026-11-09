@@ -1,6 +1,7 @@
 """MT5 market and account data adapters. MT5 is passed in for easy mocking."""
 from __future__ import annotations
 from datetime import datetime,timezone,timedelta
+import math
 from .models import AccountState
 from .time_utils import server_utc_offset
 
@@ -72,20 +73,38 @@ def get_cost_estimate(mt5,symbol,volume):
     if info is None: raise RuntimeError(f'symbol_info({symbol}) failed: {mt5.last_error()}')
     spread=float(tick.ask)-float(tick.bid)
     commission_per_lot=None
+    commission_estimated=False
     try:
         deals=mt5.history_deals_get(datetime.now(timezone.utc)-timedelta(days=30),datetime.now(timezone.utc))
         samples=[]
         for deal in deals or []:
             if getattr(deal,'symbol',None)==symbol and float(getattr(deal,'volume',0) or 0)>0:
-                commission=abs(float(getattr(deal,'commission',0) or 0))
-                if commission: samples.append(commission/float(deal.volume))
-        if samples: commission_per_lot=sum(samples)/len(samples)
+                comm=getattr(deal,'commission',None)
+                if comm is not None:
+                    samples.append(abs(float(comm))/float(deal.volume))
+        if samples:
+            commission_per_lot=sum(samples)/len(samples)
+            commission_estimated=False
     except Exception:
         commission_per_lot=None
+
+    if commission_per_lot is None:
+        for attr in ('trade_commission','commission'):
+            val=getattr(info,attr,None)
+            if val is not None and math.isfinite(float(val)):
+                commission_per_lot=float(val)
+                commission_estimated=False
+                break
+
+    if commission_per_lot is None:
+        commission_per_lot=0.0
+        commission_estimated=True
+
     from .costs import estimate_round_trip_cost
     tick_size=float(getattr(info,'trade_tick_size',0) or 0); tick_value=float(getattr(info,'trade_tick_value',0) or 0)
     estimate=estimate_round_trip_cost(spread_price=spread,stop_distance=max(spread,tick_size),
         tick_size=tick_size,tick_value=tick_value,volume=float(volume),
-        commission_per_lot_round_trip=(2*commission_per_lot if commission_per_lot is not None else None))
+        commission_per_lot_round_trip=2*commission_per_lot)
     return {'cost':estimate['cost'],'spread_cost':estimate['spread_slippage'],
-            'commission':estimate['commission'],'commission_known':estimate['commission_known']}
+            'commission':estimate['commission'],'commission_known':estimate['commission_known'],
+            'commission_estimated':commission_estimated}

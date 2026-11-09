@@ -418,7 +418,7 @@ class MarketScanner:
                 if cost_cfg.get('enabled',False):
                     since=now-timedelta(hours=float(cost_cfg.get('lookback_hours',24)))
                     cell=self.db.get_spread_cell(symbol,signal.timeframe,now.hour,since,now) if hasattr(self.db,'get_spread_cell') else {'samples':0,'median_spread_price':None}
-                    feature_snapshot['cost_map']={'hour_utc':now.hour,'samples':cell['samples'],'median_spread_price':cell['median_spread_price'],'commission_known':bool(cost.get('commission_known',False))}
+                    feature_snapshot['cost_map']={'hour_utc':now.hour,'samples':cell['samples'],'median_spread_price':cell['median_spread_price'],'commission_known':bool(cost.get('commission_known',False)),'commission_estimated':bool(cost.get('commission_estimated',False))}
                     if int(cell['samples'])<int(cost_cfg.get('min_samples_per_cell',5)):
                         cost_gate_reason='cost map cell not calibrated'
                     elif not cost.get('commission_known',False):
