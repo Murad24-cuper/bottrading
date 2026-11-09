@@ -39,6 +39,13 @@ CREATE TABLE IF NOT EXISTS signals(
  id INTEGER PRIMARY KEY, time TEXT, symbol TEXT, strategy TEXT, direction TEXT,
  timeframe TEXT, confidence REAL, entry REAL, sl REAL, tp REAL, expected_cost REAL, score REAL DEFAULT 0,
  taken INTEGER, skip_reason TEXT, features TEXT NOT NULL DEFAULT '{}');
+CREATE TABLE IF NOT EXISTS scan_funnel(
+ id INTEGER PRIMARY KEY, time TEXT NOT NULL, symbols_scanned INTEGER NOT NULL DEFAULT 0,
+ filters_passed INTEGER NOT NULL DEFAULT 0, signals INTEGER NOT NULL DEFAULT 0,
+ passed_risk INTEGER NOT NULL DEFAULT 0, orders INTEGER NOT NULL DEFAULT 0,
+ filter_rejections TEXT NOT NULL DEFAULT '{}', signal_rejections TEXT NOT NULL DEFAULT '{}',
+ risk_rejections TEXT NOT NULL DEFAULT '{}', order_rejections TEXT NOT NULL DEFAULT '{}');
+CREATE INDEX IF NOT EXISTS idx_scan_funnel_time ON scan_funnel(time);
 CREATE TABLE IF NOT EXISTS spread_samples(
  time TEXT NOT NULL, symbol TEXT NOT NULL, timeframe TEXT NOT NULL,
  hour_utc INTEGER NOT NULL, spread_price REAL NOT NULL,
@@ -427,6 +434,16 @@ class Database:
     def log_event(self,level,source,message):
         with self.connect() as connection:
             connection.execute('INSERT INTO bot_events(time,level,source,message) VALUES (?,?,?,?)',(datetime.now(timezone.utc).isoformat(),str(level),str(source),str(message)))
+    def record_scan_funnel(self,**values):
+        import json
+        values.setdefault('time',datetime.now(timezone.utc).isoformat())
+        for key in ('filter_rejections','signal_rejections','risk_rejections','order_rejections'):
+            values[key]=json.dumps(values.get(key) or {},sort_keys=True)
+        columns=list(values)
+        with self.connect() as connection:
+            self._insert(connection,'scan_funnel',values)
+            cutoff=(datetime.now(timezone.utc)-timedelta(days=7)).isoformat()
+            connection.execute('DELETE FROM scan_funnel WHERE time<?',(cutoff,))
     def upsert_bot_status(self,**values):
         values.setdefault('time',datetime.now(timezone.utc).isoformat()); values['id']=1
         columns=list(values)

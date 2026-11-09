@@ -111,6 +111,27 @@ def get_top_skip_reasons_since(since_utc,path=None,limit=5):
     """Aggregate the most common recent signal rejection reasons."""
     return _rows(path,"SELECT skip_reason,COUNT(*) AS count FROM signals WHERE time>=? AND taken=0 AND COALESCE(skip_reason,'')<>'' GROUP BY skip_reason ORDER BY count DESC,skip_reason LIMIT ?",(since_utc,int(limit)))
 
+def get_pipeline_funnel(since_utc,path=None):
+    """Aggregate completed scan funnel snapshots since a UTC timestamp."""
+    import json
+    table=_rows(path,"SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='scan_funnel'")
+    if not table: return {'available':False,'cycles':0,'counts':{},'rejections':{}}
+    rows=_rows(path,'SELECT * FROM scan_funnel WHERE time>=? ORDER BY time',(str(since_utc),))
+    fields=('symbols_scanned','filters_passed','signals','passed_risk','orders')
+    counts={key:sum(int(row.get(key) or 0) for row in rows) for key in fields}
+    rejection_fields={'filters':'filter_rejections','signals':'signal_rejections','risk':'risk_rejections','orders':'order_rejections'}
+    rejections={stage:{} for stage in rejection_fields}
+    for row in rows:
+        for stage,column in rejection_fields.items():
+            try: values=json.loads(row.get(column) or '{}')
+            except (TypeError,ValueError): values={}
+            if not isinstance(values,dict): continue
+            for reason,count in values.items():
+                try: number=max(0,int(count))
+                except (TypeError,ValueError): continue
+                rejections[stage][str(reason)]=rejections[stage].get(str(reason),0)+number
+    return {'available':True,'cycles':len(rows),'counts':counts,'rejections':rejections}
+
 def get_feature_impact(path=None):
     """Return closed-trade feature observations for the analysis tab."""
     from ..analysis.feature_impact import analyze_feature_impact

@@ -180,7 +180,50 @@ def main():
         st.warning('MT5 təqvimi və internet təqvimi əlçatan deyil. USD/EUR/GBP/JPY ilə əlaqəli alətlərdə 12:30–14:30 UTC aralığında yeni əməliyyatlar bloklanır.')
     st.markdown('<style>.status-bar{color:white;padding:.75rem 1rem;border-radius:.55rem;font-weight:650;margin:.4rem 0 1rem}.metric-card{padding:1.1rem 1rem;border:1px solid rgba(128,128,128,.25);border-radius:.7rem;min-height:105px}.metric-label{font-size:.95rem;opacity:.8}.metric-value{font-size:1.7rem;font-weight:700;margin-top:.3rem}.metric-detail{font-size:.8rem;opacity:.75;margin-top:.2rem}div[data-testid="stButton"] button{min-height:3rem;font-weight:650}</style>',unsafe_allow_html=True)
 
-    tab_main, tab_report, tab_analysis, tab_prepare, tab_detail, tab_brain = st.tabs(['Əsas', 'Hesabat', 'Analiz', 'Hazırlıq', 'Ətraflı', 'Beyin'])
+    tab_main, tab_report, tab_analysis, tab_prepare, tab_detail, tab_brain, tab_pipeline = st.tabs(['Əsas', 'Hesabat', 'Analiz', 'Hazırlıq', 'Ətraflı', 'Beyin', 'Necə işləyir'])
+    with tab_pipeline:
+        st.subheader('Botun iş axını')
+        st.graphviz_chart('''digraph pipeline {
+          graph [rankdir=TB, bgcolor="transparent", pad="0.2", nodesep="0.28", ranksep="0.38"];
+          node [shape=box, style="rounded,filled", color="#6b7280", fillcolor="#eff6ff", fontname="Segoe UI", fontsize=10];
+          edge [color="#64748b", arrowsize=0.7];
+          data [label="MT5 · kotirovka / şam / tarixçə"];
+          scan [label="Skaner · sessiya / spred / hərəkət"];
+          features [label="Xüsusiyyətlər · bazar konteksti"];
+          strategy [label="Strategiyalar · MTF siqnalları"];
+          filters [label="Xəbər · xərc · confluence · sıralama"];
+          gates [label="Bot qapıları · brain shadow · qoruma"];
+          sizing [label="Gərgin stop həcmi · portfel riski · marja"];
+          order [label="İcraçı · broker yoxlaması · MT5 sifarişi"];
+          manage [label="Mövqe sinxronu · stop / hədəf / çıxış"];
+          review [label="Nəticə və proses icmalı · DB / hesabat"];
+          schedule [label="Supervisor · backup / log təmizliyi / watchdog"];
+          weekly [label="Həftəlik icmal · model təlimi təxirə salınıb · bandit skan sırasını dəyişir"];
+          data -> scan -> features -> strategy -> filters -> gates -> sizing -> order -> manage -> review;
+          review -> data [label="yeni dövr", fontsize=8];
+          schedule -> data [style=dashed, label="botu nəzarətdə saxlayır", fontsize=8];
+          review -> weekly [style=dashed];
+        }''', width='stretch', alt='MT5 bazar məlumatından sifarişə və sonrakı icmala qədər botun axını')
+        st.markdown('''**Qısa izah.** Bot öz MT5 sessiyasından bazar məlumatı alır və tarixçəni dövrlər ərzində kiçik hissələrlə yeniləyir. Skaner alətləri və strategiya siqnallarını yoxlayır; beyin hazırda müşahidə rejimindədir. Giriş sağlamlıq, xərc, qoruma və portfel risk qapılarından keçəndə həcm gərgin stop xərci ilə hesablanır və icraçı brokerə sifariş göndərir. Açıq mövqelər idarə olunur, bağlanmış əməliyyatlar nəticə və qərar prosesi üzrə qeydə alınır. Bot gündəlik yekun və həftəlik performans icmalı yaradır; supervisor ehtiyat nüsxə, log təmizliyi, yaddaş və heartbeat yoxlamalarını aparır. Həftəlik model yenidən təlimi təxirə salınıb.''')
+
+        st.subheader('Son 1 saatın canlı funnel-i')
+        funnel=queries.get_pipeline_funnel((datetime.now(timezone.utc)-timedelta(hours=1)).isoformat(),DB_PATH)
+        if not funnel.get('available'):
+            st.info('Skan funnel qeydləri hələ yaradılmayıb; botun yenilənmiş prosesi başladıqdan sonra görünəcək.')
+        else:
+            counts=funnel.get('counts',{})
+            stages=[('Rəmzlər skan edilib','symbols_scanned'),('İlkin filtri keçib','filters_passed'),('Siqnal yaradılıb','signals'),('Riskdən keçib · icra cəhdi','passed_risk'),('Sifariş açılıb','orders')]
+            cols=st.columns(len(stages))
+            for col,(label,key) in zip(cols,stages): col.metric(label,f"{int(counts.get(key,0)):,}")
+            st.caption(f"Tamamlanmış skan dövrləri: {funnel.get('cycles',0)} · Riskdən keçib sayı botun giriş qapılarını keçərək icraçıya çatan namizədlərdir; broker yenə də sifarişi rədd edə bilər.")
+            rejection_labels=[('Filtrlər','filters'),('Siqnal mərhələsi','signals'),('Bot risk qapıları','risk'),('Broker / icraçı','orders')]
+            reason_cols=st.columns(4)
+            for col,(label,key) in zip(reason_cols,rejection_labels):
+                reason_counts=funnel.get('rejections',{}).get(key,{})
+                top=max(reason_counts.items(),key=lambda item:item[1]) if reason_counts else None
+                col.markdown(f"**{label} · əsas imtina səbəbi**")
+                col.write(f"{translate_message(top[0])} · {top[1]}" if top else 'Son 1 saatda imtina yoxdur.')
+
     with tab_main:
         controls=st.columns([1.4,1.15,1.4])
         if st.session_state.get('action_message'):

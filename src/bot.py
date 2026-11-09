@@ -77,6 +77,7 @@ class TradingBot:
         self._low_margin_alerted=False
         self._order_rejection_count=0
         self._order_rejection_alerted=False
+        self._cycle_funnel=None
         self._calendar_failure_alerted=False
     @property
     def live(self): return self.settings.config['live']
@@ -308,7 +309,10 @@ class TradingBot:
             except Exception as exc:
                 self.db.update_command(command_id,'failed',str(exc))
                 self._event('ERROR',f'Command {command_id} ({action}) failed: {exc}')
-    def _signal_update(self,candidate,taken,reason):
+    def _signal_update(self,candidate,taken,reason,stage='risk'):
+        if not taken and reason and self._cycle_funnel is not None:
+            key='order_rejections' if stage=='order' else 'risk_rejections'
+            self._cycle_funnel[key][str(reason)]+=1
         row_id=getattr(candidate,'signal_row_id',None)
         if row_id is not None: self.db.update_signal(row_id,taken=int(taken),skip_reason=reason or '')
         else:
@@ -467,6 +471,7 @@ class TradingBot:
                       'stressed_risk_sized':bool(new_risk>0),'risk_gate_passed':True,
                       'cost_gate_passed':bool(candidate_features.get('cost_map',{}).get('median_cost_stop_ratio',0)<.10 and candidate_features.get('cost_map',{}).get('commission_known',True))},
             'outcome_r':None,'outcome_grade':'pending'}
+        if self._cycle_funnel is not None: self._cycle_funnel['passed_risk']+=1
         result=self.executor.open_trade(signal,volume,expected_cost=candidate.cost,features=getattr(candidate,'features',{}))
         if not result.success:
             self._order_rejection_count+=1
@@ -475,7 +480,8 @@ class TradingBot:
                 message=f'Ardıcıl {self._order_rejection_count} əməliyyat sorğusu rədd edildi; yeni girişləri yoxlayın. Son cavab: {result.message[:180]}'
                 self._event('CRITICAL',message); self._notify('repeated_order_rejections',message)
                 self._order_rejection_alerted=True
-            self._signal_update(candidate,False,result.message); return False
+            self._signal_update(candidate,False,result.message,stage='order'); return False
+        if self._cycle_funnel is not None: self._cycle_funnel['orders']+=1
         self._order_rejection_count=0; self._order_rejection_alerted=False
         self._cycle_reservations.append({'position':{'symbol':candidate.symbol,'asset_group':candidate.asset_group,'exposure_group':underlying_group(candidate.symbol,candidate.asset_group),'underlying':underlying_key(candidate.symbol),'direction':signal.direction,'currency_base':spec.get('currency_base',''),'currency_profit':spec.get('currency_profit',''),'profit':0.0},'margin':float(margin),'risk_money':float(new_risk)})
         self._signal_update(candidate,True,'')
@@ -617,6 +623,11 @@ class TradingBot:
         scan=getattr(self.scanner,'scan',None) or getattr(self.scanner,'scan_once')
         candidates=scan()
         scan_stats=getattr(self.scanner,'last_scan_stats',{})
+        signal_rejections=Counter()
+        for reasons in (scan_stats.get('strategy_diagnostics') or {}).values():
+            signal_rejections.update(reasons)
+        self._cycle_funnel={'passed_risk':0,'orders':0,'signal_rejections':signal_rejections,
+            'risk_rejections':Counter(),'order_rejections':Counter()}
         groups_open=scan_stats.get('groups_open',{})
         market_closed=bool(scan_stats.get('scan_complete',False)) and not groups_open
         if market_closed and not self._market_closed_logged:
@@ -643,6 +654,16 @@ class TradingBot:
         for candidate in candidates:
             if self._halt_requested(): return CycleResult(False,0,market_closed)
             self._candidate(candidate,now,allow_entries)
+        if hasattr(self.db,'record_scan_funnel'):
+            self.db.record_scan_funnel(time=now.isoformat(),symbols_scanned=int(scan_stats.get('symbols_scanned',0)),
+                filters_passed=int(scan_stats.get('stage1_passed',0)),signals=int(scan_stats.get('signals',0)),
+                passed_risk=int(self._cycle_funnel['passed_risk'] if self._cycle_funnel else 0),
+                orders=int(self._cycle_funnel['orders'] if self._cycle_funnel else 0),
+                filter_rejections=scan_stats.get('stage1_rejections',{}),
+                signal_rejections=self._cycle_funnel['signal_rejections'] if self._cycle_funnel else {},
+                risk_rejections=dict(self._cycle_funnel['risk_rejections']) if self._cycle_funnel else {},
+                order_rejections=dict(self._cycle_funnel['order_rejections']) if self._cycle_funnel else {})
+        self._cycle_funnel=None
         state=get_account_state(self.client.mt5); positions=self._owned_positions()
         open_by_group=Counter((self.scanner.symbols.get_asset_group(p.symbol) if self.scanner and getattr(self.scanner,'symbols',None) else 'other') for p in positions)
         self._event('INFO',f'Open bot positions by asset group: {dict(open_by_group)}')
