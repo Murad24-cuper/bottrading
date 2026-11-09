@@ -490,9 +490,13 @@ class Database:
         if status not in {'pending','running','done','failed','expired'}: raise ValueError('Invalid command status')
         with self.connect() as connection:
             connection.execute('UPDATE commands SET status=?,message=?,processed_time=? WHERE id=?',(status,str(message),datetime.now(timezone.utc).isoformat() if status in {'done','failed','expired'} else None,command_id))
-    def get_pnl_since(self,dt):
+    def get_pnl_since(self,dt,magic=None):
         stamp=dt.isoformat() if hasattr(dt,'isoformat') else str(dt)
         with self.connect() as connection:
-            closed=float(connection.execute("SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) FROM trades WHERE status='closed' AND close_time>=?",(stamp,)).fetchone()[0])
-            partial=float(connection.execute("SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) FROM partial_closes WHERE time>=?",(stamp,)).fetchone()[0])
+            if magic is None:
+                closed=float(connection.execute("SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) FROM trades WHERE status='closed' AND close_time>=?",(stamp,)).fetchone()[0])
+                partial=float(connection.execute("SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) FROM partial_closes WHERE time>=?",(stamp,)).fetchone()[0])
+            else:
+                closed=float(connection.execute("SELECT COALESCE(SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)),0) FROM trades WHERE status='closed' AND close_time>=? AND magic=?",(stamp,int(magic))).fetchone()[0])
+                partial=float(connection.execute("SELECT COALESCE(SUM(COALESCE(p.profit,0)+COALESCE(p.commission,0)+COALESCE(p.swap,0)),0) FROM partial_closes p JOIN trades t ON p.ticket=t.ticket WHERE p.time>=? AND t.magic=?",(stamp,int(magic))).fetchone()[0])
             return closed+partial

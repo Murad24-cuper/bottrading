@@ -342,7 +342,8 @@ class TradingBot:
     def _pnl_periods(self,now):
         day=now.replace(hour=0,minute=0,second=0,microsecond=0)
         monday=(now-timedelta(days=now.weekday())).replace(hour=0,minute=0,second=0,microsecond=0)
-        return self.db.get_pnl_since(day),self.db.get_pnl_since(monday)
+        magic=getattr(self.settings,'magic_number',None)
+        return self.db.get_pnl_since(day,magic=magic),self.db.get_pnl_since(monday,magic=magic)
     def _candidate(self,candidate,now,allow_entries):
         live_mode=self.live['mode']=='trade'
         exploration_cfg=self.settings.config.get('demo_exploration',{})
