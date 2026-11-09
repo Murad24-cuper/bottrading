@@ -5,6 +5,7 @@ import pandas as pd
 from src.db import Database
 from src.models import Signal
 from src.scanner import Candidate,MarketScanner,adaptive_top_movers,expected_value_score,rank_candidates,select_diverse_movers,weekend_index_names
+from src.news import CalendarEvent
 
 def candidate(symbol,score):
     signal=Signal(symbol,'buy','M1',10,9,12,.8,'test')
@@ -18,6 +19,27 @@ def test_score_and_rank_discard_nonpositive_and_choose_best_per_symbol():
 def test_scan_breadth_expands_below_target_without_forcing_orders():
     assert adaptive_top_movers(40,15,0)==100
     assert adaptive_top_movers(40,15,10)==60
+
+
+def test_news_events_are_logged_once_per_calendar_refresh(monkeypatch,tmp_path):
+    from datetime import timedelta
+    import time
+    import src.news as news
+    now=datetime(2026,11,9,15,tzinfo=timezone.utc)
+    event=CalendarEvent(now+timedelta(hours=1),'USD','HIGH','CPI')
+    class DB:
+        def __init__(self): self.rows=[]
+        def log_event(self,level,source,message): self.rows.append((level,source,message))
+    scanner=MarketScanner.__new__(MarketScanner)
+    scanner.mt5=object(); scanner.settings=SimpleNamespace(config={'news':{'enabled':True,'refresh_hours':6,'stale_after_hours':24}},root=tmp_path)
+    scanner.db=DB(); scanner._news_loaded_at=0; scanner._news_notice_at=0; scanner._news_logged_updated=None; scanner._news_events_logged_marker=None
+    monkeypatch.setattr(news,'terminal_calendar_path',lambda mt5:None)
+    updated=now-timedelta(minutes=1)
+    monkeypatch.setattr(news,'load_calendar',lambda *args,**kwargs:([event],updated,'ForexFactory cache',.02))
+    ticks=iter((100.0,100.0,161.0,161.0)); monkeypatch.setattr(time,'monotonic',lambda:next(ticks))
+    scanner._load_news_calendar(now); scanner._load_news_calendar(now+timedelta(minutes=1))
+    assert sum('Yaxın xəbər' in row[2] for row in scanner.db.rows)==1
+    assert sum('Calendar source active' in row[2] for row in scanner.db.rows)==1
     assert adaptive_top_movers(40,15,15)==40
     assert adaptive_top_movers(40,15,20)==40
 

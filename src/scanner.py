@@ -93,7 +93,7 @@ class MarketScanner:
         self.mt5,self.settings,self.db=mt5,settings,db
         self.symbols=symbol_service or SymbolService(mt5,settings)
         self._cache={}; self._cursor=0; self._strategies=load_strategies(settings); self.last_universe_size=0; self._weekend_index_signature=None
-        self._volatility_cache={}; self._spread_cache={}; self.last_scan_stats={}; self.last_strategy_diagnostics={}; self._news_events=[]; self._news_updated=None; self._news_source='not loaded'; self._news_age_hours=None; self._news_loaded_at=0.0; self._news_notice_at=0.0; self._news_logged_updated=None
+        self._volatility_cache={}; self._spread_cache={}; self.last_scan_stats={}; self.last_strategy_diagnostics={}; self._news_events=[]; self._news_updated=None; self._news_source='not loaded'; self._news_age_hours=None; self._news_loaded_at=0.0; self._news_notice_at=0.0; self._news_logged_updated=None; self._news_events_logged_marker=None
         self._brain_rows=self._load_brain_rows()
         self._brain_pca=None
         pca_path=(getattr(self.settings,'data_dir',self.settings.root/'data')/'brain'/'pca.json')
@@ -127,12 +127,13 @@ class MarketScanner:
         if not stale and source_marker!=self._news_logged_updated:
             self.db.log_event('INFO','news',f'Calendar source active · {self._news_source} · age {source_age}')
             self._news_logged_updated=source_marker
-        if not stale and self._news_updated!=self._news_logged_updated:
+        if not stale and source_marker!=self._news_events_logged_marker:
             from .news import CURRENCY_SYMBOLS
             upcoming=[event for event in self._news_events if now<=event.time<=now+timedelta(hours=24)]
             for event in upcoming[:20]:
                 symbols=', '.join(CURRENCY_SYMBOLS.get(event.currency,()))
                 self.db.log_event('INFO','news',f"Yaxın xəbər · {event.time.isoformat()} · {event.currency} · {event.importance} · {event.name} · əlaqəli alətlər: {symbols}")
+            self._news_events_logged_marker=source_marker
         if stale and time.monotonic()-self._news_notice_at>=1800:
             self._news_notice_at=time.monotonic()
             self.db.log_event('WARNING','news','Both calendar sources unavailable or older than 24 hours; conservative 12:30-14:30 UTC entry filter is active for USD/EUR/GBP/JPY instruments')
