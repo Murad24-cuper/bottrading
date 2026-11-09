@@ -22,4 +22,4 @@ def fibonacci_retracement(frame: pd.DataFrame, timeframe: str, lookback: int=100
     nearest=min(levels,key=lambda x:x['distance_atr'] if x['distance_atr'] is not None else float('inf'))
     touched=[level for level in levels if float(last.low)<=level['price']<=float(last.high)]
     rejection=bool(touched and ((up and float(last.close)>float(last.open)) or (not up and float(last.close)<float(last.open))))
-    return {'timeframe':timeframe,'swing_direction':'up' if up else 'down','levels':levels,'nearest':nearest,'reacting':rejection,'reaction_level':min(touched,key=lambda x:x['distance_atr']) if rejection else None}
+    return {'timeframe':timeframe,'swing_direction':'up' if up else 'down','levels':levels,'nearest':nearest,'reacting':rejection,'reaction_level':min(touched,key=lambda x:x['distance_atr'] if x['distance_atr'] is not None else float('inf')) if rejection else None}
