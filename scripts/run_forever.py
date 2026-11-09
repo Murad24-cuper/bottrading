@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import os
+import logging
 import subprocess
 import sys
 import time
@@ -24,6 +25,21 @@ from src.windows_runtime import set_system_awake
 from src.notify import TelegramNotifier
 
 log = get_logger('bot.supervisor')
+
+def bind_console_handlers(stream) -> int:
+    """Attach console handlers created before detached streams were opened."""
+    if hasattr(stream,'reconfigure'):
+        try: stream.reconfigure(encoding='utf-8',errors='backslashreplace')
+        except (OSError,ValueError): pass
+    loggers=[logging.getLogger()]
+    loggers.extend(value for value in logging.Logger.manager.loggerDict.values() if isinstance(value,logging.Logger))
+    changed=0
+    for logger in loggers:
+        for handler in logger.handlers:
+            if isinstance(handler,logging.StreamHandler):
+                handler.stream=stream
+                changed+=1
+    return changed
 
 def health_check_due(last_check: float, now: float, interval: float=60.0) -> bool:
     """Return whether the supervisor's periodic child-health check is due."""
@@ -63,6 +79,7 @@ def main() -> int:
     if sys.stdout is None or sys.stderr is None:
         _,log_dir=project_paths(ROOT); output=log_dir/'bot_stdout.log'; output.parent.mkdir(parents=True,exist_ok=True)
         stream=output.open('a',encoding='utf-8',buffering=1); sys.stdout=stream; sys.stderr=stream
+    bind_console_handlers(sys.stderr)
     install_crash_handlers()
     settings = load_settings()
     assert_runtime_location(settings.config)

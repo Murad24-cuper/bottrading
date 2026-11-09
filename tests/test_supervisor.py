@@ -41,6 +41,21 @@ def test_supervisor_health_check_interval():
     assert health_check_due(10,70)
     assert utc_now().utcoffset().total_seconds()==0
 
+def test_detached_console_handlers_rebind_to_utf8_log_stream():
+    import io,logging
+    from scripts.run_forever import bind_console_handlers
+    logger=logging.getLogger('test.detached.console')
+    logger.setLevel(logging.INFO)
+    handler=logging.StreamHandler(None); logger.addHandler(handler)
+    stream=io.StringIO()
+    try:
+        assert bind_console_handlers(stream)>=1
+        logger.info('açıq')
+        assert handler.stream is stream
+        assert 'açıq' in stream.getvalue()
+    finally:
+        logger.removeHandler(handler)
+
 
 def test_supervisor_stops_after_restart_limit_and_logs_critical():
     calls=[]; events=[]; now=[0]
