@@ -6,7 +6,7 @@ from .models import TradeResult
 from .logger import get_logger
 from .time_utils import mt5_epoch_to_utc
 from . import market_data, indicators as ind
-from .risk import calc_volume
+from .risk import calc_volume, calc_volume_stressed
 from .trade_rules import adverse_exit_score, continuation_metrics, may_extend, scale_out_volume, should_exit_early, stagnation_due, stop_only_tightens, stop_protects_profit
 
 log=get_logger(__name__)
@@ -75,7 +75,27 @@ class Executor:
         if result and result.retcode in (getattr(m,'TRADE_RETCODE_REQUOTE',10004),getattr(m,'TRADE_RETCODE_PRICE_CHANGED',10020)):
             tick=m.symbol_info_tick(signal.symbol)
             if tick is None: return self._failure(f'Retry tick unavailable: {m.last_error()}',volume,result.retcode)
-            req['price']=tick.ask if buy else tick.bid
+            new_price=tick.ask if buy else tick.bid
+            if buy and not signal.sl_price<new_price<signal.tp_price:
+                return self._failure(f'Requote cancelled: price {new_price} violates stop/target side for buy',volume,retcode=result.retcode)
+            if not buy and not signal.tp_price<new_price<signal.sl_price:
+                return self._failure(f'Requote cancelled: price {new_price} violates stop/target side for sell',volume,retcode=result.retcode)
+            if distance and (abs(new_price-signal.sl_price)<distance or abs(new_price-signal.tp_price)<distance):
+                return self._failure('Requote cancelled: SL/TP inside broker trade_stops_level',volume,retcode=result.retcode)
+            costs=expected_cost if isinstance(expected_cost,dict) else {}
+            cost_per_lot=float(costs.get('cost',0) or 0)/float(volume) if float(volume)>0 else 0.0
+            if cost_per_lot>0:
+                new_safe_volume,why=calc_volume_stressed(float(account.equity),self.settings.risk.risk_per_trade_pct,float(new_price),signal.sl_price,info._asdict(),cost_per_lot)
+            else:
+                new_safe_volume,why=calc_volume(float(account.equity),self.settings.risk.risk_per_trade_pct,float(new_price),signal.sl_price,info._asdict())
+            if new_safe_volume<=0 or new_safe_volume<minimum:
+                return self._failure(f'Requote cancelled: safe volume below minimum lot ({why})',volume,retcode=result.retcode)
+            new_volume=round(min(float(volume),float(new_safe_volume)),8)
+            if new_volume<minimum:
+                return self._failure(f'Requote cancelled: volume {new_volume} below minimum lot {minimum}',volume,retcode=result.retcode)
+            volume=new_volume
+            req['price']=new_price
+            req['volume']=float(volume)
             result=m.order_send(req)
         if result is None: return self._failure(f'order_send failed: {m.last_error()}',volume)
         if result.retcode!=m.TRADE_RETCODE_DONE: return self._failure(f'order_send rejected ({result.retcode}): {result.comment}',volume,retcode=result.retcode)
