@@ -104,17 +104,18 @@ class Executor:
         opened_p=next((x for x in (m.positions_get() or []) if (int(x.ticket)==ticket or int(getattr(x,'identifier',-1) or -1)==ticket) and int(getattr(x,'magic',0))==self.settings.magic_number),None)
         if opened_p and not float(getattr(opened_p,'sl',0) or 0):
             self.remediate_missing_sl(opened_p,planned_sl=signal.sl_price)
+        filled_volume=float(getattr(opened_p,'volume',getattr(result,'volume',volume)) or volume)
         now=datetime.now(timezone.utc).isoformat()
         try:
             costs=expected_cost if isinstance(expected_cost,dict) else {}
             import json
             trade_features=dict(features or {}); trade_mode=str(trade_features.pop('trade_mode','main'))
-            self.db.insert_trade(ticket=ticket,symbol=signal.symbol,asset_group=self._asset_group(signal.symbol),direction=signal.direction,volume=volume,initial_volume=volume,open_time=now,open_price=result.price,sl=signal.sl_price,tp=signal.tp_price,profit=0,commission=0,swap=0,strategy=signal.strategy_name,reason=signal.reason,magic=self.settings.magic_number,status='open',timeframe=signal.timeframe,initial_risk=abs(float(result.price)-float(signal.sl_price)),scale_out_done=0,peak_favorable_r=0,estimated_spread_cost=float(costs.get('spread_cost',0) or 0),estimated_commission_cost=float(costs.get('commission',0) or 0),features=json.dumps(trade_features,sort_keys=True,default=str),mode=trade_mode)
+            self.db.insert_trade(ticket=ticket,symbol=signal.symbol,asset_group=self._asset_group(signal.symbol),direction=signal.direction,volume=filled_volume,initial_volume=filled_volume,open_time=now,open_price=result.price,sl=signal.sl_price,tp=signal.tp_price,profit=0,commission=0,swap=0,strategy=signal.strategy_name,reason=signal.reason,magic=self.settings.magic_number,status='open',timeframe=signal.timeframe,initial_risk=abs(float(result.price)-float(signal.sl_price)),scale_out_done=0,peak_favorable_r=0,estimated_spread_cost=float(costs.get('spread_cost',0) or 0),estimated_commission_cost=float(costs.get('commission',0) or 0),features=json.dumps(trade_features,sort_keys=True,default=str),mode=trade_mode)
         except Exception as exc:
             # The broker position is open; surface the persistence failure loudly for reconciliation.
             self._event(f'CRITICAL: opened ticket {ticket} but could not write trade row: {exc}','ERROR')
-        self._event(f'Opened {signal.direction} {signal.symbol} ticket={ticket} volume={volume}')
-        return TradeResult(True,ticket,result.price,volume,result.retcode,str(result.comment))
+        self._event(f'Opened {signal.direction} {signal.symbol} ticket={ticket} volume={filled_volume}')
+        return TradeResult(True,ticket,result.price,filled_volume,result.retcode,str(result.comment))
     def close_position(self,ticket,reason):
         m=self.mt5
         if reason not in {'tp','partial_tp','trail','early_exit','momentum_lost','stagnant','sl','time','session_close','manual','kill','weekly_stop'}: return self._failure(f'Refused close: unsupported reason {reason!r}',ticket=ticket)
@@ -453,7 +454,16 @@ class Executor:
             forced=ticket in reasons
             if int(row.get('magic') or 0)!=self.settings.magic_number or (ticket in live and not forced): continue
             deals=self._history(ticket)
-            if not deals and ticket not in reasons: continue
+            if not deals and ticket not in reasons:
+                fallback=fallbacks.get(ticket,{})
+                close_price=float(fallback.get('close_price',row.get('open_price') or 0))
+                close_time=datetime.now(timezone.utc).isoformat()
+                profit=float(fallback.get('profit',0)); commission=0.0; swap=float(fallback.get('swap',0))
+                close_reason='reconciled_stale'
+                self.db.update_trade_close(ticket,close_time=close_time,close_price=close_price,profit=profit,commission=commission,swap=swap,close_reason=close_reason)
+                self._event(f'Closed stale DB record ticket={ticket} (position no longer on MT5)','WARNING')
+                reconciled.append(ticket)
+                continue
             closing=[d for d in deals if getattr(d,'entry',None) in (getattr(self.mt5,'DEAL_ENTRY_OUT',1),getattr(self.mt5,'DEAL_ENTRY_OUT_BY',3),getattr(self.mt5,'DEAL_ENTRY_INOUT',2))]
             initial_volume=float(row.get('initial_volume') or row.get('volume') or 0)
             partial_tickets=self.db.get_partial_deal_tickets(ticket)
@@ -467,6 +477,8 @@ class Executor:
                     if deal_ticket: partial_tickets.add(deal_ticket)
                     accumulated+=deal_volume
             final_closing=[d for d in closing if int(getattr(d,'ticket',0) or 0) not in partial_tickets]
+            if ticket not in live and not final_closing and closing:
+                final_closing=[closing[-1]]
             source=final_closing or closing or deals
             if source:
                 last=source[-1]; close_price=float(last.price); close_time=mt5_epoch_to_utc(last.time,self.mt5).isoformat()

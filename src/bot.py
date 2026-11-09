@@ -250,9 +250,12 @@ class TradingBot:
     def _startup(self,state):
         if self._started: return
         if self.executor:
+            if hasattr(self.executor,'sync_positions'):
+                self.executor.sync_positions()
             for p in self._owned_positions():
                 if not float(getattr(p,'sl',0) or 0):
-                    self.executor.remediate_missing_sl(p)
+                    if hasattr(self.executor,'remediate_missing_sl'):
+                        self.executor.remediate_missing_sl(p)
         enabled=[s.name for s in getattr(self.scanner,'_strategies',[])] if self.scanner else []
         allowed=[name for name in enabled if name in self.live['strategies']]
         self._event('INFO',f"Bot started mode={self.live['mode']} account={self._last_account_type} equity={state.equity:.2f} enabled={enabled} allowed_live={allowed}")
