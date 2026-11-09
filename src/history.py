@@ -8,6 +8,7 @@ import hashlib
 import pandas as pd
 from .symbols import SymbolService
 from .time_utils import server_utc_offset
+from . import parquet_compat
 
 TF_MINUTES={'M1':1,'M5':5,'M15':15,'H1':60,'H4':240,'D1':1440}
 

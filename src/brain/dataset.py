@@ -9,6 +9,7 @@ import pandas as pd
 
 from .memory import situation_vector
 from .training import label_trade, split_name
+from .. import parquet_compat
 
 
 def _as_utc_index(frame: pd.DataFrame) -> pd.DataFrame:
