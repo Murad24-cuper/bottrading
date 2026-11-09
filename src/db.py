@@ -2,8 +2,27 @@
 from __future__ import annotations
 from datetime import datetime,timezone,date,timedelta
 from pathlib import Path
+import re
 import sqlite3
 import time
+
+_IDENT_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+ALLOWED_TABLES = {
+    'trades', 'signals', 'daily_stats', 'equity_snapshots', 'bot_events',
+    'bot_status', 'commands', 'telegram_updates', 'adaptive_gates',
+    'weekend_control', 'partial_closes', 'spread_samples', 'scan_funnel',
+    'maintenance_runs', 'daily_report', 'weekly_limits', 'schema_migrations'
+}
+
+def _validate_identifier(name: str, kind: str = "column") -> str:
+    if not isinstance(name, str) or not _IDENT_RE.match(name):
+        raise ValueError(f"Invalid {kind} identifier: {name!r}")
+    return name
+
+def _validate_table(table: str) -> str:
+    if table not in ALLOWED_TABLES:
+        raise ValueError(f"Invalid table name: {table!r}")
+    return table
 
 class _RetryConnection(sqlite3.Connection):
     """Retry one transient SQLite lock once after the configured busy wait."""
@@ -120,19 +139,23 @@ class Database:
                 connection.execute('INSERT INTO schema_migrations(name,applied_at) VALUES (?,?)',(migration,datetime.now(timezone.utc).isoformat()))
     @staticmethod
     def _insert(connection,table,values):
+        _validate_table(table)
         columns=list(values)
         if not columns: raise ValueError('At least one value is required')
+        for k in columns: _validate_identifier(k, 'column')
         connection.execute(f"INSERT INTO {table} ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",[values[k] for k in columns])
     def insert_trade(self,**values):
         with self.connect() as connection: self._insert(connection,'trades',values)
     def update_trade_close(self,ticket,**values):
         values['status']='closed'; columns=list(values)
+        for k in columns: _validate_identifier(k, 'column')
         with self.connect() as connection:
             result=connection.execute(f"UPDATE trades SET {','.join(k+'=?' for k in columns)} WHERE ticket=?",[values[k] for k in columns]+[ticket])
             if not result.rowcount: raise KeyError(f'No trade row for ticket {ticket}')
     def update_open_trade(self,ticket,**values):
         if not values: return
         columns=list(values)
+        for k in columns: _validate_identifier(k, 'column')
         with self.connect() as connection:
             result=connection.execute(f"UPDATE trades SET {','.join(k+'=?' for k in columns)} WHERE ticket=? AND status='open'",[values[k] for k in columns]+[ticket])
             return result.rowcount
@@ -321,6 +344,7 @@ class Database:
                     (values.get('symbol'),values.get('strategy'),values.get('direction'),values.get('skip_reason'))).fetchone()
                 if prior:
                     columns=[key for key in values if key not in {'symbol','strategy','direction'}]
+                    for k in columns: _validate_identifier(k, 'column')
                     connection.execute(f"UPDATE signals SET {','.join(key+'=?' for key in columns)} WHERE id=?",
                                        [values[key] for key in columns]+[int(prior['id'])])
                     return int(prior['id'])
@@ -344,6 +368,7 @@ class Database:
     def insert_partial_close(self,**values):
         values.setdefault('time',datetime.now(timezone.utc).isoformat())
         columns=list(values)
+        for k in columns: _validate_identifier(k, 'column')
         with self.connect() as connection:
             cursor=connection.execute(f"INSERT OR IGNORE INTO partial_closes ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",[values[key] for key in columns])
             return cursor.rowcount
@@ -421,11 +446,13 @@ class Database:
     def update_signal(self,signal_id,**values):
         if not values: return
         columns=list(values)
+        for k in columns: _validate_identifier(k, 'column')
         with self.connect() as connection:
             connection.execute(f"UPDATE signals SET {','.join(k+'=?' for k in columns)} WHERE id=?",[values[k] for k in columns]+[signal_id])
     def upsert_daily_stats(self,**values):
         columns=list(values)
         if 'date' not in values: raise ValueError('daily_stats.date is required')
+        for k in columns: _validate_identifier(k, 'column')
         with self.connect() as connection:
             connection.execute(f"INSERT INTO daily_stats ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)}) ON CONFLICT(date) DO UPDATE SET {','.join(k+'=excluded.'+k for k in columns if k!='date')}",[values[k] for k in columns])
     def insert_equity_snapshot(self,**values):
@@ -447,6 +474,7 @@ class Database:
     def upsert_bot_status(self,**values):
         values.setdefault('time',datetime.now(timezone.utc).isoformat()); values['id']=1
         columns=list(values)
+        for k in columns: _validate_identifier(k, 'column')
         with self.connect() as connection:
             connection.execute(f"INSERT INTO bot_status ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)}) ON CONFLICT(id) DO UPDATE SET {','.join(k+'=excluded.'+k for k in columns if k!='id')}",[values[k] for k in columns])
     def get_bot_status(self):
