@@ -22,6 +22,13 @@ def install_crash_handlers():
     _,log_dir=project_paths(ROOT); log_dir.mkdir(parents=True,exist_ok=True)
     _crash_file=(log_dir/'crash.log').open('a',encoding='utf-8',buffering=1)
     faulthandler.enable(file=_crash_file,all_threads=True)
+    import signal
+    if hasattr(signal, 'SIGBREAK'):
+        try: faulthandler.register(signal.SIGBREAK, file=_crash_file, all_threads=True, chain=False)
+        except Exception: pass
+    if hasattr(signal, 'SIGUSR1'):
+        try: faulthandler.register(signal.SIGUSR1, file=_crash_file, all_threads=True, chain=False)
+        except Exception: pass
     old_sys_hook=sys.excepthook
     def handle_exception(exc_type,exc_value,exc_traceback):
         if exc_type is SystemExit: return old_sys_hook(exc_type,exc_value,exc_traceback)

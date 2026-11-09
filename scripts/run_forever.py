@@ -181,7 +181,7 @@ def main() -> int:
                 run_scheduler_tick(utc_now(),settings.config,completed,{'daily_backup':daily_backup_job,'hourly_history':hourly_history_job,'weekly_maintenance':weekly_job})
             if hang_watchdog_should_terminate(heartbeat_is_stale(settings.db_path,hang_seconds),time.monotonic()-child_started,hang_seconds):
                 reason=f'heartbeat older than {hang_seconds}s; child PID={child.pid}'
-                write_hang_report(settings.logs_dir,reason)
+                write_hang_report(settings.logs_dir,reason,child_pid=child.pid)
                 emit('CRITICAL',f'Hang watchdog: {reason}; terminating child for supervised restart')
                 try: child.terminate(); child.wait(timeout=5)
                 except subprocess.TimeoutExpired: child.kill(); child.wait()

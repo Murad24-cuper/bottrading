@@ -34,11 +34,32 @@ def hang_watchdog_should_terminate(heartbeat_stale: bool, child_runtime_seconds:
     """Ignore a stale persisted heartbeat until the newly launched child has had time to start."""
     return bool(heartbeat_stale and float(child_runtime_seconds)>=int(hang_seconds))
 
-def write_hang_report(log_dir: str | Path, reason: str) -> None:
-    """Capture recent bot log lines and the supervisor's current stack."""
+def request_child_traceback(child_pid: int) -> bool:
+    """Signal child process to dump all thread tracebacks to crash.log before termination."""
+    import os
+    import signal
+    try:
+        if hasattr(signal, 'CTRL_BREAK_EVENT'):
+            os.kill(child_pid, signal.CTRL_BREAK_EVENT)
+            return True
+        elif hasattr(signal, 'SIGUSR1'):
+            os.kill(child_pid, signal.SIGUSR1)
+            return True
+    except (OSError, ProcessLookupError):
+        pass
+    return False
+
+def write_hang_report(log_dir: str | Path, reason: str, child_pid: int | None = None) -> None:
+    """Capture recent bot log lines, request child thread traceback, and record supervisor stack."""
     root=Path(log_dir); root.mkdir(parents=True,exist_ok=True)
+    if child_pid:
+        request_child_traceback(child_pid)
+        time.sleep(0.5)
     with (root/'crash.log').open('a',encoding='utf-8') as out:
-        out.write(f"\nHANG WATCHDOG {datetime.now(timezone.utc).isoformat()} {reason}\n--- last bot.log lines ---\n")
+        out.write(f"\nHANG WATCHDOG {datetime.now(timezone.utc).isoformat()} {reason}\n")
+        if child_pid:
+            out.write(f"--- requested child stack dump for PID={child_pid} ---\n")
+        out.write("--- last bot.log lines ---\n")
         try: out.writelines((root/'bot.log').read_text(encoding='utf-8',errors='replace').splitlines(keepends=True)[-50:])
         except OSError as exc: out.write(f'bot.log unavailable: {exc}\n')
         out.write('--- supervisor faulthandler stack ---\n')
