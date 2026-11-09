@@ -90,6 +90,34 @@ def test_demo_exploration_candidate_is_sized_and_tagged_separately(tmp_path):
     assert item.features['trade_mode']=='exploration'
     assert executor.opened[0][1]<=1.0
 
+def test_exploration_can_collect_demo_data_through_adaptive_strategy_gate(tmp_path):
+    bot,db,_,_,_,executor,item=make_bot(tmp_path,'trade',[])
+    bot.settings.config['demo_exploration']={'enabled':True,'risk_per_trade_pct':.1,'max_open_positions':5,'max_trades_per_day':40,'min_confidence':.45,'mtf_min_agree':2}
+    item.features={'exploration':{'eligible':True,'soft_failures':['normal strategies disabled']}}
+    now=datetime.now(timezone.utc)
+    for i in range(20):
+        stamp=(now-timedelta(days=1,seconds=i)).isoformat()
+        db.insert_trade(ticket=1000+i,symbol=f'X{i}',asset_group='forex',direction='buy',volume=.01,
+            open_time=stamp,close_time=stamp,open_price=10,close_price=9,sl=9,tp=12,profit=-1,
+            commission=0,swap=0,strategy='breakout',magic=bot.settings.magic_number,status='closed')
+    db.refresh_adaptive_gates(20,24,bot.settings.magic_number,now)
+    bot.cycle()
+    assert len(executor.opened)==1
+    assert item.features['trade_mode']=='exploration'
+
+def test_exploration_still_obeys_daily_loss_limit(tmp_path):
+    bot,db,_,_,_,executor,item=make_bot(tmp_path,'trade',[])
+    bot.settings.config['demo_exploration']={'enabled':True,'risk_per_trade_pct':.1,'max_open_positions':5,'max_trades_per_day':40,'min_confidence':.45,'mtf_min_agree':2}
+    item.features={'exploration':{'eligible':True,'soft_failures':['normal strategies disabled']}}
+    stamp=datetime.now(timezone.utc).replace(hour=1).isoformat()
+    db.insert_trade(ticket=2001,symbol='GBPUSD',asset_group='forex',direction='buy',volume=.01,
+        open_time=stamp,close_time=stamp,open_price=10,close_price=9,sl=9,tp=12,profit=-40,
+        commission=0,swap=0,strategy='breakout',magic=bot.settings.magic_number,status='closed')
+    bot.cycle()
+    assert executor.opened==[]
+    with db.connect() as connection:
+        assert connection.execute('SELECT skip_reason FROM signals WHERE id=?',(item.signal_row_id,)).fetchone()[0]=='daily loss limit reached'
+
 def test_stop_blocks_entries_and_halt_exits_cleanly(tmp_path):
     bot,db,_,_,scanner,executor,item=make_bot(tmp_path,'trade',['breakout'])
     (tmp_path/'STOP').write_text('PAUSE\n',encoding='utf-8')

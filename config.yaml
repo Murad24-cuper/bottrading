@@ -133,6 +133,7 @@ scanner:
   timeframe_point_sizes: {}     # Optional symbol point sizes for candle spread pricing
 live:
   mode: trade                   # shadow = record decisions only; trade = submit orders
+  normal_trading_disabled: true # Part 7 Case B: no tested strategy currently qualifies after costs
   strategies: [trend_pullback, mean_reversion, breakout, volatility_scalp]
   max_cycle_errors: 5           # Disable new entries after this many consecutive errors
   equity_snapshot_seconds: 30

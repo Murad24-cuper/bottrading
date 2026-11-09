@@ -192,6 +192,11 @@ class MarketScanner:
             self.db.log_event('WARNING','cost_model',f'Spread sample failed for {symbol} {timeframe}: {type(exc).__name__}')
     def scan_once(self):
         started=perf_counter(); cfg=self.settings.config['scanner']
+        account_snapshot=self.mt5.account_info() if hasattr(self.mt5,'account_info') else None
+        demo_exploration_mode=bool(self.settings.config.get('live',{}).get('normal_trading_disabled',False)
+            and self.settings.config.get('demo_exploration',{}).get('enabled',False)
+            and account_snapshot is not None
+            and getattr(account_snapshot,'trade_mode',None)==getattr(self.mt5,'ACCOUNT_TRADE_MODE_DEMO',0))
         self._load_news_calendar(datetime.now(timezone.utc))
         active_gates=self.db.get_active_adaptive_gates() if hasattr(self.db,'get_active_adaptive_gates') else []
         disabled_strategies={row['name'] for row in active_gates if row['scope']=='strategy'}
@@ -289,9 +294,10 @@ class MarketScanner:
                     rejection[session_reason]+=1
                     continue
             group=self.symbols.get_asset_group(symbol); strategies=[s for s in self._strategies if group in s.allowed_groups]
-            if group in disabled_groups:
+            if group in disabled_groups and not demo_exploration_mode:
                 rejection[f'adaptive gate: group {group}']+=1; continue
-            strategies=[s for s in strategies if s.name not in disabled_strategies]
+            if not demo_exploration_mode:
+                strategies=[s for s in strategies if s.name not in disabled_strategies]
             needed=sorted({tf for strategy in strategies for tf in strategy.required_timeframes} | ({'M1','M5','M15'} if cfg.get('require_mtf_agreement',True) else set()))
             if not needed: continue
             volatility_enabled=any(strategy.name=='volatility_scalp' for strategy in strategies)
@@ -312,7 +318,7 @@ class MarketScanner:
             features['observations']={'chart_patterns':chart,'candlestick_patterns':candles_found,'fibonacci':fib,'key_levels':levels,'session':session,'market_context':cycle_context}
             info=self.mt5.symbol_info(symbol)
             if info is None: continue
-            spec=info._asdict(); account=self.mt5.account_info()
+            spec=info._asdict(); account=account_snapshot or self.mt5.account_info()
             if account is None: continue
             for strategy in strategies:
                 if any(tf not in candles for tf in strategy.required_timeframes):
@@ -353,6 +359,8 @@ class MarketScanner:
                 exploration_cfg=self.settings.config.get('demo_exploration',{})
                 demo_mode=getattr(account,'trade_mode',None)==getattr(self.mt5,'ACCOUNT_TRADE_MODE_DEMO',0)
                 exploration_enabled=bool(exploration_cfg.get('enabled',False) and demo_mode)
+                if exploration_enabled and self.settings.config.get('live',{}).get('normal_trading_disabled',False):
+                    feature_snapshot['exploration']={'eligible':True,'soft_failures':['no strategy passed the edge gate; DEMO exploration only']}
                 if not confidence_allowed(signal.confidence,float(cfg.get('min_confidence',0.0))):
                     if not exploration_enabled or not confidence_allowed(signal.confidence,float(exploration_cfg.get('min_confidence',.45))):
                         reason='confidence below scanner.min_confidence'; self._write_signal(signal,0,reason,features=feature_snapshot); strategy_diagnostics[strategy.name]['confidence_below_minimum']+=1; continue

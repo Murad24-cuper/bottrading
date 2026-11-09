@@ -288,14 +288,17 @@ class TradingBot:
         return self.db.get_pnl_since(day),self.db.get_pnl_since(monday)
     def _candidate(self,candidate,now,allow_entries):
         live_mode=self.live['mode']=='trade'
+        exploration_cfg=self.settings.config.get('demo_exploration',{})
+        candidate_features=getattr(candidate,'features',{})
+        exploration_eligible=bool(exploration_cfg.get('enabled',False) and self._last_account_type=='DEMO' and candidate_features.get('exploration',{}).get('eligible',False))
         allowed_strategy=candidate.strategy in self.live['strategies']
         active_gates=self.db.get_active_adaptive_gates(now) if hasattr(self.db,'get_active_adaptive_gates') else []
         gate=next((entry for entry in active_gates if (entry['scope']=='strategy' and entry['name']==candidate.strategy) or (entry['scope']=='group' and entry['name']==candidate.asset_group)),None)
-        if gate: reason=f'adaptive gate active: {gate["scope"]}={gate["name"]} until {gate["disabled_until"]}'
+        if gate and not exploration_eligible: reason=f'adaptive gate active: {gate["scope"]}={gate["name"]} until {gate["disabled_until"]}'
         elif (self.settings.root/'STOP').exists(): reason='kill switch active'
         elif self.consecutive_errors>=int(self.live['max_cycle_errors']) or self.trading_disabled: reason='consecutive cycle error limit reached'
         elif not live_mode: reason='shadow mode'
-        elif not allowed_strategy: reason='strategy not allowed live'
+        elif not allowed_strategy and not exploration_eligible: reason='strategy not allowed live'
         elif self._entries_health_blocked or not self._trade_allowed: reason='MT5 health or algorithmic trading permission blocks new entries'
         elif not allow_entries: reason='new trades disabled after cycle errors'
         else: reason=''
@@ -322,10 +325,6 @@ class TradingBot:
                 message=f"Weekend trading disabled until {weekend_gate['disabled_until']} after negative expectancy across {weekend_gate['sample_size']} trades"
                 self._event('WARNING',message); self._notify('weekend_disabled','Həftəsonu rejimi son 20 əməliyyatın mənfi nəticəsinə görə 7 gün söndürüldü.')
             return False
-        exploration_cfg=self.settings.config.get('demo_exploration',{})
-        candidate_features=getattr(candidate,'features',{})
-        if not hasattr(candidate,'features'): candidate.features=candidate_features
-        exploration_eligible=bool(exploration_cfg.get('enabled',False) and self._last_account_type=='DEMO' and candidate_features.get('exploration',{}).get('eligible',False))
         trade_mode=('weekend_exploration' if weekend else 'exploration') if exploration_eligible else ('weekend' if weekend else 'main')
         risk_pct=float(exploration_cfg.get('risk_per_trade_pct',.1)) if exploration_eligible else self.settings.risk.risk_per_trade_pct
         if weekend: risk_pct=min(risk_pct,float(weekend_cfg.get('risk_per_trade_pct',risk_pct)))
@@ -335,8 +334,6 @@ class TradingBot:
             gate_settings=SimpleNamespace(config={**self.settings.config,'risk':risk_config},root=self.settings.root)
         if exploration_eligible:
             risk_config=dict(gate_settings.config['risk'])
-            risk_config['min_risk_reward']=float(exploration_cfg.get('min_risk_reward',1.0))
-            risk_config['max_cost_to_target_ratio']=float(exploration_cfg.get('max_cost_to_target_ratio',.45))
             risk_config['max_open_positions']=min(int(risk_config['max_open_positions']),int(exploration_cfg.get('max_open_positions',5)))
             gate_settings=SimpleNamespace(config={**gate_settings.config,'risk':risk_config},root=self.settings.root)
         planned_volume,planned_reason=calc_volume(state.equity,risk_pct,signal.entry_hint,signal.sl_price,spec)
@@ -399,26 +396,6 @@ class TradingBot:
         group_trades_today=(self.db.count_group_trades_since(day_start,candidate.asset_group,self.settings.magic_number) if hasattr(self.db,'count_group_trades_since') else 0)+sum(r['position'].get('asset_group')==candidate.asset_group for r in self._cycle_reservations)
         allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,gate_settings,candidate.cost,candidate.asset_group,now,margin+reserved_margin,volume,spec,cooldown_active,symbol_trades_today,session_closing,trades_today,group_trades_today)
         if not allowed:
-            if (not exploration_eligible and exploration_cfg.get('enabled',False) and self._last_account_type=='DEMO'
-                    and why in {'net risk/reward below minimum','cost-to-target ratio too high'}
-                    and signal.confidence>=float(exploration_cfg.get('min_confidence',.45))):
-                exploration_eligible=True; trade_mode='weekend_exploration' if weekend else 'exploration'; risk_pct=float(exploration_cfg.get('risk_per_trade_pct',.1))
-                if weekend: risk_pct=min(risk_pct,float(weekend_cfg.get('risk_per_trade_pct',risk_pct)))
-                features=getattr(candidate,'features',{}); features['exploration']={'eligible':True,'soft_failures':[why]}; features['trade_mode']=trade_mode
-                count_open=self.db.count_mode_trades_since('exploration',now,open_only=True)
-                count_today=self.db.count_mode_trades_since('exploration',day_start)
-                if count_open>=int(exploration_cfg.get('max_open_positions',5)) or count_today>=int(exploration_cfg.get('max_trades_per_day',40)):
-                    self._signal_update(candidate,False,'exploration trade limit reached'); return False
-                volume,volume_reason=calc_volume(state.equity,risk_pct,signal.entry_hint,signal.sl_price,spec)
-                if volume<=0: self._signal_update(candidate,False,volume_reason); return False
-                margin=self.client.mt5.order_calc_margin(order_type,candidate.symbol,volume,signal.entry_hint)
-                if margin is None: self._signal_update(candidate,False,'order_calc_margin failed'); return False
-                relaxed=dict(self.settings.config['risk'])
-                relaxed['min_risk_reward']=float(exploration_cfg.get('min_risk_reward',1.0))
-                relaxed['max_cost_to_target_ratio']=float(exploration_cfg.get('max_cost_to_target_ratio',.45))
-                relaxed['max_open_positions']=min(int(relaxed['max_open_positions']),int(exploration_cfg.get('max_open_positions',5)))
-                gate_settings=SimpleNamespace(config={**self.settings.config,'risk':relaxed},root=self.settings.root)
-                allowed,why=check_trade_allowed(signal,state,open_positions,pnl_today,pnl_week,gate_settings,candidate.cost,candidate.asset_group,now,margin+reserved_margin,volume,spec,cooldown_active,symbol_trades_today,session_closing,trades_today,group_trades_today)
             if why=='daily loss limit reached': self._notify('daily_loss','🛑 Gündəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.')
             if why=='weekly loss limit reached': self._notify('weekly_loss','🛑 Həftəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.')
             if not allowed: self._signal_update(candidate,False,why); return False

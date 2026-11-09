@@ -195,6 +195,7 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
         if not isinstance(entry,dict) or type(entry.get('enabled')) is not bool or not isinstance(entry.get('groups'),list) or not isinstance(entry.get('timeframes'),list) or not isinstance(entry.get('params'),dict): raise ValueError(f'strategies.{name} must define enabled, groups, timeframes and params')
     live=config['live']
     if live.get('mode') not in {'shadow','trade'}: raise ValueError('live.mode must be shadow or trade')
+    if type(live.get('normal_trading_disabled',False)) is not bool: raise ValueError('live.normal_trading_disabled must be boolean')
     if not isinstance(live.get('strategies'),list) or any(not isinstance(name,str) for name in live['strategies']): raise ValueError('live.strategies must be a list of strategy names')
     for key in ('max_cycle_errors','equity_snapshot_seconds','heartbeat_seconds'):
         if type(live.get(key)) is not int or live[key]<=0: raise ValueError(f'live.{key} must be a positive integer')
