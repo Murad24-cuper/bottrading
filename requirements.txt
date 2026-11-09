@@ -10,3 +10,4 @@ streamlit
 graphviz>=0.19.0
 streamlit-autorefresh
 requests
+defusedxml

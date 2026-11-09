@@ -83,7 +83,11 @@ def parse_ff_json(payload: str | bytes) -> list[CalendarEvent]:
 def parse_ff_xml(payload: str | bytes) -> list[CalendarEvent]:
     """Parse recorded ForexFactory XML; naive calendar wall times are US/Eastern."""
     from zoneinfo import ZoneInfo
-    root = ET.fromstring(payload)
+    try:
+        import defusedxml.ElementTree as safe_ET
+        root = safe_ET.fromstring(payload)
+    except ImportError:
+        root = ET.fromstring(payload)
     eastern = ZoneInfo("America/New_York")
     events = []
     for row in root.findall(".//event"):
@@ -99,14 +103,16 @@ def parse_ff_xml(payload: str | bytes) -> list[CalendarEvent]:
                     date = None
             if date is None or not time_text or time_text.lower() in {"all day", "tentative"}:
                 continue
-            try:
-                wall = datetime.strptime(time_text.upper(), "%I:%M%p").replace(
-                    year=date.year, month=date.month, day=date.day, tzinfo=eastern)
-            except ValueError:
+            wall_time = None
+            for t_fmt in ("%I:%M%p", "%H:%M"):
                 try:
-                    wall = datetime.combine(date, datetime.strptime(time_text, "%H:%M").time(), eastern)
+                    wall_time = datetime.strptime(time_text.upper(), t_fmt).time()
+                    break
                 except ValueError:
-                    continue
+                    pass
+            if wall_time is None:
+                continue
+            wall = datetime.combine(date, wall_time, tzinfo=eastern)
             stamp = wall.astimezone(timezone.utc)
         events.append(CalendarEvent(stamp, fields.get("country", "").upper(),
                                    fields.get("impact", "").upper(), fields.get("title", ""),
@@ -157,9 +163,11 @@ def load_calendar(csv_path: str | Path | None, cache_path: str | Path,
     return [], None, "fallback window", float("inf")
 
 
-def _download_calendar() -> bytes:
+def _download_calendar(url: str = "https://nfs.faireconomy.media/ff_calendar_thisweek.json") -> bytes:
+    if not isinstance(url, str) or not url.startswith("https://"):
+        raise ValueError(f"Insecure or unsupported calendar URL scheme: {url!r}")
     request = urllib.request.Request(
-        "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+        url,
         headers={"User-Agent": "tradingbot-calendar/1.0"})
     with urllib.request.urlopen(request, timeout=12) as response:
         if response.status != 200:
