@@ -25,7 +25,7 @@ def main():
     if s.config['account']['mode']!='demo' or s.allow_real: raise SystemExit('Requires DEMO config and ALLOW_REAL=false')
     data_dir=s.data_dir/'history'; brain=s.data_dir/'brain'
     split=json.loads((brain/'splits.json').read_text()); specs=json.loads((data_dir/'symbol_specs.json').read_text())
-    start=pd.Timestamp(split['train_end'],tz='UTC')-pd.Timedelta(days=8)
+    start=min(pd.Timestamp(x['start_utc']) for x in split['symbols'].values())
     finish=pd.Timestamp(max(x['end_utc'] for x in split['symbols'].values()))
     frames={}
     for symbol in split['symbols']:
@@ -49,6 +49,8 @@ def main():
             cost=med_sp*point+2*float(bt.get('slippage_points',0))*point+(2*float(bt.get('commission_per_lot_per_side',0))/mpp if mpp else 0)
             stop=med_atr*float(cfg['risk']['sl_move_mult'])
             costs.append((symbol,spec.get('asset_group','other'),tf,med_sp,med_atr,cost,stop,cost/stop if stop>0 else None))
+        for tf in TFS:
+            if tf not in fs: costs.append((symbol,spec.get('asset_group','other'),tf,None,None,None,None,None))
     strategies=[x for x in load_strategies(s) if x.name in NAMES]
     weekend_names=cfg['universe'].get('weekend_symbols',[]); aliases=cfg['universe'].get('symbol_aliases',{})
     pats=[str(a).upper() for n in weekend_names for a in aliases.get(n,[n])]
@@ -70,24 +72,36 @@ def main():
             entry=prepared.get(tf)
             if entry is None or len(entry)<80: continue
             delta=pd.Timedelta(minutes=TFS[tf]); # closed candle at idx, entry on idx+1
+            # Baseline matches the stored holdout cadence. Grid uses at least
+            # one entry per source timeframe bar, without duplicating H1 bars.
+            sample_minutes=120 if tf=='M1' else 60
+            decision_index=entry.index+pd.Timedelta(minutes=TFS[tf])
+            period_mask=(decision_index.minute.to_numpy()%sample_minutes)==0
+            period_mask &= decision_index.second.to_numpy()==0
+            if tf=='M1':
+                period_mask &= decision_index>=pd.Timestamp(split['test_start'],tz='UTC')
+            else:
+                period_mask &= decision_index<=pd.Timestamp(split['validation_end'],tz='UTC')
+            sample_indices=np.flatnonzero(period_mask)
             # M1 is the baseline; M15/H1 are diagnostic grid entries.
-            for idx in range(60,len(entry)-1):
+            for idx in sample_indices:
+                if idx<60 or idx>=len(entry)-1: continue
                 now=entry.index[idx]+delta; part=split_name(now.to_pydatetime(),split)
                 if part not in ('train','validation','test'): continue
+                if (tf=='M1' and part!='test') or (tf!='M1' and part=='test'): continue
+                if now.minute % sample_minutes != 0 or now.second != 0: continue
                 pos=int(fxidx.searchsorted(now,side='right'))-1; forex_open=pos>=0 and now-fxidx[pos]<=pd.Timedelta(minutes=2)
                 if (symbol in weekend and (now.weekday()<5 or forex_open)) or (symbol not in weekend and now.weekday()>=5 and not forex_open): continue
                 candles={}
                 for source,f in prepared.items():
-                    end=f.index.searchsorted(now-pd.Timedelta(minutes=TFS[source]),side='right')
+                    end=int(f.index.searchsorted(now-pd.Timedelta(minutes=TFS[source]),side='right'))
                     if end: candles[source]=f.iloc[max(0,end-(7201 if source=='M1' else 300)):end]
                 if tf not in candles: continue
                 atrvals=atr(entry.iloc[max(0,idx-100):idx+1],14); atrv=float(atrvals.iloc[-1])
                 if not np.isfinite(atrv) or atrv<=0: continue
                 for strategy in strategies:
                     if group not in getattr(strategy,'allowed_groups',[]): continue
-                    # Current rule baseline: run all three strategies at M1 entries.
-                    # Grid only uses M15/H1 entries and train/validation timestamps.
-                    if tf!='M1' and part=='test': continue
+                    # Baseline uses M1 holdout; grid uses M15/H1 train/validation.
                     try: signal=strategy.generate_signal(symbol,candles)
                     except (KeyError,ValueError,IndexError,TypeError): continue
                     if signal is None or signal.direction not in ('buy','sell'): continue
@@ -97,7 +111,9 @@ def main():
                     if stop<=0 or not np.isfinite(stop): continue
                     # Single-symbol max-hold spacing keeps overlapping labels out.
                     if tf=='M1' and now<last_close.get((symbol,strategy.name),pd.Timestamp.min.tz_localize('UTC')): continue
-                    horizon=hld; proxy=stop/math.sqrt(max(1,horizon))
+                    # Bars are indivisible: H1 labels need a 60m minimum barrier
+                    # so no partial-hour price path is accidentally assumed.
+                    horizon=max(hld,TFS[tf]); proxy=stop/math.sqrt(max(1,horizon))
                     targets=RRS if tf in ('M15','H1') else (abs(float(signal.tp_price)-float(signal.entry_hint))/stop,)
                     for rr in targets:
                         result=label_trade(entry,idx,signal.direction,proxy,spec,horizon_minutes=horizon,sl_mult=1,tp_mult=rr,
@@ -122,10 +138,12 @@ def main():
     rng=np.random.default_rng(20261109); rand=np.asarray([rng.choice(pool,len(chosen),replace=False).mean() for _ in range(1000)])
     bmet=metric(baseline); lines=['# Edge research','','Offline-only diagnostic. No MT5 connection, live code path, or trading/risk configuration changes.',
       f"Frozen periods: train ends {split['train_end']}; validation {split['validation_start']} to {split['validation_end']}; holdout begins {split['test_start']}.",
-      'Holdout is used only for the requested baseline and checklist comparison. Grid code processes train/validation only.','',
+      'Holdout is used only for the requested baseline and checklist comparison. Grid code processes train/validation only. Baseline is sampled every 120 minutes to match stored holdout predictions; the grid samples hourly on closed M15/H1 bars. H1 labels use a 60m minimum timeout because OHLC bars cannot safely represent a 20m intrabar path. Cost medians use the complete locally available history range.','',
       '## 1. Transaction costs vs ATR stop distance','','Round trip = median spread + two-sided configured commission + two-sided slippage, converted to price units. Stop = median ATR(14) × configured stop multiplier.','',
       '| Symbol | Group | TF | Median spread pts | Median ATR | Cost price | Stop distance | Cost/stop |','|---|---|---:|---:|---:|---:|---:|---:|']
-    for a in costs: lines.append(f'| {a[0]} | {a[1]} | {a[2]} | {a[3]:.3f} | {a[4]:.8g} | {a[5]:.8g} | {a[6]:.8g} | {a[7]:.1%} |' if a[7] is not None else f'| {a[0]} | {a[1]} | {a[2]} | {a[3]:.3f} | {a[4]:.8g} | {a[5]:.8g} | {a[6]:.8g} | n/a |')
+    for a in costs:
+        if a[3] is None: lines.append(f'| {a[0]} | {a[1]} | {a[2]} | n/a | n/a | n/a | n/a | n/a |')
+        else: lines.append(f'| {a[0]} | {a[1]} | {a[2]} | {a[3]:.3f} | {a[4]:.8g} | {a[5]:.8g} | {a[6]:.8g} | {a[7]:.1%} |' if a[7] is not None else f'| {a[0]} | {a[1]} | {a[2]} | {a[3]:.3f} | {a[4]:.8g} | {a[5]:.8g} | {a[6]:.8g} | n/a |')
     lines+=['','## 2. Current strategies on holdout','',f"Signal-level M1 baseline, current confidence/MTF gates, one max-hold slot per symbol/strategy: {bmet['n']} trades, win {winshow(bmet['win'])}, expectancy {show(bmet['ev'])} R, PF {show(bmet['pf'])}.",'','### By strategy','','| Strategy | Trades | Win rate | Expectancy R | PF |','|---|---:|---:|---:|---:|']
     for k,v in sorted(bys.items()):
         m=metric(v); lines.append(f'| {k} | {m["n"]} | {winshow(m["win"])} | {show(m["ev"])} | {show(m["pf"])} |')
@@ -135,7 +153,8 @@ def main():
     lines+=['','## 3. M15/H1 timeframe and R:R grid (train/validation only)','','Causal signals use closed bars; entry is the next bar open. The strategy stop distance is preserved; target is varied. Costs and configured time barrier are applied; stop takes precedence if both barriers hit.','',
       '| Strategy | Group | TF | R:R | Split | Trades | Win | Expectancy net R | PF |','|---|---|---:|---:|---|---:|---:|---:|---:|']
     for st,g,tf,rr,part,m in g_rows: lines.append(f'| {st} | {g} | {tf} | 1:{rr:g} | {part} | {m["n"]} | {winshow(m["win"])} | {show(m["ev"])} | {show(m["pf"])} |')
-    lines+=['','## 4. Positive on both train and validation with 300+ trades in each','']
+    lines+=['','Rows with zero qualifying setups are omitted from the grid (zero trades; expectancy is undefined).','',
+      '## 4. Positive on both train and validation with 300+ trades in each','']
     if viable:
         lines+=['| Strategy | Group | TF | R:R | Train N / EV | Validation N / EV |','|---|---|---:|---:|---:|---:|']
         for k,t,v in viable: lines.append(f'| {k[0]} | {k[1]} | {k[2]} | 1:{k[3]:g} | {t["n"]} / {t["ev"]:.4f} | {v["n"]} / {v["ev"]:.4f} |')
