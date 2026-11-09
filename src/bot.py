@@ -73,6 +73,11 @@ class TradingBot:
         self._daily_limit_alert_day=''; self._weekly_limit_alert_week=''
         self._weekend_gate_notified_until=''
         self._clock_checked=False
+        self._missing_sl_signature=()
+        self._low_margin_alerted=False
+        self._order_rejection_count=0
+        self._order_rejection_alerted=False
+        self._calendar_failure_alerted=False
     @property
     def live(self): return self.settings.config['live']
     def _now(self):
@@ -172,6 +177,35 @@ class TradingBot:
                 self._notify('mt5_reconnected','🟢 MT5 bağlantısı bərpa olundu.')
                 self._event('INFO','MT5 bağlantısı və qiymət axını bərpa olundu.')
             self._health_failures=0; self._connection_down=False; self._entries_health_blocked=False
+        missing_sl=tuple(sorted(
+            str(getattr(position,'symbol','?'))
+            for position in positions
+            if not float(getattr(position,'sl',0) or 0)
+        ))
+        if missing_sl:
+            self._entries_health_blocked=True
+            if missing_sl!=self._missing_sl_signature:
+                message='Bot mövqelərində stop-loss yoxdur; yeni əməliyyatlar bloklandı: '+', '.join(missing_sl)
+                self._event('CRITICAL',message)
+                self._notify('position_without_sl',message)
+            self._missing_sl_signature=missing_sl
+        elif self._missing_sl_signature:
+            self._event('INFO','Bot mövqelərində stop-loss yoxlaması bərpa olundu.')
+            self._missing_sl_signature=()
+        if connected:
+            try: account=mt5.account_info()
+            except Exception: account=None
+            margin_level=getattr(account,'margin_level',None) if account is not None else None
+            threshold=float(self.settings.config.get('health',{}).get('min_margin_level_pct',150))
+            if margin_level is not None and float(margin_level)>0 and float(margin_level)<threshold:
+                self._entries_health_blocked=True
+                if not self._low_margin_alerted:
+                    message=f'Margin səviyyəsi {float(margin_level):.1f}% həddən aşağıdır ({threshold:.1f}%); yeni əməliyyatlar bloklandı.'
+                    self._event('CRITICAL',message); self._notify('low_margin_level',message)
+                    self._low_margin_alerted=True
+            elif self._low_margin_alerted:
+                self._event('INFO','Margin səviyyəsi təhlükəsiz həddə qayıtdı.')
+                self._low_margin_alerted=False
         if not trade_allowed:
             self._notify('trading_disallowed','⚠️ MT5 terminalında avtomatik ticarət icazəsi bağlıdır; yeni əməliyyatlar açılmır.')
             self._event('WARNING','MT5 trade_allowed=false; new entries disabled')
@@ -435,7 +469,14 @@ class TradingBot:
             'outcome_r':None,'outcome_grade':'pending'}
         result=self.executor.open_trade(signal,volume,expected_cost=candidate.cost,features=getattr(candidate,'features',{}))
         if not result.success:
+            self._order_rejection_count+=1
+            threshold=int(self.settings.config.get('health',{}).get('order_rejections_before_alert',3))
+            if self._order_rejection_count>=threshold and not self._order_rejection_alerted:
+                message=f'Ardıcıl {self._order_rejection_count} əməliyyat sorğusu rədd edildi; yeni girişləri yoxlayın. Son cavab: {result.message[:180]}'
+                self._event('CRITICAL',message); self._notify('repeated_order_rejections',message)
+                self._order_rejection_alerted=True
             self._signal_update(candidate,False,result.message); return False
+        self._order_rejection_count=0; self._order_rejection_alerted=False
         self._cycle_reservations.append({'position':{'symbol':candidate.symbol,'asset_group':candidate.asset_group,'exposure_group':underlying_group(candidate.symbol,candidate.asset_group),'underlying':underlying_key(candidate.symbol),'direction':signal.direction,'currency_base':spec.get('currency_base',''),'currency_profit':spec.get('currency_profit',''),'profit':0.0},'margin':float(margin),'risk_money':float(new_risk)})
         self._signal_update(candidate,True,'')
         # Refresh portfolio state before the next ranked candidate.
@@ -533,6 +574,12 @@ class TradingBot:
         self._components(); account=self._account_type(); state=get_account_state(self.client.mt5); self._startup(state)
         self._check_clock(now)
         if hasattr(self.scanner,'_load_news_calendar'): self.scanner._load_news_calendar(now)
+        calendar_unavailable=getattr(self.scanner,'_news_source','')=='fallback window'
+        if calendar_unavailable and not self._calendar_failure_alerted:
+            message='Təqvim mənbələrinin ikisi də əlçatan deyil; ehtiyat xəbər filtri aktivdir.'
+            self._notify('calendar_sources_failed',message); self._calendar_failure_alerted=True
+        elif not calendar_unavailable:
+            self._calendar_failure_alerted=False
         health_ok=self._health(now)
         self.executor.sync_positions(); getattr(self.executor,'enforce_adverse_move_exit',lambda *_:None)(self.settings); getattr(self.executor,'enforce_news_positions',lambda *_:[])(getattr(self.scanner,'_news_events',[]),now); self.executor.enforce_time_stop(self._management_settings(now)); self.executor.enforce_session_close(self.settings,now)
         self._notify_closed_losses()

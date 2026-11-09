@@ -142,6 +142,8 @@ live:
 health:
   stale_ticks_seconds: 120       # Reconnect if all open-market symbols have stale ticks
   reconnect_failures_before_pause: 3 # Disable entries after repeated MT5 health failures
+  min_margin_level_pct: 150      # Block new entries and alert below this margin level
+  order_rejections_before_alert: 3 # Alert on repeated failed order submissions
   max_memory_mb: 1500
   warn_disk_free_gb: 5
   stop_downloads_free_gb: 2

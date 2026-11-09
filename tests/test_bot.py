@@ -51,6 +51,7 @@ def make_bot(tmp_path,mode='shadow',strategies=None,candidate=True,max_errors=5,
     item=SimpleNamespace(symbol='EURUSD',asset_group='forex',strategy='breakout',signal=signal,cost={'cost':.1},symbol_spec=spec,score=5,signal_row_id=row)
     scanner=FakeScanner([item] if candidate else [])
     bot=TradingBot(settings,client,db,scanner,executor,clock=clock)
+    bot.notifier=SimpleNamespace(send=lambda *args,**kwargs:False,flush=lambda:None)
     return bot,db,mt5,client,scanner,executor,item
 
 def test_shadow_cycle_logs_skip_and_never_opens(tmp_path):
@@ -271,10 +272,42 @@ def test_terminal_trade_permission_blocks_new_entries(tmp_path):
         assert conn.execute('SELECT skip_reason FROM signals ORDER BY id DESC LIMIT 1').fetchone()[0]=='MT5 health or algorithmic trading permission blocks new entries'
     assert db.get_bot_status()['trade_allowed']==0
 
+def test_position_without_stop_loss_blocks_entries_and_alerts_once(tmp_path):
+    bot,db,mt5,_,_,_,_=make_bot(tmp_path,candidate=False)
+    mt5.terminal_info=lambda:SimpleNamespace(connected=True,trade_allowed=True)
+    mt5.positions=[SimpleNamespace(magic=bot.settings.magic_number,symbol='EURUSD',sl=0)]
+    mt5.symbol_select=lambda *args:True
+    now=datetime.now(timezone.utc)
+    stamp=now.timestamp()
+    mt5.symbol_info_tick=lambda symbol:SimpleNamespace(time=int(stamp),time_msc=int(stamp*1000))
+    assert bot._health(now) is False
+    assert bot._entries_health_blocked
+    assert bot._health(now) is False
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM bot_events WHERE level='CRITICAL' AND message LIKE '%stop-loss yoxdur%'").fetchone()[0]==1
+
+def test_low_margin_level_blocks_new_entries_and_recovers(tmp_path):
+    bot,db,mt5,_,_,_,_=make_bot(tmp_path,candidate=False)
+    mt5.terminal_info=lambda:SimpleNamespace(connected=True,trade_allowed=True)
+    mt5.account_info=lambda:SimpleNamespace(margin_level=120)
+    assert bot._health(datetime.now(timezone.utc)) is False
+    mt5.account_info=lambda:SimpleNamespace(margin_level=200)
+    assert bot._health(datetime.now(timezone.utc)) is True
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM bot_events WHERE level='CRITICAL' AND message LIKE '%Margin səviyyəsi%'").fetchone()[0]==1
+
+def test_repeated_order_rejections_raise_one_alert(tmp_path):
+    bot,db,_,_,_,executor,_=make_bot(tmp_path,'trade',['breakout'])
+    executor.open_trade=lambda *args,**kwargs:TradeResult(False,None,None,0,10030,'broker rejected request')
+    bot.settings.config.setdefault('health',{})['order_rejections_before_alert']=2
+    bot.cycle(); bot.cycle()
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM bot_events WHERE level='CRITICAL' AND message LIKE '%əməliyyat sorğusu rədd edildi%'").fetchone()[0]==1
+
 def test_stale_open_symbol_ticks_block_entries_after_three_reconnect_attempts(tmp_path):
     bot,db,mt5,client,_,_,_=make_bot(tmp_path,candidate=False)
     mt5.terminal_info=lambda:SimpleNamespace(connected=True,trade_allowed=True)
-    mt5.positions=[SimpleNamespace(magic=bot.settings.magic_number,symbol='EURUSD')]
+    mt5.positions=[SimpleNamespace(magic=bot.settings.magic_number,symbol='EURUSD',sl=1.0)]
     now=datetime.now(timezone.utc)
     for _ in range(3): assert bot._health(now) is False
     assert bot._entries_health_blocked
@@ -287,7 +320,7 @@ def test_closed_market_does_not_trigger_stale_tick_reconnect(tmp_path):
     mt5.symbol_select=lambda *args:True
     old_stamp=datetime(2026,1,1,tzinfo=timezone.utc).timestamp()
     mt5.symbol_info_tick=lambda symbol:SimpleNamespace(time=int(old_stamp),time_msc=int(old_stamp*1000))
-    mt5.positions=[SimpleNamespace(magic=bot.settings.magic_number,symbol='EURUSD')]
+    mt5.positions=[SimpleNamespace(magic=bot.settings.magic_number,symbol='EURUSD',sl=1.0)]
     bot.scanner.symbols.market_should_be_open=lambda symbol,now:False
     assert bot._health(datetime.now(timezone.utc)) is True
     assert not client.closed and bot._health_failures==0

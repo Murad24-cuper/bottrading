@@ -21,6 +21,7 @@ from scripts.run_bot import install_crash_handlers
 from src.paths import project_paths
 from src.scheduler import due_scheduler_jobs,run_scheduler_tick,run_daily_backup,should_restart_for_memory,prune_old_logs
 from src.windows_runtime import set_system_awake
+from src.notify import TelegramNotifier
 
 log = get_logger('bot.supervisor')
 
@@ -66,6 +67,7 @@ def main() -> int:
     settings = load_settings()
     assert_runtime_location(settings.config)
     db = Database(settings.db_path)
+    notifier=TelegramNotifier(rate_limit_minutes=int(settings.config.get('notify',{}).get('rate_limit_minutes',5)))
     data_dir = settings.data_dir
     data_dir.mkdir(parents=True, exist_ok=True)
     pid_path = data_dir / 'supervisor.pid'
@@ -95,6 +97,9 @@ def main() -> int:
     def emit(level: str, message: str) -> None:
         getattr(log, level.lower(), log.info)(message)
         db.log_event(level, 'supervisor', message)
+        if level in {'ERROR','CRITICAL'} or message.startswith('Disk free space is low'):
+            kind='disk' if message.startswith('Disk free space is low') else level.lower()
+            notifier.send(f'supervisor_{kind}',f'⚠️ Nəzarətçi xəbərdarlığı: {message[:350]}')
 
     def should_stop() -> bool:
         return stop_path.exists()
@@ -176,6 +181,7 @@ def main() -> int:
             int(backoff['restart_window_minutes']) * 60,
         )
     finally:
+        notifier.flush()
         if awake: set_system_awake(False)
         try:
             if pid_path.read_text(encoding='utf-8').strip() == str(os.getpid()):
