@@ -13,5 +13,6 @@ data/bot.lock
 data/supervisor.pid
 data/supervisor.stop
 .venv/
+.venv-audit/
 __pycache__/
 .pytest_cache/
