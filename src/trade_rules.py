@@ -33,7 +33,7 @@ def mtf_direction_agrees(candles: dict[str, pd.DataFrame], direction: str, timef
 def strategy_mtf_allowed(strategy_name: str, candles: dict[str, pd.DataFrame], direction: str,
                          enabled: bool=True, fast: int=5, slow: int=13, min_agree: int=3) -> bool:
     """Apply generic trend alignment except to range-reversion entries, which validate M1 reversal internally."""
-    if not enabled or strategy_name=='mean_reversion':
+    if not enabled or strategy_name in ('mean_reversion', 'vwap_reversion'):
         return True
     return mtf_direction_agrees(candles,direction,fast=fast,slow=slow,min_agree=min_agree)
 

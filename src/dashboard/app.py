@@ -307,6 +307,11 @@ def main():
             if closed_exploration:
                 st.caption(f"Kəşf əməliyyatlarının nəticəsi: {sum(row['net_profit'] for row in closed_exploration):+.2f} $ · {len(closed_exploration)} bağlanmış əməliyyat")
         else: st.caption('Bu gün kəşf əməliyyatı yoxdur.')
+        fwd_stats=queries.get_exploration_forward_tracking(DB_PATH)
+        if fwd_stats:
+            st.markdown('##### Kəşf Ailələri: Canlı Nəticələr vs Backtest Meyarları')
+            fwd_df=pd.DataFrame([{'Ailə':s['name'],'Cəmi/Açıq':f"{s['total_trades']}/{s['open_trades']}",'Canlı Win%':s['win_rate'],'Canlı EV':s['ev_r'],'Backtest EV':s['bt_ev'],'Backtest Win%':s['bt_win']} for s in fwd_stats])
+            st.dataframe(fwd_df,use_container_width=True,hide_index=True)
         weekend_control=queries.get_weekend_control(DB_PATH)
         if weekend_control and weekend_control.get('disabled_until'):
             st.warning(f"Həftəsonu rejimi mənfi nəticəyə görə {local_time(weekend_control['disabled_until'])} tarixinədək söndürülüb.")

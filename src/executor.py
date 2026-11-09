@@ -70,7 +70,10 @@ class Executor:
         safe_volume,why=calc_volume(float(account.equity),self.settings.risk.risk_per_trade_pct,float(price),signal.sl_price,info._asdict())
         if safe_volume<=0 or float(volume)>safe_volume+1e-9:
             return self._failure(f'Refused open: requested volume exceeds stop-risk size ({why})',volume)
-        req={'action':m.TRADE_ACTION_DEAL,'symbol':signal.symbol,'volume':float(volume),'type':m.ORDER_TYPE_BUY if buy else m.ORDER_TYPE_SELL,'price':price,'sl':signal.sl_price,'tp':signal.tp_price,'deviation':self.settings.config['executor']['deviation_points'],'magic':self.settings.magic_number,'comment':signal.strategy_name[:31],'type_time':m.ORDER_TIME_GTC,'type_filling':filling}
+        exp_info=features.get('exploration',{}) if isinstance(features,dict) else {}
+        fam=exp_info.get('family',signal.strategy_name); var=exp_info.get('variant','v1')
+        trade_comment=f"exp:{fam[:14]}:{var[:6]}" if (features and features.get('trade_mode') in ('exploration','weekend_exploration')) else signal.strategy_name[:31]
+        req={'action':m.TRADE_ACTION_DEAL,'symbol':signal.symbol,'volume':float(volume),'type':m.ORDER_TYPE_BUY if buy else m.ORDER_TYPE_SELL,'price':price,'sl':signal.sl_price,'tp':signal.tp_price,'deviation':self.settings.config['executor']['deviation_points'],'magic':self.settings.magic_number,'comment':trade_comment,'type_time':m.ORDER_TIME_GTC,'type_filling':filling}
         result=m.order_send(req)
         if result and result.retcode in (getattr(m,'TRADE_RETCODE_REQUOTE',10004),getattr(m,'TRADE_RETCODE_PRICE_CHANGED',10020)):
             tick=m.symbol_info_tick(signal.symbol)

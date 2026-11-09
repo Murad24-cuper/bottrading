@@ -58,9 +58,54 @@ def get_closed_trades(start_utc,end_utc,path=None):
 
 def get_exploration_trades(start_utc,end_utc,path=None):
     """Return isolated demo exploration trades for the dedicated dashboard section."""
-    rows=_rows(path,"SELECT open_time,close_time,symbol,direction,volume,profit,commission,swap,strategy,status,close_reason FROM trades WHERE mode IN ('exploration','weekend_exploration') AND ((open_time>=? AND open_time<?) OR (close_time>=? AND close_time<?) OR status='open') ORDER BY open_time DESC",(start_utc,end_utc,start_utc,end_utc))
+    rows=_rows(path,"SELECT open_time,close_time,symbol,direction,volume,profit,commission,swap,strategy,status,close_reason,initial_risk FROM trades WHERE mode IN ('exploration','weekend_exploration') AND ((open_time>=? AND open_time<?) OR (close_time>=? AND close_time<?) OR status='open') ORDER BY open_time DESC",(start_utc,end_utc,start_utc,end_utc))
     for row in rows: row['net_profit']=sum(float(row.get(key) or 0) for key in ('profit','commission','swap'))
     return rows
+
+def get_exploration_forward_tracking(path=None):
+    """Aggregate live DEMO exploration results per strategy family alongside backtest benchmarks."""
+    baselines = {
+        'session_breakout': {'name': 'Session Breakout', 'bt_ev': -0.0817, 'bt_win': '43.1%'},
+        'opening_range_breakout': {'name': 'Index ORB', 'bt_ev': -0.0354, 'bt_win': '43.1%'},
+        'vwap_reversion': {'name': 'VWAP Reversion', 'bt_ev': -0.0363, 'bt_win': '45.2%'},
+        'donchian_breakout': {'name': 'Donchian Breakout', 'bt_ev': -0.0319, 'bt_win': '39.8%'},
+        'ts_momentum': {'name': 'TS Momentum', 'bt_ev': -0.0274, 'bt_win': '43.9%'},
+        'index_pullback_200d': {'name': 'Index Pullback 200D', 'bt_ev': +0.1926, 'bt_win': '49.1%'},
+        'trend_pullback': {'name': 'Trend Pullback', 'bt_ev': -0.3240, 'bt_win': '30.3%'},
+        'mean_reversion': {'name': 'Mean Reversion', 'bt_ev': -0.3397, 'bt_win': '28.6%'},
+        'volatility_scalp': {'name': 'Volatility Scalp', 'bt_ev': -0.2898, 'bt_win': '31.2%'}
+    }
+    rows = _rows(path, "SELECT strategy, status, profit, commission, swap, initial_risk FROM trades WHERE mode IN ('exploration','weekend_exploration')")
+    stats = {}
+    for strat, base in baselines.items():
+        strat_rows = [r for r in rows if r.get('strategy') == strat]
+        closed = [r for r in strat_rows if r.get('status') == 'closed']
+        n_closed = len(closed)
+        n_open = len([r for r in strat_rows if r.get('status') == 'open'])
+        wins = sum(1 for r in closed if (float(r.get('profit') or 0) + float(r.get('commission') or 0) + float(r.get('swap') or 0)) > 0)
+        win_rate = (wins / n_closed * 100.0) if n_closed > 0 else None
+        
+        # Approximate R return if initial_risk present
+        r_list = []
+        for r in closed:
+            net = float(r.get('profit') or 0) + float(r.get('commission') or 0) + float(r.get('swap') or 0)
+            risk = float(r.get('initial_risk') or 0)
+            if risk > 0:
+                r_list.append(net / risk)
+        ev_r = (sum(r_list) / len(r_list)) if r_list else None
+        
+        stats[strat] = {
+            'strategy': strat,
+            'name': base['name'],
+            'total_trades': len(strat_rows),
+            'closed_trades': n_closed,
+            'open_trades': n_open,
+            'win_rate': f"{win_rate:.1f}%" if win_rate is not None else "0 (no closed)",
+            'ev_r': f"{ev_r:+.3f}R" if ev_r is not None else "0.000R",
+            'bt_ev': f"{base['bt_ev']:+.3f}R",
+            'bt_win': base['bt_win']
+        }
+    return list(stats.values())
 
 def get_weekend_control(path=None):
     rows=_rows(path,'SELECT disabled_until,expectancy,sample_size,updated_at FROM weekend_control WHERE id=1')

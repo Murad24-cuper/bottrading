@@ -105,6 +105,36 @@ strategies:
     timeframes: [M1, M5, M15]
     groups: [forex, metals, indices, energy, crypto, stocks]
     params: {atr_period: 14, atr_percentile: 0.70, percentile_lookback_bars: 7200, target_atr: 0.4, stop_atr: 0.65, max_spread_target_ratio: 0.35}
+  session_breakout:
+    enabled: true
+    groups: [forex, metals, indices, crypto]
+    timeframes: [M15, H1]
+    params: {variant: v1, buf_mult: 0.1, sl_mult: 1.5, tp_mult: 2.0}
+  opening_range_breakout:
+    enabled: true
+    groups: [indices]
+    timeframes: [M15, H1]
+    params: {variant: v1, sl_mult: 1.0, tp_mult: 1.5, use_sma: false}
+  vwap_reversion:
+    enabled: true
+    groups: [forex, metals, indices, crypto]
+    timeframes: [M15, H1]
+    params: {variant: v1, dev_mult: 2.0, sl_mult: 1.5, use_rsi: false}
+  donchian_breakout:
+    enabled: true
+    groups: [forex, metals, indices, crypto]
+    timeframes: [H1, M15]
+    params: {variant: v1, period: 20, sl_mult: 2.0, tp_mult: 4.0}
+  ts_momentum:
+    enabled: true
+    groups: [forex, metals, indices, crypto]
+    timeframes: [H1, M15]
+    params: {variant: v1, lookback: 12, sl_mult: 2.0, tp_mult: 3.0}
+  index_pullback_200d:
+    enabled: true
+    groups: [indices]
+    timeframes: [H1, M15]
+    params: {variant: v1, sl_mult: 1.5, tp_mult: 2.5}
 loop:
   interval_seconds: 15            # Period target; work time is subtracted from this interval
 scanner:
@@ -134,7 +164,7 @@ scanner:
 live:
   mode: trade                   # shadow = record decisions only; trade = submit orders
   normal_trading_disabled: true # Part 7 Case B: no tested strategy currently qualifies after costs
-  strategies: [trend_pullback, mean_reversion, breakout, volatility_scalp]
+  strategies: [trend_pullback, mean_reversion, breakout, volatility_scalp, session_breakout, opening_range_breakout, vwap_reversion, donchian_breakout, ts_momentum, index_pullback_200d]
   max_cycle_errors: 5           # Disable new entries after this many consecutive errors
   equity_snapshot_seconds: 30
   heartbeat_seconds: 10

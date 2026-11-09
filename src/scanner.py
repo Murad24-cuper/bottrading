@@ -367,7 +367,10 @@ class MarketScanner:
                 demo_mode=getattr(account,'trade_mode',None)==getattr(self.mt5,'ACCOUNT_TRADE_MODE_DEMO',0)
                 exploration_enabled=bool(exploration_cfg.get('enabled',False) and demo_mode)
                 if exploration_enabled and self.settings.config.get('live',{}).get('normal_trading_disabled',False):
-                    feature_snapshot['exploration']={'eligible':True,'soft_failures':['no strategy passed the edge gate; DEMO exploration only']}
+                    feature_snapshot.setdefault('exploration',{})['eligible']=True
+                    feature_snapshot['exploration'].setdefault('soft_failures',[]).append('no strategy passed the edge gate; DEMO exploration only')
+                    feature_snapshot['exploration']['family']=getattr(strategy,'family',strategy.name)
+                    feature_snapshot['exploration']['variant']=getattr(strategy,'variant','v1')
                 if not confidence_allowed(signal.confidence,float(cfg.get('min_confidence',0.0))):
                     if not exploration_enabled or not confidence_allowed(signal.confidence,float(exploration_cfg.get('min_confidence',.45))):
                         reason='confidence below scanner.min_confidence'; self._write_signal(signal,0,reason,features=feature_snapshot); strategy_diagnostics[strategy.name]['confidence_below_minimum']+=1; continue
