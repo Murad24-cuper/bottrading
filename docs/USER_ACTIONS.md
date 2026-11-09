@@ -2,6 +2,9 @@
 
 ## Telegram bildirişi
 
+Son test nəticəsi: **HTTP 400 — `Bad Request: chat not found`**. Mesaj
+çatdırılmadı. Bot tokeni və chat ID-si test çıxışına daxil edilməyib.
+
 Botun Telegram-a qoşulmasını yoxlamaq üçün layihə qovluğunda bu əmri bir dəfə
 işlədin:
 

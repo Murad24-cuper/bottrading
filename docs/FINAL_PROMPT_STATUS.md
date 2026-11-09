@@ -27,15 +27,15 @@ not reopened.
 | 19 | Partial | Supervisor, restart cap, watchdog, logon scheduled task, awake request, daily backup retention and log pruning exist. Weekly retraining/readiness and fresh MT5 reconnect behavior are not end-to-end verified in this run. |
 | 20 | Partial | Point-in-time report is FAIL; no weekly regeneration or Telegram delivery, and incidents lack resolution ledger. |
 | 21 | Done (audit) | Cleanup manifest was reviewed. It records prior data cleanup and states no safe unused source/config candidates were found; protected assets remain. No risky code deletion was made. |
-| 22 | Partial | Azerbaijani user instructions are documented. One Telegram test is attempted once at final verification; its status/error is reported without credentials. Optional exporter and Windows power steps are documented. |
+| 22 | Partial | Azerbaijani user instructions are documented. One Telegram test returned HTTP 400 `Bad Request: chat not found`; no token/chat ID was exposed. The owner must start a bot conversation, obtain the chat ID from getUpdates and update `.env` manually. Optional exporter and Windows power steps are documented. |
 
 ## Evidence snapshot
 
-Last read-only SQLite checkpoint before the restart was 2026-11-09 15:23 UTC:
+Last read-only SQLite checkpoint after the restart was 2026-11-09 15:30 UTC:
 DEMO, equity 1,000.00, mode `trade`, bot status `running`, MT5 connected and
-`trade_allowed`; 10 symbols scanned, 6 movers selected, zero signals. The 41
+`trade_allowed`; 10 symbols scanned, 10 movers selected, zero signals. The 41
 closed main-mode trades in the database were unchanged from the existing
 readiness report. No new orders were submitted by this task.
 
-Full test suite: **270 passed** before the final restart. Current blockers and
+Full test suite after all code changes: **271 passed**. Current blockers and
 their safe next actions are in `docs/BLOCKERS.md`.
