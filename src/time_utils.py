@@ -5,12 +5,16 @@ from datetime import datetime, timedelta, timezone
 import time
 
 _OFFSET_CACHE: dict[int, tuple[float, timedelta]] = {}
+_LAST_KNOWN_OFFSETS: dict[int, timedelta] = {}
+_GLOBAL_LAST_OFFSET: timedelta | None = None
 
 
 def detect_server_utc_offset(mt5, now_utc: datetime | None = None,
                              symbols: tuple[str, ...] = ("EURUSD", "GBPUSD", "USDJPY"),
-                             tolerance_seconds: int = 600, max_tick_age_seconds: int=900) -> timedelta:
+                             tolerance_seconds: int = 600, max_tick_age_seconds: int=900,
+                             fallback_offset: timedelta | None = None) -> timedelta:
     """Estimate server minus UTC offset using a fresh FX tick or an open-market fallback."""
+    global _GLOBAL_LAST_OFFSET
     now = now_utc or datetime.now(timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
@@ -49,20 +53,61 @@ def detect_server_utc_offset(mt5, now_utc: datetime | None = None,
             if (-14 <= hours <= 14 and
                     abs(difference - hours * 3600) <= tolerance_seconds and
                     -tolerance_seconds <= age <= max_tick_age_seconds):
-                return timedelta(hours=hours)
+                res = timedelta(hours=hours)
+                key = id(mt5) if mt5 is not None else None
+                if key is not None:
+                    _LAST_KNOWN_OFFSETS[key] = res
+                _GLOBAL_LAST_OFFSET = res
+                try:
+                    from pathlib import Path
+                    cache_file = Path("data/.server_offset")
+                    cache_file.parent.mkdir(parents=True, exist_ok=True)
+                    cache_file.write_text(str(hours), encoding="utf-8")
+                except Exception:
+                    pass
+                return res
         except (AttributeError, TypeError, ValueError, OverflowError):
             continue
+
+    # Weekend / closed market fallback:
+    key = id(mt5) if mt5 is not None else None
+    if key is not None and key in _LAST_KNOWN_OFFSETS:
+        return _LAST_KNOWN_OFFSETS[key]
+    if _GLOBAL_LAST_OFFSET is not None:
+        return _GLOBAL_LAST_OFFSET
+    if fallback_offset is not None:
+        return fallback_offset
+    try:
+        from pathlib import Path
+        cache_file = Path("data/.server_offset")
+        if cache_file.exists():
+            val = int(cache_file.read_text(encoding="utf-8").strip())
+            if -14 <= val <= 14:
+                return timedelta(hours=val)
+    except Exception:
+        pass
+    try:
+        import yaml
+        from pathlib import Path
+        cfg_file = Path("config.yaml")
+        if cfg_file.exists():
+            data = yaml.safe_load(cfg_file.read_text(encoding="utf-8")) or {}
+            cfg_h = data.get("time", {}).get("default_server_utc_offset_hours")
+            if cfg_h is not None and -14 <= int(cfg_h) <= 14:
+                return timedelta(hours=int(cfg_h))
+    except Exception:
+        pass
     return timedelta(0)
 
 
-def server_utc_offset(mt5) -> timedelta:
+def server_utc_offset(mt5, fallback_offset: timedelta | None = None) -> timedelta:
     """Return a short-lived cached broker offset, detecting it from a liquid tick."""
     key = id(mt5)
     cached = _OFFSET_CACHE.get(key)
     now = time.monotonic()
     if cached and now - cached[0] < 60:
         return cached[1]
-    offset = detect_server_utc_offset(mt5)
+    offset = detect_server_utc_offset(mt5, fallback_offset=fallback_offset)
     _OFFSET_CACHE[key] = (now, offset)
     return offset
 

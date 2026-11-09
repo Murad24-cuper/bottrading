@@ -242,4 +242,12 @@ def load_settings(config_path: str | Path='config.yaml', env_path: str | Path='.
     dashboard=config.get('dashboard',{})
     for key in ('real_balance_default','real_risk_pct_default'):
         if not isinstance(dashboard.get(key),(int,float)) or dashboard[key]<=0: raise ValueError(f'dashboard.{key} must be positive')
+    time_cfg = config.get('time', {})
+    if time_cfg:
+        if not isinstance(time_cfg, dict):
+            raise ValueError('time must be a mapping')
+        if 'default_server_utc_offset_hours' in time_cfg:
+            offset_h = time_cfg['default_server_utc_offset_hours']
+            if not isinstance(offset_h, (int, float)) or not (-14 <= offset_h <= 14):
+                raise ValueError('time.default_server_utc_offset_hours must be between -14 and 14')
     return Settings(config,int(login) if login else None,credentials['MT5_PASSWORD'],credentials['MT5_SERVER'],os.getenv('MT5_PATH') or None,os.getenv('ALLOW_REAL','false').lower()=='true',path.parent,risk)

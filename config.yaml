@@ -282,3 +282,5 @@ backtest:
 db_path: data/bot.db
 runtime:
   location: local               # local | server; a mismatch refuses bot startup
+time:
+  default_server_utc_offset_hours: 2
