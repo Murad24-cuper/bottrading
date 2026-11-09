@@ -6,6 +6,7 @@ logs/*
 *.db-shm
 data/history/
 data/brain/
+data/calendar/
 reports/
 STOP
 data/bot.lock
