@@ -17,7 +17,7 @@ def _trade_frame(trades):
 
 def _metrics(frame,equity_curve=None,start_equity=None):
     if frame.empty:
-        return {'trades':0,'win_rate':0.0,'average_win':0.0,'average_loss':0.0,'expectancy':0.0,'profit_factor':0.0,'max_drawdown':0.0,'max_drawdown_pct':0.0,'longest_losing_streak':0,'average_holding_minutes':0.0,'total_costs':0.0,'return_pct':0.0}
+        return {'trades':0,'win_rate':0.0,'average_win':0.0,'average_loss':0.0,'expectancy':0.0,'profit_factor':0.0,'max_drawdown':0.0,'max_drawdown_pct':0.0,'longest_losing_streak':0,'average_holding_minutes':0.0,'total_costs':0.0,'return_pct':0.0,'sharpe':0.0,'sortino':0.0,'calmar':0.0}
     net=frame.net_profit.astype(float); wins=net[net>0]; losses=net[net<0]
     gross_profit=float(wins.sum()); gross_loss=float(-losses.sum()); pf=gross_profit/gross_loss if gross_loss else (float('inf') if gross_profit else 0.0)
     if equity_curve:
@@ -29,7 +29,33 @@ def _metrics(frame,equity_curve=None,start_equity=None):
     streak=longest=0
     for value in net:
         streak=streak+1 if value<0 else 0; longest=max(longest,streak)
-    return {'trades':int(len(frame)),'win_rate':float((net>0).mean()),'average_win':float(wins.mean()) if len(wins) else 0.0,'average_loss':float(losses.mean()) if len(losses) else 0.0,'expectancy':float(net.mean()),'profit_factor':pf,'max_drawdown':max_dd,'max_drawdown_pct':max_dd_pct,'longest_losing_streak':longest,'average_holding_minutes':float(frame.get('holding_minutes',pd.Series(0,index=frame.index)).mean()),'total_costs':float(frame.get('costs',pd.Series(0,index=frame.index)).sum()),'return_pct':float(net.sum()/start*100) if start else 0.0}
+    deviation=float(net.std(ddof=1)) if len(net)>1 else 0.0
+    downside=net[net<0]; downside_dev=float((downside.pow(2).mean())**.5) if len(downside) else 0.0
+    sharpe=float(net.mean()/deviation*(len(net)**.5)) if deviation>0 else 0.0
+    sortino=float(net.mean()/downside_dev*(len(net)**.5)) if downside_dev>0 else 0.0
+    total_return=float(net.sum()/start*100) if start else 0.0
+    calmar=total_return/max_dd_pct if max_dd_pct>0 else (float('inf') if total_return>0 else 0.0)
+    return {'trades':int(len(frame)),'win_rate':float((net>0).mean()),'average_win':float(wins.mean()) if len(wins) else 0.0,'average_loss':float(losses.mean()) if len(losses) else 0.0,'expectancy':float(net.mean()),'profit_factor':pf,'max_drawdown':max_dd,'max_drawdown_pct':max_dd_pct,'longest_losing_streak':longest,'average_holding_minutes':float(frame.get('holding_minutes',pd.Series(0,index=frame.index)).mean()),'total_costs':float(frame.get('costs',pd.Series(0,index=frame.index)).sum()),'return_pct':total_return,'sharpe':sharpe,'sortino':sortino,'calmar':calmar}
+
+def monte_carlo(trades,start_equity,iterations=10_000,seed=7,ruin_equity=0.0):
+    """Bootstrap net trade outcomes and report terminal equity, drawdown and ruin.
+
+    This is an IID trade-order sensitivity analysis, not a slippage/path model.
+    """
+    import numpy as np
+    values=np.asarray([float(row.get('net_profit',row.get('profit',0)+row.get('commission',0)+row.get('swap',0))) for row in trades],dtype=float)
+    if len(values)==0: return {'iterations':0,'terminal_equity_percentiles':None,'max_drawdown_percentiles':None,'ruin_probability':0.0}
+    if iterations<=0 or start_equity<=0: raise ValueError('iterations and start_equity must be positive')
+    rng=np.random.default_rng(seed); endings=np.empty(iterations); drawdowns=np.empty(iterations); ruins=0
+    for i in range(iterations):
+        path=float(start_equity)+np.cumsum(rng.choice(values,size=len(values),replace=True))
+        peak=np.maximum.accumulate(np.r_[float(start_equity),path])[1:]
+        dd=(peak-path)/np.maximum(peak,1e-12)*100
+        endings[i]=path[-1]; drawdowns[i]=float(dd.max(initial=0))
+        ruins+=bool(np.any(path<=float(ruin_equity)))
+    return {'iterations':int(iterations),'terminal_equity_percentiles':{str(q):float(np.percentile(endings,q)) for q in (5,50,95)},
+            'max_drawdown_percentiles':{str(q):float(np.percentile(drawdowns,q)) for q in (5,50,95)},
+            'ruin_probability':ruins/iterations}
 
 def metrics_by(trades,dimension,start_equity=None):
     frame=_trade_frame(trades)

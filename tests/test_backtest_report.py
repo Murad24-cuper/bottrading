@@ -1,6 +1,6 @@
 from datetime import datetime,timezone
 from src.backtest.engine import BacktestResult
-from src.backtest.report import save_report,validate,walk_forward
+from src.backtest.report import save_report,validate,walk_forward,monte_carlo
 
 def sample_trades():
     return [
@@ -24,3 +24,18 @@ def test_walk_forward_caps_each_grid_to_twenty_combinations():
     rows=walk_forward(datetime(2020,1,1,tzinfo=timezone.utc),datetime(2020,9,1,tzinfo=timezone.utc),{'x':{'a':list(range(5)),'b':list(range(5))}},run_window,6,2)
     assert len(rows)==1
     assert len([x for x in calls if x[0]=='x'])==21 # twenty candidates plus selected out-of-sample run
+
+
+def test_report_metrics_include_trade_sharpe_sortino_and_calmar():
+    result=validate(sample_trades(),[],.5)['overall']
+    assert {'sharpe','sortino','calmar'}.issubset(result)
+    assert result['sharpe']>0 and result['sortino']>0
+
+
+def test_monte_carlo_bootstrap_is_reproducible_and_reports_ruin():
+    trades=[{'net_profit':-20},{'net_profit':-10},{'net_profit':5}]
+    a=monte_carlo(trades,15,iterations=500,seed=13)
+    b=monte_carlo(trades,15,iterations=500,seed=13)
+    assert a==b and a['iterations']==500
+    assert a['ruin_probability']>0
+    assert set(a['terminal_equity_percentiles'])=={'5','50','95'}
