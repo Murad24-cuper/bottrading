@@ -15,7 +15,7 @@
 | 11 — live/backtest reconciliation | Persisted trades do not include enough verified fill-side spread/slippage/commission evidence to calculate a reliable weekly bias correction. | Collect broker deal and quote cost evidence in the bot loop; update estimates only conservatively. |
 | 17 — Telegram approval mode | Ticket approval lifecycle and expiry are not implemented. A real approval can place a DEMO order; no isolated fake-executor approval integration exists yet. Mode stays off. | Implement full fake-executor lifecycle/expiry tests before enabling; only then use an isolated DEMO test. |
 | 18 — weekly self-learning | The scheduled weekly job explicitly defers retraining: no complete train/validation/walk-forward/holdout promotion pipeline is available. Risk ceilings are locked; bandit remains priority-only. | Build versioned rolling unseen holdouts and champion/challenger evaluation before enabling promotion or tuning. |
-| 20 — automated readiness report | `docs/LIVE_READINESS.md` is a point-in-time report. It is not regenerated and sent weekly; unresolved events do not have a verified resolution ledger. | Add a read-only weekly report job and event-resolution tracking; keep report-only and never let it switch account mode. |
+| 20 — automated readiness report | `docs/LIVE_READINESS.md` remains a point-in-time report and is not regenerated/sent weekly. `docs/ERROR_LEDGER.md` now reconciles all 21 historical ERROR/CRITICAL rows; six watchdog hang causes remain unresolved. | Add a read-only weekly report job; retain the ledger and keep report-only, never switching account mode. |
 
 Part 2 calendar fallback and Part 16 incident alerts are implemented. Part 19
 has the scheduled task, supervisor, system-awake request and bounded backup/log
