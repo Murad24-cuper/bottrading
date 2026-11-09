@@ -183,6 +183,16 @@ class TradingBot:
             for position in positions
             if not float(getattr(position,'sl',0) or 0)
         ))
+        if missing_sl and self.executor and hasattr(self.executor,'remediate_missing_sl'):
+            for p in positions:
+                if not float(getattr(p,'sl',0) or 0):
+                    self.executor.remediate_missing_sl(p)
+            positions=self._owned_positions() if hasattr(mt5,'positions_get') else []
+            missing_sl=tuple(sorted(
+                str(getattr(position,'symbol','?'))
+                for position in positions
+                if not float(getattr(position,'sl',0) or 0)
+            ))
         if missing_sl:
             self._entries_health_blocked=True
             if missing_sl!=self._missing_sl_signature:
@@ -193,6 +203,7 @@ class TradingBot:
         elif self._missing_sl_signature:
             self._event('INFO','Bot mövqelərində stop-loss yoxlaması bərpa olundu.')
             self._missing_sl_signature=()
+            self._entries_health_blocked=False
         if connected:
             try: account=mt5.account_info()
             except Exception: account=None
@@ -238,6 +249,10 @@ class TradingBot:
         return account
     def _startup(self,state):
         if self._started: return
+        if self.executor:
+            for p in self._owned_positions():
+                if not float(getattr(p,'sl',0) or 0):
+                    self.executor.remediate_missing_sl(p)
         enabled=[s.name for s in getattr(self.scanner,'_strategies',[])] if self.scanner else []
         allowed=[name for name in enabled if name in self.live['strategies']]
         self._event('INFO',f"Bot started mode={self.live['mode']} account={self._last_account_type} equity={state.equity:.2f} enabled={enabled} allowed_live={allowed}")

@@ -80,6 +80,10 @@ class Executor:
         if result is None: return self._failure(f'order_send failed: {m.last_error()}',volume)
         if result.retcode!=m.TRADE_RETCODE_DONE: return self._failure(f'order_send rejected ({result.retcode}): {result.comment}',volume,retcode=result.retcode)
         ticket=int(getattr(result,'position',0) or getattr(result,'order',0) or getattr(result,'deal',0))
+        # Ensure the opened broker position has a valid server-side stop-loss
+        opened_p=next((x for x in (m.positions_get() or []) if (int(x.ticket)==ticket or int(getattr(x,'identifier',-1) or -1)==ticket) and int(getattr(x,'magic',0))==self.settings.magic_number),None)
+        if opened_p and not float(getattr(opened_p,'sl',0) or 0):
+            self.remediate_missing_sl(opened_p,planned_sl=signal.sl_price)
         now=datetime.now(timezone.utc).isoformat()
         try:
             costs=expected_cost if isinstance(expected_cost,dict) else {}
@@ -151,6 +155,49 @@ class Executor:
             except Exception as exc: self._event(f'Could not persist updated SL/TP for ticket={p.ticket}: {exc}','WARNING')
         self._event(f'Modify SL/TP ticket={ticket} success={ok}'+('' if ok else f' error={getattr(result,"comment",m.last_error())}'), 'INFO' if ok else 'WARNING')
         return ok
+    def remediate_missing_sl(self,position,planned_sl=None,max_retries=3):
+        """Ensure a live position has a valid server-side stop loss; close immediately if impossible."""
+        ticket=int(position.ticket)
+        current_sl=float(getattr(position,'sl',0) or 0)
+        if current_sl>0: return True
+        symbol=str(position.symbol)
+        is_buy=getattr(position,'type',0)==getattr(self.mt5,'POSITION_TYPE_BUY',0)
+        row=(self.db.get_trade(ticket) if hasattr(self.db,'get_trade') else None) or {}
+        sl_candidate=planned_sl or float(row.get('sl') or 0)
+        tp_candidate=float(getattr(position,'tp',0) or 0) or float(row.get('tp') or 0)
+        info=self.mt5.symbol_info(symbol)
+        tick=self.mt5.symbol_info_tick(symbol)
+        point=float(getattr(info,'point',1e-5) or 1e-5) if info else 1e-5
+        stops_level=float(getattr(info,'trade_stops_level',0) or 0)*point if info else 0.0
+        bid=float(tick.bid) if tick else float(getattr(position,'price_open',0) or 0)
+        ask=float(tick.ask) if tick else float(getattr(position,'price_open',0) or 0)
+        market_price=bid if is_buy else ask
+        if not sl_candidate or (is_buy and sl_candidate>=market_price) or (not is_buy and sl_candidate<=market_price):
+            atr_distance=0.0
+            try:
+                frame=market_data.get_closed_candles(self.mt5,symbol,'M1',30)
+                if frame is not None and not frame.empty: atr_distance=float(ind.atr(frame).iloc[-1])*2.0
+            except Exception: pass
+            if not atr_distance or not math.isfinite(atr_distance) or atr_distance<=0:
+                atr_distance=max(50*point,abs(market_price*0.005)) if market_price>0 else 50*point
+            atr_distance=max(atr_distance,stops_level+5*point)
+            sl_candidate=round(market_price-atr_distance if is_buy else market_price+atr_distance,5)
+        if not tp_candidate or (is_buy and tp_candidate<=market_price) or (not is_buy and tp_candidate>=market_price):
+            tp_candidate=round(market_price+2.0*abs(market_price-sl_candidate) if is_buy else market_price-2.0*abs(market_price-sl_candidate),5)
+        for attempt in range(1,max_retries+1):
+            req={'action':self.mt5.TRADE_ACTION_SLTP,'position':ticket,'symbol':symbol,'sl':sl_candidate,'tp':tp_candidate,'magic':self.settings.magic_number}
+            res=self.mt5.order_send(req)
+            if res and res.retcode==getattr(self.mt5,'TRADE_RETCODE_DONE',10009):
+                self._event(f'Recovered missing SL for ticket={ticket} symbol={symbol} sl={sl_candidate} (attempt {attempt})','WARNING')
+                try: self.db.update_open_trade(ticket,sl=sl_candidate,tp=tp_candidate)
+                except Exception: pass
+                if hasattr(position,'sl'): position.sl=sl_candidate
+                return True
+            import time
+            time.sleep(0.05*attempt)
+        self._event(f'CRITICAL: Emergency remediation failed to set SL on ticket={ticket} ({symbol}) after {max_retries} attempts; closing position at market','CRITICAL')
+        self.close_position(ticket,'kill')
+        return False
     def enforce_time_stop(self,settings=None):
         """Manage scale-outs, protective stops, momentum exits and the safety ceiling."""
         settings=settings or self.settings; config=settings.risk; raw=settings.config['risk']; now=datetime.now(timezone.utc); actions=[]
