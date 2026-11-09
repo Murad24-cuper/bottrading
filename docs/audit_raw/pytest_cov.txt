@@ -1,0 +1,369 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.2.0, pluggy-1.7.0
+rootdir: C:\Users\Murad\Desktop\tradingbot
+plugins: anyio-4.16.0, platformdirs-4.14.5, cov-7.1.0
+collected 273 items
+
+tests\patterns\test_candles.py ...                                       [  1%]
+tests\patterns\test_chart.py ....                                        [  2%]
+tests\patterns\test_fibonacci.py ...                                     [  3%]
+tests\test_adaptive_gates.py ..                                          [  4%]
+tests\test_backtest.py ......                                            [  6%]
+tests\test_backtest_report.py ....                                       [  8%]
+tests\test_bot.py ................................                       [ 19%]
+tests\test_brain_bandit.py ..                                            [ 20%]
+tests\test_brain_checklist.py .                                          [ 20%]
+tests\test_brain_data.py .                                               [ 21%]
+tests\test_brain_dataset.py F                                            [ 21%]
+tests\test_brain_decision.py ..                                          [ 22%]
+tests\test_brain_drift.py ..                                             [ 23%]
+tests\test_brain_evaluation.py ...                                       [ 24%]
+tests\test_brain_memory.py ....                                          [ 25%]
+tests\test_brain_training.py ....                                        [ 27%]
+tests\test_causality.py .                                                [ 27%]
+tests\test_config.py ....                                                [ 28%]
+tests\test_confluence.py ..                                              [ 29%]
+tests\test_costs.py ..                                                   [ 30%]
+tests\test_dashboard_controls.py .....                                   [ 32%]
+tests\test_dashboard_presentation.py ...                                 [ 33%]
+tests\test_dashboard_process.py .                                        [ 33%]
+tests\test_dashboard_queries.py ....                                     [ 35%]
+tests\test_dashboard_readiness.py ..                                     [ 35%]
+tests\test_db.py ..................                                      [ 42%]
+tests\test_executor_safety.py ....                                       [ 43%]
+tests\test_executor_sessions.py ..                                       [ 44%]
+tests\test_executor_sync.py ....                                         [ 46%]
+tests\test_feature_impact.py ..                                          [ 46%]
+tests\test_health_notify.py ...                                          [ 47%]
+tests\test_history.py .F.F..F.                                           [ 50%]
+tests\test_indicators_features.py ....                                   [ 52%]
+tests\test_levels.py ...                                                 [ 53%]
+tests\test_market_context.py ..                                          [ 54%]
+tests\test_mt5_safety.py ...                                             [ 55%]
+tests\test_news.py .........                                             [ 58%]
+tests\test_paths_health_check.py ..                                      [ 59%]
+tests\test_pipeline_funnel.py ..                                         [ 60%]
+tests\test_process_utils.py ...                                          [ 61%]
+tests\test_protections.py ....                                           [ 62%]
+tests\test_risk.py .................................                     [ 74%]
+tests\test_scanner.py .........                                          [ 78%]
+tests\test_scheduler.py ......                                           [ 80%]
+tests\test_session_context.py ..                                         [ 80%]
+tests\test_strategies.py ........                                        [ 83%]
+tests\test_supervisor.py ..........                                      [ 87%]
+tests\test_symbols.py ............                                       [ 91%]
+tests\test_telegram_commands.py .                                        [ 92%]
+tests\test_time_utils.py ........                                        [ 95%]
+tests\test_trade_rules.py .............                                  [100%]
+
+================================== FAILURES ===================================
+_________ test_labeled_dataset_is_causal_and_contains_both_directions _________
+
+tmp_path = WindowsPath('C:/Users/Murad/AppData/Local/Temp/pytest-of-Murad/pytest-251/test_labeled_dataset_is_causal0')
+
+    def test_labeled_dataset_is_causal_and_contains_both_directions(tmp_path):
+        m1_index=pd.date_range('2026-01-01',periods=24*60,freq='min',tz='UTC')
+        m1=bars(m1_index); m5=bars(m1_index[::5]); m15=bars(m1_index[::15])
+>       for tf,frame in [('M1',m1),('M5',m5),('M15',m15)]: frame.to_parquet(tmp_path/f'EURUSD_{tf}.parquet')
+                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_brain_dataset.py:18: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+.venv\Lib\site-packages\pandas\core\frame.py:3002: in to_parquet
+    return to_parquet(
+.venv\Lib\site-packages\pandas\io\parquet.py:551: in to_parquet
+    impl = get_engine(engine)
+           ^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+engine = 'auto'
+
+    def get_engine(engine: str) -> BaseImpl:
+        """return our implementation"""
+        if engine == "auto":
+            engine = config["io"]["parquet"]["engine"]
+    
+        if engine == "auto":
+            # try engines in this order
+            engine_classes = [PyArrowImpl, FastParquetImpl]
+    
+            error_msgs = ""
+            for engine_class in engine_classes:
+                try:
+                    return engine_class()
+                except ImportError as err:
+                    error_msgs += "\n - " + str(err)
+    
+>           raise ImportError(
+                "Unable to find a usable engine; "
+                "tried using: 'pyarrow', 'fastparquet'.\n"
+                "A suitable version of "
+                "pyarrow or fastparquet is required for parquet "
+                "support.\n"
+                "Trying to import the above resulted in these errors:"
+                f"{error_msgs}"
+            )
+E           ImportError: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.
+E           A suitable version of pyarrow or fastparquet is required for parquet support.
+E           Trying to import the above resulted in these errors:
+E            - The pyarrow installation is not built with support for the Parquet file format (DLL load failed while importing _parquet: An Application Control policy has blocked this file.)
+E            - `Import fastparquet` failed. fastparquet is required for parquet support. Use pip, conda, or your preferred package management tool to install the fastparquet package.
+
+.venv\Lib\site-packages\pandas\io\parquet.py:73: ImportError
+_________________ test_history_download_and_incremental_cache _________________
+
+tmp_path = WindowsPath('C:/Users/Murad/AppData/Local/Temp/pytest-of-Murad/pytest-251/test_history_download_and_incr0')
+
+    def test_history_download_and_incremental_cache(tmp_path):
+        mt5=FakeMT5(); settings=SimpleNamespace(root=tmp_path,config={'history':{'data_dir':'data/history','ranges_months':{'M1':3}}})
+        start=datetime(2025,1,1,tzinfo=timezone.utc); end=datetime(2025,1,1,0,3,tzinfo=timezone.utc)
+>       first=download_history(mt5,['EURUSD'],['M1'],start,end,settings)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_history.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\history.py:137: in download_history
+    combined.to_parquet(temporary)
+.venv\Lib\site-packages\pandas\core\frame.py:3002: in to_parquet
+    return to_parquet(
+.venv\Lib\site-packages\pandas\io\parquet.py:551: in to_parquet
+    impl = get_engine(engine)
+           ^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+engine = 'auto'
+
+    def get_engine(engine: str) -> BaseImpl:
+        """return our implementation"""
+        if engine == "auto":
+            engine = config["io"]["parquet"]["engine"]
+    
+        if engine == "auto":
+            # try engines in this order
+            engine_classes = [PyArrowImpl, FastParquetImpl]
+    
+            error_msgs = ""
+            for engine_class in engine_classes:
+                try:
+                    return engine_class()
+                except ImportError as err:
+                    error_msgs += "\n - " + str(err)
+    
+>           raise ImportError(
+                "Unable to find a usable engine; "
+                "tried using: 'pyarrow', 'fastparquet'.\n"
+                "A suitable version of "
+                "pyarrow or fastparquet is required for parquet "
+                "support.\n"
+                "Trying to import the above resulted in these errors:"
+                f"{error_msgs}"
+            )
+E           ImportError: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.
+E           A suitable version of pyarrow or fastparquet is required for parquet support.
+E           Trying to import the above resulted in these errors:
+E            - The pyarrow installation is not built with support for the Parquet file format (DLL load failed while importing _parquet: An Application Control policy has blocked this file.)
+E            - `Import fastparquet` failed. fastparquet is required for parquet support. Use pip, conda, or your preferred package management tool to install the fastparquet package.
+
+.venv\Lib\site-packages\pandas\io\parquet.py:73: ImportError
+_____ test_long_history_range_retries_in_chunks_and_keeps_available_bars ______
+
+tmp_path = WindowsPath('C:/Users/Murad/AppData/Local/Temp/pytest-of-Murad/pytest-251/test_long_history_range_retrie0')
+
+    def test_long_history_range_retries_in_chunks_and_keeps_available_bars(tmp_path):
+        class ChunkOnlyMT5(FakeMT5):
+            def copy_rates_range(self,symbol,tf,start,end):
+                self.calls.append((start,end))
+                if (end-start).days>7:
+                    return None
+                stamp=int(start.timestamp())
+                return np.array([(stamp,1.,2.,.5,1.5,100,1)],dtype=[('time','i8'),('open','f8'),('high','f8'),('low','f8'),('close','f8'),('tick_volume','i8'),('spread','i8')])
+            def last_error(self): return (-2,'Invalid params')
+    
+        mt5=ChunkOnlyMT5(); settings=SimpleNamespace(root=tmp_path,config={'history':{'data_dir':'data/history','ranges_months':{'M1':3}}})
+        start=datetime(2025,1,1,tzinfo=timezone.utc); end=datetime(2025,1,16,tzinfo=timezone.utc)
+>       result=download_history(mt5,['EURUSD'],['M1'],start,end,settings)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_history.py:65: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\history.py:137: in download_history
+    combined.to_parquet(temporary)
+.venv\Lib\site-packages\pandas\core\frame.py:3002: in to_parquet
+    return to_parquet(
+.venv\Lib\site-packages\pandas\io\parquet.py:551: in to_parquet
+    impl = get_engine(engine)
+           ^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+engine = 'auto'
+
+    def get_engine(engine: str) -> BaseImpl:
+        """return our implementation"""
+        if engine == "auto":
+            engine = config["io"]["parquet"]["engine"]
+    
+        if engine == "auto":
+            # try engines in this order
+            engine_classes = [PyArrowImpl, FastParquetImpl]
+    
+            error_msgs = ""
+            for engine_class in engine_classes:
+                try:
+                    return engine_class()
+                except ImportError as err:
+                    error_msgs += "\n - " + str(err)
+    
+>           raise ImportError(
+                "Unable to find a usable engine; "
+                "tried using: 'pyarrow', 'fastparquet'.\n"
+                "A suitable version of "
+                "pyarrow or fastparquet is required for parquet "
+                "support.\n"
+                "Trying to import the above resulted in these errors:"
+                f"{error_msgs}"
+            )
+E           ImportError: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.
+E           A suitable version of pyarrow or fastparquet is required for parquet support.
+E           Trying to import the above resulted in these errors:
+E            - The pyarrow installation is not built with support for the Parquet file format (DLL load failed while importing _parquet: An Application Control policy has blocked this file.)
+E            - `Import fastparquet` failed. fastparquet is required for parquet support. Use pip, conda, or your preferred package management tool to install the fastparquet package.
+
+.venv\Lib\site-packages\pandas\io\parquet.py:73: ImportError
+___________ test_incremental_refresh_backfills_oldest_missing_chunk ___________
+
+tmp_path = WindowsPath('C:/Users/Murad/AppData/Local/Temp/pytest-of-Murad/pytest-251/test_incremental_refresh_backf0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F6717C2540>
+
+    def test_incremental_refresh_backfills_oldest_missing_chunk(tmp_path,monkeypatch):
+        import json
+        import src.history as history
+        data_dir=tmp_path/'data'; brain=data_dir/'brain'; brain.mkdir(parents=True)
+        (brain/'universe.json').write_text(json.dumps({'symbols':[{'symbol':'EURUSD'}]}),encoding='utf-8')
+        history_dir=data_dir/'history'; history_dir.mkdir()
+        first=pd.Timestamp('2026-10-01T00:00:00Z')
+>       pd.DataFrame({'open':[1],'high':[1],'low':[1],'close':[1],'tick_volume':[1],'spread':[1]},index=pd.DatetimeIndex([first],name='time')).to_parquet(history_dir/'EURUSD_M1.parquet')
+
+tests\test_history.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+.venv\Lib\site-packages\pandas\core\frame.py:3002: in to_parquet
+    return to_parquet(
+.venv\Lib\site-packages\pandas\io\parquet.py:551: in to_parquet
+    impl = get_engine(engine)
+           ^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+engine = 'auto'
+
+    def get_engine(engine: str) -> BaseImpl:
+        """return our implementation"""
+        if engine == "auto":
+            engine = config["io"]["parquet"]["engine"]
+    
+        if engine == "auto":
+            # try engines in this order
+            engine_classes = [PyArrowImpl, FastParquetImpl]
+    
+            error_msgs = ""
+            for engine_class in engine_classes:
+                try:
+                    return engine_class()
+                except ImportError as err:
+                    error_msgs += "\n - " + str(err)
+    
+>           raise ImportError(
+                "Unable to find a usable engine; "
+                "tried using: 'pyarrow', 'fastparquet'.\n"
+                "A suitable version of "
+                "pyarrow or fastparquet is required for parquet "
+                "support.\n"
+                "Trying to import the above resulted in these errors:"
+                f"{error_msgs}"
+            )
+E           ImportError: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.
+E           A suitable version of pyarrow or fastparquet is required for parquet support.
+E           Trying to import the above resulted in these errors:
+E            - The pyarrow installation is not built with support for the Parquet file format (DLL load failed while importing _parquet: An Application Control policy has blocked this file.)
+E            - `Import fastparquet` failed. fastparquet is required for parquet support. Use pip, conda, or your preferred package management tool to install the fastparquet package.
+
+.venv\Lib\site-packages\pandas\io\parquet.py:73: ImportError
+============================== warnings summary ===============================
+.venv-audit\Lib\site-packages\coverage\core.py:108
+  C:\Users\Murad\Desktop\tradingbot\.venv-audit\Lib\site-packages\coverage\core.py:108: CoverageWarning: Couldn't import C tracer: DLL load failed while importing tracer: An Application Control policy has blocked this file. (no-ctracer); see https://coverage.readthedocs.io/en/7.17.2/messages.html#warning-no-ctracer
+    warn(f"Couldn't import C tracer: {IMPORT_ERROR}", slug="no-ctracer", once=True)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.12.10-final-0 _______________
+
+Name                                 Stmts   Miss  Cover
+--------------------------------------------------------
+src\__init__.py                          0      0   100%
+src\analysis\__init__.py                 0      0   100%
+src\analysis\feature_impact.py          50      8    84%
+src\backtest\__init__.py                 2      0   100%
+src\backtest\engine.py                 295     65    78%
+src\backtest\report.py                 121      4    97%
+src\bot.py                             741    160    78%
+src\brain\__init__.py                    0      0   100%
+src\brain\bandit.py                     34      2    94%
+src\brain\checklist.py                  43      1    98%
+src\brain\data.py                       29      4    86%
+src\brain\dataset.py                    78     67    14%
+src\brain\decide.py                     13      1    92%
+src\brain\drift.py                      12      0   100%
+src\brain\evaluation.py                 50     11    78%
+src\brain\memory.py                     69      3    96%
+src\brain\sizing.py                      6      0   100%
+src\brain\training.py                   78      8    90%
+src\config.py                          218     12    94%
+src\confluence.py                       20      1    95%
+src\costs.py                            45      4    91%
+src\dashboard\__init__.py                0      0   100%
+src\dashboard\app.py                   442    355    20%
+src\dashboard\presentation.py           47      3    94%
+src\dashboard\queries.py               178     48    73%
+src\dashboard\readiness.py              20      1    95%
+src\db.py                              424     56    87%
+src\executor.py                        417    230    45%
+src\features.py                         37      1    97%
+src\history.py                         182     45    75%
+src\indicators.py                       79      0   100%
+src\levels.py                           37      1    97%
+src\logger.py                           18      4    78%
+src\market_context.py                   39      0   100%
+src\market_data.py                      77     39    49%
+src\models.py                           55      0   100%
+src\mt5_client.py                       74     20    73%
+src\news.py                            147     29    80%
+src\notify.py                          110      7    94%
+src\paths.py                            14      0   100%
+src\patterns\__init__.py                 0      0   100%
+src\patterns\candles.py                 35      0   100%
+src\patterns\chart.py                   63      4    94%
+src\patterns\fibonacci.py               21      0   100%
+src\process_utils.py                    39      7    82%
+src\protections.py                      41      2    95%
+src\risk.py                            110      9    92%
+src\scanner.py                         471    118    75%
+src\scheduler.py                        62      9    85%
+src\sessions.py                         61      5    92%
+src\strategies\__init__.py              18      0   100%
+src\strategies\breakout.py              25      9    64%
+src\strategies\common.py                16      2    88%
+src\strategies\mean_reversion.py        35     23    34%
+src\strategies\trend_pullback.py        36      6    83%
+src\strategies\volatility_scalp.py      39      3    92%
+src\strategy_base.py                    16      0   100%
+src\supervisor.py                       77     10    87%
+src\symbols.py                         183     23    87%
+src\time_utils.py                       59      3    95%
+src\trade_rules.py                     102      3    97%
+src\windows_runtime.py                  11      2    82%
+--------------------------------------------------------
+TOTAL                                 5821   1428    75%
+=========================== short test summary info ===========================
+FAILED tests/test_brain_dataset.py::test_labeled_dataset_is_causal_and_contains_both_directions
+FAILED tests/test_history.py::test_history_download_and_incremental_cache - I...
+FAILED tests/test_history.py::test_long_history_range_retries_in_chunks_and_keeps_available_bars
+FAILED tests/test_history.py::test_incremental_refresh_backfills_oldest_missing_chunk
+================== 4 failed, 269 passed, 1 warning in 40.54s ==================
