@@ -1,7 +1,7 @@
 # Live readiness — report only
 
 **Status: FAIL — not READY.** Generated from the read-only local database at
-2026-11-09 15:03 UTC. This score does not change account mode or trading
+2026-11-09 15:23 UTC. This score does not change account mode or trading
 controls. DEMO remains the only selected account; real-money switching stays a
 manual decision.
 
