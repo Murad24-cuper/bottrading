@@ -27,6 +27,17 @@ def validate_risk_ceilings(config: dict[str,Any]) -> None:
             if value<ceiling: raise ValueError(f'risk.{key} cannot be below locked floor {ceiling}')
         elif value>ceiling:
             raise ValueError(f'risk.{key} exceeds locked ceiling {ceiling}')
+    for section_name in ('demo_exploration','weekend'):
+        section=config.get(section_name,{})
+        if not isinstance(section,dict): continue
+        for key in ('risk_per_trade_pct','max_open_positions'):
+            if key in section:
+                try: val=float(section[key])
+                except (TypeError,ValueError) as exc: raise ValueError(f'{section_name}.{key} must be a number') from exc
+                if not math.isfinite(val): raise ValueError(f'{section_name}.{key} must be finite')
+                ceiling=LOCKED_RISK_CEILINGS[key]
+                if val>ceiling:
+                    raise ValueError(f'{section_name}.{key} exceeds locked ceiling {ceiling}')
 
 def assert_runtime_location(config: dict[str, Any], actual: str | None = None) -> None:
     """Refuse to start a bot from a machine not selected by config."""

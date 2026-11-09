@@ -9,4 +9,5 @@ Tracking responses and fixes for findings in `docs/AUDIT.md`.
 | **CRIT-03** | Cost gate commission deadlock | Confirmed & Fixed | Added fallback hierarchy (deals -> symbol/account -> 0.0 default); recognized 0.0 deals; marked estimated commissions so fresh/zero-commission accounts pass cost gate without blocking. | `tests/test_audit_crit03.py` |
 | **CRIT-04** | Requote sizing and stop validation | Confirmed & Fixed | On requote, re-validate SL/TP side and distance, recompute volume via stressed-stop sizing to ensure risk cap is never exceeded, and cancel if safe volume falls below min lot. | `tests/test_audit_crit04.py` |
 | **CRIT-05** | Partial fill and DB reconciliation | Confirmed & Fixed | Recorded actual filled volume in `open_trade`; updated `sync_positions` and bot `_startup` to reconcile DB open trades against MT5 and close stale DB records. | `tests/test_audit_crit05.py` |
+| **HIGH-01** | Exploration & weekend locked ceiling bypass | Confirmed & Fixed | Extended `validate_risk_ceilings()` to enforce locked ceilings on `demo_exploration` and `weekend` config sections (`risk_per_trade_pct` and `max_open_positions`). | `tests/test_audit_high01.py` |
 
