@@ -25,22 +25,38 @@ def _validate_table(table: str) -> str:
     return table
 
 class _RetryConnection(sqlite3.Connection):
-    """Retry one transient SQLite lock once after the configured busy wait."""
+    """Retry transient SQLite lock errors with exponential backoff (up to 4 attempts)."""
+    _RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4)  # seconds: 50ms, 100ms, 200ms, 400ms
+
     @staticmethod
     def _locked(exc):
         return isinstance(exc, sqlite3.OperationalError) and 'locked' in str(exc).lower()
+
     def execute(self, *args, **kwargs):
-        try: return super().execute(*args, **kwargs)
-        except sqlite3.OperationalError as exc:
-            if not self._locked(exc): raise
-            time.sleep(.05)
-            return super().execute(*args, **kwargs)
+        last_exc = None
+        for delay in (None,) + self._RETRY_DELAYS:
+            if delay is not None:
+                time.sleep(delay)
+            try:
+                return super().execute(*args, **kwargs)
+            except sqlite3.OperationalError as exc:
+                if not self._locked(exc):
+                    raise
+                last_exc = exc
+        raise last_exc
+
     def executemany(self, *args, **kwargs):
-        try: return super().executemany(*args, **kwargs)
-        except sqlite3.OperationalError as exc:
-            if not self._locked(exc): raise
-            time.sleep(.05)
-            return super().executemany(*args, **kwargs)
+        last_exc = None
+        for delay in (None,) + self._RETRY_DELAYS:
+            if delay is not None:
+                time.sleep(delay)
+            try:
+                return super().executemany(*args, **kwargs)
+            except sqlite3.OperationalError as exc:
+                if not self._locked(exc):
+                    raise
+                last_exc = exc
+        raise last_exc
 
 SCHEMA='''
 CREATE TABLE IF NOT EXISTS trades(
