@@ -411,7 +411,7 @@ class MarketScanner:
                 if cost_cfg.get('enabled',False):
                     since=now-timedelta(hours=float(cost_cfg.get('lookback_hours',24)))
                     cell=self.db.get_spread_cell(symbol,signal.timeframe,now.hour,since,now) if hasattr(self.db,'get_spread_cell') else {'samples':0,'median_spread_price':None}
-                    feature_snapshot['cost_map']={'hour_utc':now.hour,'samples':cell['samples'],'median_spread_price':cell['median_spread_price']}
+                    feature_snapshot['cost_map']={'hour_utc':now.hour,'samples':cell['samples'],'median_spread_price':cell['median_spread_price'],'commission_known':bool(cost.get('commission_known',False))}
                     if int(cell['samples'])<int(cost_cfg.get('min_samples_per_cell',5)):
                         cost_gate_reason='cost map cell not calibrated'
                     elif not cost.get('commission_known',False):
@@ -450,10 +450,11 @@ class MarketScanner:
             arms=list(dict.fromkeys(arm_for(item) for item in eligible))
             try:
                 with self.db.connect() as connection:
-                    closed=connection.execute("SELECT strategy,asset_group,open_time,COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0) net FROM trades WHERE status='closed' AND mode='main' ORDER BY close_time DESC LIMIT ?",(max(1,int(self.settings.config.get('self_learning',{}).get('bandit_history_trades',1000))),)).fetchall()
+                    closed=connection.execute("SELECT strategy,asset_group,open_time,features,COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0) net FROM trades WHERE status='closed' AND mode='main' ORDER BY close_time DESC LIMIT ?",(max(1,int(self.settings.config.get('self_learning',{}).get('bandit_history_trades',1000))*10),)).fetchall()
                 history=[]
                 for row in closed:
                     try:
+                        if not json.loads(row['features'] or '{}').get('process_review',{}).get('good_process',False): continue
                         opened=datetime.fromisoformat(str(row['open_time']).replace('Z','+00:00'))
                         hour=opened.astimezone(timezone.utc).hour
                     except (ValueError,TypeError): continue

@@ -185,6 +185,11 @@ class Database:
         with self.connect() as connection:
             row=connection.execute('SELECT * FROM trades WHERE ticket=?',(ticket,)).fetchone()
             return dict(row) if row else None
+    def update_trade_features(self,ticket,features):
+        import json
+        payload=features if isinstance(features,str) else json.dumps(features,ensure_ascii=False,sort_keys=True,default=str)
+        with self.connect() as connection:
+            return connection.execute('UPDATE trades SET features=? WHERE ticket=?',(payload,int(ticket))).rowcount
     def latest_trade_id(self):
         with self.connect() as connection: return int(connection.execute('SELECT COALESCE(MAX(id),0) FROM trades').fetchone()[0])
     def get_closed_trades_after_id(self,last_id):
@@ -201,7 +206,10 @@ class Database:
             partial={int(row['ticket']):float(row['pnl'] or 0) for row in connection.execute('SELECT ticket,SUM(COALESCE(profit,0)+COALESCE(commission,0)+COALESCE(swap,0)) pnl FROM partial_closes GROUP BY ticket')}
         outcomes=[]
         for trade in trades:
-            try: brain=json.loads(trade.get('features') or '{}').get('brain',{}); memory=brain.get('memory',{})
+            try:
+                payload=json.loads(trade.get('features') or '{}')
+                if not payload.get('process_review',{}).get('good_process',False): continue
+                brain=payload.get('brain',{}); memory=brain.get('memory',{})
             except (TypeError,ValueError): continue
             probability=memory.get('probability'); risk_money=float(brain.get('risk_money') or 0)
             if probability is None or risk_money<=0: continue

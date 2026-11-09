@@ -377,7 +377,7 @@ def main():
             detail_end=(datetime.combine(selected,dt_time.min,tzinfo=AZ_TZ)+timedelta(days=1)).astimezone(timezone.utc).isoformat()
             detail_closed=queries.get_closed_trades(detail_start,detail_end,DB_PATH)
             if detail_closed:
-                full_closed=pd.DataFrame([{'Saat':local_time(r['close_time']),'Alət':r['symbol'],'İstiqamət':direction_label(r['direction']),'Həcm':r['volume'],'Açılış qiyməti':r['open_price'],'Bağlanış qiyməti':r['close_price'],'SL':r.get('sl'),'TP':r.get('tp'),'Nəticə':r['net_profit'],'Səbəb':close_reason_label(r['close_reason']),'Strategiya':strategy_label(r['strategy'])} for r in detail_closed])
+                full_closed=pd.DataFrame([{'Saat':local_time(r['close_time']),'Alət':r['symbol'],'İstiqamət':direction_label(r['direction']),'Həcm':r['volume'],'Açılış qiyməti':r['open_price'],'Bağlanış qiyməti':r['close_price'],'SL':r.get('sl'),'TP':r.get('tp'),'Nəticə':r['net_profit'],'Proses':('Yaxşı' if r.get('process_review',{}).get('good_process') else 'Naməlum'),'Nəticə (R)':r.get('process_review',{}).get('outcome_r'),'Səbəb':close_reason_label(r['close_reason']),'Strategiya':strategy_label(r['strategy'])} for r in detail_closed])
                 st.table(full_closed.style.format({'Nəticə':lambda value:format_money(value,signed=True)}).map(_money_color,subset=['Nəticə']))
             else: st.caption('Seçilən tarixdə bağlanan əməliyyat yoxdur.')
             if opened:

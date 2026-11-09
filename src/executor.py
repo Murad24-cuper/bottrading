@@ -1,7 +1,7 @@
 """MT5 order execution limited to positions carrying the configured magic."""
 from __future__ import annotations
 from datetime import datetime,timezone,timedelta
-import math
+import math,json
 from .models import TradeResult
 from .logger import get_logger
 from .time_utils import mt5_epoch_to_utc
@@ -412,6 +412,19 @@ class Executor:
                 profit=float(fallback.get('profit',0)); commission=0.0; swap=float(fallback.get('swap',0))
             close_reason=self._close_reason(final_closing,reasons.get(ticket),row)
             self.db.update_trade_close(ticket,close_time=close_time,close_price=close_price,profit=profit,commission=commission,swap=swap,close_reason=close_reason)
+            try:
+                closed=self.db.get_trade(ticket) or row
+                features=json.loads(closed.get('features') or '{}')
+                review=features.get('process_review')
+                if isinstance(review,dict):
+                    partial_net=sum(float(item.get('profit') or 0)+float(item.get('commission') or 0)+float(item.get('swap') or 0) for item in self.db.get_partial_closes(ticket))
+                    risk_money=float(features.get('sizing',{}).get('stressed_risk_money') or features.get('brain',{}).get('risk_money') or 0)
+                    net=profit+commission+swap+partial_net
+                    review['outcome_r']=net/risk_money if risk_money>0 else None
+                    review['outcome_grade']='win' if net>0 else 'loss' if net<0 else 'flat'
+                    self.db.update_trade_features(ticket,features)
+            except (ValueError,TypeError,AttributeError) as exc:
+                self._event(f'Process/outcome review failed ticket={ticket}: {type(exc).__name__}','WARNING')
             self._event(f'Synced closed ticket={ticket} reason={close_reason} profit={profit}')
             reconciled.append(ticket)
         return reconciled

@@ -405,6 +405,11 @@ class TradingBot:
             if count_open>=int(exploration_cfg.get('max_open_positions',5)) or count_today>=int(exploration_cfg.get('max_trades_per_day',40)):
                 self._signal_update(candidate,False,'exploration trade limit reached'); return False
         candidate_features.setdefault('trade_mode',trade_mode)
+        candidate_features['process_review']={'good_process':True,'grade':'good',
+            'checks':{'stop_and_target_present':bool(signal.sl_price and signal.tp_price),
+                      'stressed_risk_sized':bool(new_risk>0),'risk_gate_passed':True,
+                      'cost_gate_passed':bool(candidate_features.get('cost_map',{}).get('median_cost_stop_ratio',0)<.10 and candidate_features.get('cost_map',{}).get('commission_known',True))},
+            'outcome_r':None,'outcome_grade':'pending'}
         result=self.executor.open_trade(signal,volume,expected_cost=candidate.cost,features=getattr(candidate,'features',{}))
         if not result.success:
             self._signal_update(candidate,False,result.message); return False
@@ -459,8 +464,14 @@ class TradingBot:
         rows=self.db.get_closed_trades_between(start,end,self.settings.magic_number)
         def net(row): return float(row.get('profit') or 0)+float(row.get('commission') or 0)+float(row.get('swap') or 0)
         by_strategy=Counter(); by_group=Counter()
+        good_process=0; reviewed_r=[]
         for row in rows:
             value=net(row); by_strategy[str(row.get('strategy') or 'Naməlum')]+=value; by_group[str(row.get('asset_group') or 'digər')]+=value
+            try:
+                review=json.loads(row.get('features') or '{}').get('process_review',{})
+                good_process+=bool(review.get('good_process'))
+                if review.get('outcome_r') is not None: reviewed_r.append(float(review['outcome_r']))
+            except (TypeError,ValueError): pass
         pnl=sum(net(row) for row in rows)
         lessons=[]
         if by_strategy:
@@ -469,7 +480,9 @@ class TradingBot:
         if by_group:
             best_group=max(by_group,key=by_group.get); worst_group=min(by_group,key=by_group.get)
             lessons.append(f'qrup üzrə yaxşı: {best_group} {by_group[best_group]:+.2f} $, zəif: {worst_group} {by_group[worst_group]:+.2f} $')
-        message=f"🧠 Bu həftə öyrəndiklərim · {start.date().isoformat()}–{(end-timedelta(days=1)).date().isoformat()} · {len(rows)} bağlanan əməliyyat · xalis {pnl:+.2f} $."
+        mean_r=sum(reviewed_r)/len(reviewed_r) if reviewed_r else None
+        review_summary=f'proses qaydasına uyğun {good_process}/{len(rows)} · orta nəticə {mean_r:+.2f}R' if mean_r is not None else f'proses qaydasına uyğun {good_process}/{len(rows)} · R nəticəsi məlum deyil'
+        message=f"🧠 Bu həftə öyrəndiklərim · {start.date().isoformat()}–{(end-timedelta(days=1)).date().isoformat()} · {len(rows)} bağlanan əməliyyat · xalis {pnl:+.2f} $ · {review_summary}."
         if lessons: message+=' '+' · '.join(lessons)+'.'
         else: message+=' Əməliyyat olmayıb; strategiya nəticəsi çıxarmaq üçün nümunə yoxdur.'
         self.db.log_event('INFO','bot',message); self._notify('weekly_learning',message)

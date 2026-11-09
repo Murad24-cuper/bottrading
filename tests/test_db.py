@@ -44,12 +44,19 @@ def test_spread_samples_are_bucketed_by_utc_symbol_timeframe_and_hour(tmp_path):
 def test_recent_brain_outcomes_include_costs_and_partial_closes(tmp_path):
     import json
     db=Database(tmp_path/'brain-outcomes.db')
-    db.insert_trade(ticket=909,symbol='EURUSD',asset_group='forex',direction='buy',volume=.1,open_time='2026-11-05T10:00:00+00:00',open_price=1.1,sl=1.09,tp=1.12,profit=0,commission=0,swap=0,magic=20260001,status='open',features=json.dumps({'brain':{'memory':{'probability':.7},'risk_money':2}}))
+    db.insert_trade(ticket=909,symbol='EURUSD',asset_group='forex',direction='buy',volume=.1,open_time='2026-11-05T10:00:00+00:00',open_price=1.1,sl=1.09,tp=1.12,profit=0,commission=0,swap=0,magic=20260001,status='open',features=json.dumps({'brain':{'memory':{'probability':.7},'risk_money':2},'process_review':{'good_process':True}}))
     db.update_trade_close(909,close_time='2026-11-05T10:05:00+00:00',close_price=1.12,profit=1.0,commission=-.1,swap=0,close_reason='tp')
     db.insert_partial_close(ticket=909,symbol='EURUSD',volume=.05,price=1.11,profit=.7,commission=-.05,swap=0,reason='partial_tp')
     rows=db.get_recent_brain_outcomes(100,20260001)
     assert rows[0]['probability']==.7 and rows[0]['win'] is True
     assert abs(rows[0]['net_r']-.775)<1e-12
+
+def test_brain_outcomes_exclude_trades_without_good_process_review(tmp_path):
+    import json
+    db=Database(tmp_path/'process-filter.db')
+    db.insert_trade(ticket=911,symbol='EURUSD',asset_group='forex',direction='buy',volume=.1,open_time='2026-11-05T10:00:00+00:00',open_price=1.1,sl=1.09,tp=1.12,profit=0,commission=0,swap=0,magic=20260001,status='open',features=json.dumps({'brain':{'memory':{'probability':.9},'risk_money':2}}))
+    db.update_trade_close(911,close_time='2026-11-05T10:05:00+00:00',close_price=1.12,profit=1,commission=0,swap=0,close_reason='tp')
+    assert db.get_recent_brain_outcomes(10,20260001)==[]
 
 def test_signal_stats_snapshot_event_and_wal(tmp_path):
     db=Database(tmp_path/'dashboard.db')

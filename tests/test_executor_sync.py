@@ -8,8 +8,9 @@ from src.executor import Executor
 
 
 def test_sync_separates_partial_and_final_realized_pnl(tmp_path):
+    import json
     db=Database(tmp_path/'sync.db')
-    db.insert_trade(ticket=17,symbol='EURUSD',asset_group='forex',direction='buy',volume=.5,initial_volume=1.0,open_time='2026-11-05T10:00:00+00:00',open_price=1.1,sl=1.09,tp=1.12,profit=0,commission=0,swap=0,magic=7,status='open',initial_risk=.01)
+    db.insert_trade(ticket=17,symbol='EURUSD',asset_group='forex',direction='buy',volume=.5,initial_volume=1.0,open_time='2026-11-05T10:00:00+00:00',open_price=1.1,sl=1.09,tp=1.12,profit=0,commission=0,swap=0,magic=7,status='open',initial_risk=.01,features=json.dumps({'sizing':{'stressed_risk_money':2},'process_review':{'good_process':True,'outcome_r':None,'outcome_grade':'pending'}}))
     deals=[
         SimpleNamespace(ticket=1,position_id=17,entry=0,time=1793872800,volume=1.0,price=1.1,profit=0,commission=-.1,swap=0,reason=0,comment=''),
         SimpleNamespace(ticket=2,position_id=17,entry=1,time=1793872860,volume=.5,price=1.11,profit=1,commission=-.05,swap=.01,reason=0,comment='partial_tp'),
@@ -28,6 +29,8 @@ def test_sync_separates_partial_and_final_realized_pnl(tmp_path):
     assert row['commission']==pytest.approx(-.15) and row['swap']==pytest.approx(.02)
     assert len(partial)==1 and partial[0]['deal_ticket']==2 and partial[0]['profit']==1
     assert db.get_pnl_since('2026-11-05T00:00:00+00:00')==pytest.approx(2.83)
+    review=json.loads(row['features'])['process_review']
+    assert review['outcome_grade']=='win' and review['outcome_r']==pytest.approx(2.83/2)
 
 
 @pytest.mark.parametrize(('stop','deal_profit','expected'),[

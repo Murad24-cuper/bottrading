@@ -48,8 +48,12 @@ def get_open_positions(path=None):
     return _rows(path,"SELECT ticket,symbol,direction,volume,open_time,open_price,sl,tp,profit,commission,swap,strategy,magic,extended_minutes,features FROM trades WHERE status='open' AND mode='main' ORDER BY open_time")
 
 def get_closed_trades(start_utc,end_utc,path=None):
-    rows=_rows(path,"SELECT close_time,symbol,direction,volume,open_price,close_price,sl,tp,profit,commission,swap,close_reason,strategy FROM trades WHERE status='closed' AND mode='main' AND close_time>=? AND close_time<? ORDER BY close_time DESC",(start_utc,end_utc))
-    for row in rows: row['net_profit']=float(row.get('profit') or 0)+float(row.get('commission') or 0)+float(row.get('swap') or 0)
+    rows=_rows(path,"SELECT close_time,symbol,direction,volume,open_price,close_price,sl,tp,profit,commission,swap,close_reason,strategy,features FROM trades WHERE status='closed' AND mode='main' AND close_time>=? AND close_time<? ORDER BY close_time DESC",(start_utc,end_utc))
+    import json
+    for row in rows:
+        row['net_profit']=float(row.get('profit') or 0)+float(row.get('commission') or 0)+float(row.get('swap') or 0)
+        try: row['process_review']=json.loads(row.get('features') or '{}').get('process_review',{})
+        except (TypeError,ValueError): row['process_review']={}
     return rows
 
 def get_exploration_trades(start_utc,end_utc,path=None):
