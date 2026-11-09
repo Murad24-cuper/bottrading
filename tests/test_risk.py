@@ -2,13 +2,20 @@ from datetime import datetime,timezone,timedelta
 from types import SimpleNamespace
 import pytest
 from src.models import Signal,AccountState
-from src.risk import calc_volume,check_trade_allowed
+from src.risk import calc_volume,calc_volume_stressed,check_trade_allowed
 
 SPEC={'trade_tick_value':1.0,'trade_tick_size':0.0001,'volume_min':0.01,'volume_step':0.01,'volume_max':10.0}
 
 def test_calc_volume_normal_case():
     volume,reason=calc_volume(1000,0.5,1.1,1.099,SPEC)
     assert volume==0.5 and reason=='ok'
+
+def test_stressed_sizing_accounts_for_costs_and_refuses_risky_minimum():
+    ordinary,_=calc_volume(1000,.5,1.1,1.099,SPEC)
+    stressed,reason=calc_volume_stressed(1000,.5,1.1,1.099,SPEC,2.0)
+    assert reason=='ok' and 0<stressed<ordinary
+    tiny,tiny_reason=calc_volume_stressed(10,.25,1.1,1.099,SPEC,100.0)
+    assert tiny==0 and tiny_reason=='min lot exceeds risk'
 def test_calc_volume_ten_dollar_account_refused():
     assert calc_volume(10,0.5,1.1,1.099,SPEC)==(0,'min lot exceeds risk')
 def test_calc_volume_rounds_down_to_step():

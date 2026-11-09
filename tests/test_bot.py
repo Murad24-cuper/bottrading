@@ -47,7 +47,7 @@ def make_bot(tmp_path,mode='shadow',strategies=None,candidate=True,max_errors=5,
     settings=make_settings(tmp_path,mode,strategies,max_errors); db=Database(settings.db_path); mt5=FakeMT5(); client=FakeClient(mt5); executor=FakeExecutor()
     signal=Signal('EURUSD','buy','M1',100,99,102,.8,'breakout','test signal')
     spec={'trade_tick_value':1,'trade_tick_size':1,'volume_min':.01,'volume_step':.01,'volume_max':5}
-    row=db.insert_signal(time='2026-11-02T12:00:00+00:00',symbol='EURUSD',strategy='breakout',direction='buy',timeframe='M1',confidence=.8,entry=100,sl=99,tp=102,expected_cost=.1,score=5,taken=0,skip_reason='')
+    row=db.insert_signal(time=datetime.now(timezone.utc).isoformat(),symbol='EURUSD',strategy='breakout',direction='buy',timeframe='M1',confidence=.8,entry=100,sl=99,tp=102,expected_cost=.1,score=5,taken=0,skip_reason='')
     item=SimpleNamespace(symbol='EURUSD',asset_group='forex',strategy='breakout',signal=signal,cost={'cost':.1},symbol_spec=spec,score=5,signal_row_id=row)
     scanner=FakeScanner([item] if candidate else [])
     bot=TradingBot(settings,client,db,scanner,executor,clock=clock)

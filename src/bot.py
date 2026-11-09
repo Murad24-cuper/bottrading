@@ -12,7 +12,7 @@ from .executor import Executor
 from .logger import get_logger
 from .market_data import get_account_state
 from .mt5_client import MT5Client
-from .risk import calc_volume,check_trade_allowed
+from .risk import calc_volume,calc_volume_stressed,check_trade_allowed
 from .scanner import MarketScanner
 from .symbols import SymbolService
 from .symbols import underlying_group,underlying_key
@@ -339,7 +339,15 @@ class TradingBot:
             risk_config['max_cost_to_target_ratio']=float(exploration_cfg.get('max_cost_to_target_ratio',.45))
             risk_config['max_open_positions']=min(int(risk_config['max_open_positions']),int(exploration_cfg.get('max_open_positions',5)))
             gate_settings=SimpleNamespace(config={**gate_settings.config,'risk':risk_config},root=self.settings.root)
-        volume,volume_reason=calc_volume(state.equity,risk_pct,signal.entry_hint,signal.sl_price,spec)
+        planned_volume,planned_reason=calc_volume(state.equity,risk_pct,signal.entry_hint,signal.sl_price,spec)
+        if planned_volume<=0:
+            self._signal_update(candidate,False,planned_reason); return False
+        tick_size=float(spec.get('trade_tick_size') or spec.get('tick_size') or 0)
+        tick_value=float(spec.get('trade_tick_value_loss') or spec.get('trade_tick_value') or spec.get('tick_value') or 0)
+        point=float(spec.get('point') or spec.get('point_size') or 0)
+        cost_per_lot=float(candidate.cost.get('cost',0) or 0)/max(float(getattr(candidate,'volume',planned_volume) or planned_volume),1e-12)
+        cost_per_lot+=2*float(self.settings.config.get('cost_model',{}).get('slippage_points',0))*point/tick_size*tick_value if tick_size>0 else float('inf')
+        volume,volume_reason=calc_volume_stressed(state.equity,risk_pct,signal.entry_hint,signal.sl_price,spec,cost_per_lot)
         if volume<=0:
             self._signal_update(candidate,False,volume_reason); return False
         risk_limit_pct=float(self.settings.config.get('risk',{}).get('max_total_open_risk_pct',5.0))
@@ -358,6 +366,9 @@ class TradingBot:
             current_open_risk+=_risk_money(abs(float(position.price_open)-stop),float(position.volume),position_spec)
         reserved_risk=sum(float(row.get('risk_money',0.0)) for row in self._cycle_reservations)
         new_risk=_risk_money(abs(float(signal.entry_hint)-float(signal.sl_price)),volume,spec)
+        candidate_features.setdefault('sizing',{}).update({'planned_volume':planned_volume,'stressed_volume':volume,
+            'planned_stop_risk_money':_risk_money(abs(float(signal.entry_hint)-float(signal.sl_price)),planned_volume,spec),
+            'stressed_risk_money':new_risk+cost_per_lot*volume,'estimated_cost_per_lot':cost_per_lot})
         if current_open_risk+reserved_risk+new_risk>float(state.equity)*risk_limit_pct/100:
             self._signal_update(candidate,False,'total open stop risk cap reached'); return False
         order_type=self.client.mt5.ORDER_TYPE_BUY if signal.direction=='buy' else self.client.mt5.ORDER_TYPE_SELL

@@ -24,6 +24,20 @@ def calc_volume(equity: float, risk_pct: float, entry: float, sl: float, symbol_
         volume=round(max(0,volume-step),8)
     return (volume,'ok') if volume>=minimum else (0,'min lot exceeds risk')
 
+
+def calc_volume_stressed(equity: float, risk_pct: float, entry: float, sl: float,
+                         symbol_spec: dict, extra_cost_per_lot: float) -> tuple[float,str]:
+    """Size so stop loss plus conservative per-lot costs stay inside the risk budget."""
+    if not math.isfinite(float(extra_cost_per_lot)) or float(extra_cost_per_lot)<0:
+        return 0,'invalid stressed cost estimate'
+    distance=abs(float(entry)-float(sl))
+    tick_value=float(symbol_spec.get('trade_tick_value_loss') or symbol_spec.get('trade_tick_value') or symbol_spec.get('tick_value') or 0)
+    tick_size=float(symbol_spec.get('trade_tick_size') or symbol_spec.get('tick_size') or 0)
+    if distance<=0 or tick_value<=0 or tick_size<=0: return 0,'invalid stop or tick specification'
+    stressed_spec=dict(symbol_spec)
+    stressed_spec['trade_tick_value_loss']=tick_value+float(extra_cost_per_lot)*tick_size/distance
+    return calc_volume(equity,risk_pct,entry,sl,stressed_spec)
+
 def _value(obj,key,default=None): return obj.get(key,default) if isinstance(obj,dict) else getattr(obj,key,default)
 
 def _group(position):
