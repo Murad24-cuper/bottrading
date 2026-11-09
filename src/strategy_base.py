@@ -14,7 +14,3 @@ class Strategy(ABC):
         return None
     @abstractmethod
     def generate_signal(self, symbol: str, candles: dict[str,pd.DataFrame]) -> Signal | None: ...
-
-class DummyStrategy(Strategy):
-    name='dummy'; required_timeframes=[]; params={}
-    def generate_signal(self, symbol, candles): return None

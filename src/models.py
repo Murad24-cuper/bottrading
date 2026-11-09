@@ -14,17 +14,6 @@ class Signal:
     reason: str = ''
 
 @dataclass
-class TradeRequest:
-    symbol: str
-    direction: str
-    volume: float
-    sl: float
-    tp: float
-    magic: int
-    comment: str = ''
-    deviation: int = 20
-
-@dataclass
 class TradeResult:
     success: bool
     ticket: int | None
@@ -32,20 +21,6 @@ class TradeResult:
     volume: float
     retcode: int | None
     message: str
-
-@dataclass
-class Position:
-    ticket: int
-    symbol: str
-    direction: str
-    volume: float
-    open_time: object
-    open_price: float
-    sl: float | None
-    tp: float | None
-    profit: float = 0
-    magic: int = 0
-    swap: float = 0
 
 @dataclass
 class AccountState:
