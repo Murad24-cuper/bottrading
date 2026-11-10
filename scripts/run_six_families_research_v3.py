@@ -23,7 +23,12 @@ def rsi_close(df, period=14):
     return r['close'] if isinstance(r, pd.DataFrame) else r
 
 FOCUS_SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'US500Cash', 'US100Cash', 'US30Cash', 'GER40Cash', 'GOLD']
+FOREX_SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD']
 INDEX_SYMBOLS = ['US500Cash', 'US100Cash', 'US30Cash', 'GER40Cash']
+REPORT_FILENAME = 'edge_research_v3.md'
+REPORT_TITLE = 'Systematic Edge Research v3: Six Strategy Families (Correct Research Split)'
+COST_MODEL_LABEL = 'Conservative Cost Model v1 (1.25x spread + slippage + commission).'
+BENCHMARK_LABEL = 'Buy-and-hold returns for indices and gold to isolate strategy skill from secular drift.'
 
 # Split boundaries per timeframe
 M_TRAIN_END = pd.Timestamp("2025-12-31T23:59:59Z")
@@ -222,7 +227,7 @@ def run_research():
         ("v3 (H1 buf 0.0, sl 1.5, tp 2.5)", "H1", 0.0, 1.5, 2.5, 12),
     ]:
         all_trades = []
-        for s in ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD']:
+        for s in FOREX_SYMBOLS:
             df = data[s][tf]
             if df is None: continue
             atr_s = atr(df, period=14)
@@ -587,11 +592,11 @@ def run_research():
         })
 
     # Write reports/edge_research_v3.md
-    report_path = ROOT / "reports" / "edge_research_v3.md"
+    report_path = ROOT / "reports" / REPORT_FILENAME
     report_path.parent.mkdir(parents=True, exist_ok=True)
     
     lines = [
-        "# Systematic Edge Research v3: Six Strategy Families (Correct Research Split)",
+        f"# {REPORT_TITLE}",
         "",
         f"**Date:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
         "**Splits Applied:**",
@@ -599,8 +604,8 @@ def run_research():
         "- **H4/D1 Swing:** Train `<= 2024-06-30`, Validation `2024-07-01` .. `2026-09-30` (27 months).",
         "- **Protected holdout:** observations from `2026-10-20` onward are excluded from feature and outcome scoring.",
         "- Trades whose full holding horizon would cross a train/validation cutoff are purged; holdout entries are not simulated.",
-        "**Cost Model:** Conservative Cost Model v1 (1.25x spread + slippage + commission).",
-        "**Benchmark Included:** Buy-and-hold returns for indices and gold to isolate strategy skill from secular drift.",
+        f"**Cost Model:** {COST_MODEL_LABEL}",
+        f"**Benchmark Included:** {BENCHMARK_LABEL}",
         "**Multiple Testing Control:** Deflated Sharpe Ratio with $M=18$ trials (threshold $DSR > 0$).",
         "",
         "## 1. Summary of Results",
@@ -637,7 +642,7 @@ def run_research():
         lines.extend([
             "- **Case B Applied:** No strategy qualified for unconstrained live production trading.",
             "- Normal entries stay off (capital protected from negative expectancy).",
-            "- `docs/NO_EDGE.md` updated with empirical v3 numbers.",
+            "- Research findings are report-only; they do not change normal-entry settings.",
             "- DEMO exploration continues running for all families at 0.1% minimum risk.",
         ])
         
@@ -645,12 +650,13 @@ def run_research():
         "",
         "## 3. Buy-and-Hold Drift vs. Strategy Skill Analysis",
         "",
-        "Over the examined periods, secular asset appreciation was extraordinarily strong:",
-        f"- **US500Cash:** Intraday M15/H1: Train {bnh_stats['US500Cash']['m_train']:+.1f}%, Val {bnh_stats['US500Cash']['m_val']:+.1f}% | H4/D1: Train {bnh_stats['US500Cash']['d_train']:+.1f}%, Val {bnh_stats['US500Cash']['d_val']:+.1f}%.",
-        f"- **US100Cash:** Intraday M15/H1: Train {bnh_stats['US100Cash']['m_train']:+.1f}%, Val {bnh_stats['US100Cash']['m_val']:+.1f}% | H4/D1: Train {bnh_stats['US100Cash']['d_train']:+.1f}%, Val {bnh_stats['US100Cash']['d_val']:+.1f}%.",
-        f"- **GOLD:** Intraday M15/H1: Train {bnh_stats['GOLD']['m_train']:+.1f}%, Val {bnh_stats['GOLD']['m_val']:+.1f}% | H4/D1: Train {bnh_stats['GOLD']['d_train']:+.1f}%, Val {bnh_stats['GOLD']['d_val']:+.1f}%.",
+        "Buy-and-hold returns for the symbols in this report's benchmark scope:",
+    ])
+    for symbol, stats in bnh_stats.items():
+        lines.append(f"- **{symbol}:** Intraday M15/H1: Train {stats['m_train']:+.1f}%, Val {stats['m_val']:+.1f}% | H4/D1: Train {stats['d_train']:+.1f}%, Val {stats['d_val']:+.1f}%.")
+    lines.extend([
         "",
-        "Despite large macro market drifts, mechanical breakout and trend rules suffer from transaction drag, execution costs, and whipsaws during chop regimes, resulting in negative net expectancy after conservative execution costs.",
+        "Strategy results are evaluated after the configured execution-cost model; benchmark returns are contextual and do not change qualification.",
     ])
     
     report_path.write_text("\n".join(lines), encoding="utf-8")

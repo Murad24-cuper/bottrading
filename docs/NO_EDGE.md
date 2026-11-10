@@ -1,5 +1,11 @@
 # Final Empirical No-Edge Policy: Case B Applied (v3 Research Splits)
 
+## Latest evaluation: v4 Ultra Low live costs
+
+**Date:** 2026-11-10. **Decision:** Case B; 0 of the 18 variants qualified on the requested seven-forex-pair plus GOLD universe using the live XM Ultra Low DEMO spread snapshot multiplied by 1.25. The unchanged v3 time splits, holdout, simulator, and qualification tests were used. See [the full v4 report](../reports/edge_research_v4_ultralow.md) for live costs, gate checks, and side-by-side v3 results.
+
+Normal strategy entries remain disabled. The v4 run did not change any strategy enablement, risk limit, exploration setting, or protection. The v3 research results below are retained as the historical baseline.
+
 ## 1. Decision & Status
 
 **Status:** Completed Case B (Empirical Research v3 Finished on 2026-11-10).
