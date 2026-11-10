@@ -12,7 +12,7 @@ from .features import build_features
 from .risk import calc_volume
 from .strategies import load_strategies
 from .symbols import SymbolService
-from .trade_rules import confidence_allowed, strategy_mtf_allowed, stop_target_from_atr, rebase_signal_levels, spread_within_median, spread_within_expected_move, weekend_mode_active
+from .trade_rules import confidence_allowed, strategy_mtf_allowed, exploration_mtf_allowed, stop_target_from_atr, rebase_signal_levels, spread_within_median, spread_within_expected_move, weekend_mode_active
 from .patterns.chart import detect_chart_patterns
 from .patterns.candles import detect_candlestick_patterns
 from .patterns.fibonacci import fibonacci_retracement
@@ -381,8 +381,8 @@ class MarketScanner:
                 mtf_args={'enabled':cfg.get('require_mtf_agreement',True),'fast':int(cfg.get('mtf_ema_fast',5)),'slow':int(cfg.get('mtf_ema_slow',13))}
                 main_mtf=strategy_mtf_allowed(strategy.name,candles,signal.direction,min_agree=int(cfg.get('mtf_min_agree',3)),**mtf_args)
                 if not main_mtf:
-                    explore_mtf=strategy_mtf_allowed(strategy.name,candles,signal.direction,min_agree=int(exploration_cfg.get('mtf_min_agree',2)),**mtf_args)
-                    if exploration_enabled and explore_mtf:
+                    explore_mtf=exploration_enabled and exploration_mtf_allowed(strategy.name,signal.timeframe,candles,signal.direction,fast=mtf_args['fast'],slow=mtf_args['slow'],min_agree=int(exploration_cfg.get('mtf_min_agree',2)))
+                    if explore_mtf:
                         feature_snapshot.setdefault('exploration',{'eligible':True,'soft_failures':[]})['soft_failures'].append('main MTF agreement threshold not met')
                     else:
                         reason='M1/M5/M15 direction disagreement'; self._write_signal(signal,0,reason,features=feature_snapshot); strategy_diagnostics[strategy.name]['mtf_disagreement']+=1; continue

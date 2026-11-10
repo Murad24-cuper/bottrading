@@ -178,7 +178,12 @@ def main() -> int:
                     emit('WARNING','Weekly brain retraining deferred: no complete training pipeline/data is available; brain remains shadow-only')
                     db.mark_maintenance_done('weekly_retrain',key,utc_now())
                     db.mark_maintenance_done('weekly_maintenance',key,utc_now())
-                run_scheduler_tick(utc_now(),settings.config,completed,{'daily_backup':daily_backup_job,'hourly_history':hourly_history_job,'weekly_maintenance':weekly_job})
+                def monthly_report_job(key):
+                    try:
+                        from src.monthly_report import write_monthly_report
+                        write_monthly_report(db,settings.root/'docs'/'MONTHLY_REPORT.md',key,notifier)
+                    except Exception as exc: emit('ERROR',f'Monthly exploration report failed: {type(exc).__name__}: {exc}')
+                run_scheduler_tick(utc_now(),settings.config,completed,{'daily_backup':daily_backup_job,'hourly_history':hourly_history_job,'weekly_maintenance':weekly_job,'monthly_report':monthly_report_job})
             if hang_watchdog_should_terminate(heartbeat_is_stale(settings.db_path,hang_seconds),time.monotonic()-child_started,hang_seconds):
                 reason=f'heartbeat older than {hang_seconds}s; child PID={child.pid}'
                 write_hang_report(settings.logs_dir,reason,child_pid=child.pid)

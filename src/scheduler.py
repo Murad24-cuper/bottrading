@@ -47,6 +47,8 @@ def due_scheduler_jobs(now: datetime, config: dict) -> list[tuple[str,str]]:
     daily_hour=int(schedule.get('daily_rollover_hour_utc',0))
     if now.hour>=daily_hour:
         jobs.append(('daily_backup',now.date().isoformat()))
+    if now.day==1:
+        jobs.append(('monthly_report',now.strftime('%Y-%m')))
     if now.weekday()==int(schedule.get('weekly_day_utc',6)) and now.hour>=int(schedule.get('weekly_hour_utc',2)):
         jobs.append(('weekly_maintenance',now.strftime('%G-W%V')))
     return jobs

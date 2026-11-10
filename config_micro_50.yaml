@@ -76,43 +76,43 @@ universe:
   exclude_dated_futures: true
   symbol_aliases:
     GOLD:
-    - GOLD
-    - XAUUSD
     - GOLDmicro
     - XAUUSDmicro
+    - GOLD
+    - XAUUSD
     SILVER:
     - SILVER
     - XAGUSD
     - SILVERmicro
     - XAGUSDmicro
     EURUSD:
-    - EURUSD
     - EURUSDmicro
     - EURUSD.m
+    - EURUSD
     GBPUSD:
-    - GBPUSD
     - GBPUSDmicro
     - GBPUSD.m
+    - GBPUSD
     USDJPY:
-    - USDJPY
     - USDJPYmicro
     - USDJPY.m
+    - USDJPY
     AUDUSD:
-    - AUDUSD
     - AUDUSDmicro
     - AUDUSD.m
+    - AUDUSD
     USDCAD:
-    - USDCAD
     - USDCADmicro
     - USDCAD.m
+    - USDCAD
     EURJPY:
-    - EURJPY
     - EURJPYmicro
     - EURJPY.m
+    - EURJPY
     GBPJPY:
-    - GBPJPY
     - GBPJPYmicro
     - GBPJPY.m
+    - GBPJPY
     US30:
     - US30Cash
     - US30
@@ -365,7 +365,7 @@ scanner:
   group_repeat_penalty: 0.05
   timeframe_point_sizes: {}
 live:
-  mode: trade
+  mode: shadow
   normal_trading_disabled: true
   strategies:
   - trend_pullback
@@ -570,9 +570,9 @@ weekend:
   move_horizon_minutes: 60
   max_hold_extended_minutes: 120
 demo_exploration:
-  enabled: true
+  enabled: false
   risk_per_trade_pct: 0.1
-  max_open_positions: 5
+  max_open_positions: 3
   max_trades_per_day: 40
   min_confidence: 0.45
   mtf_min_agree: 2

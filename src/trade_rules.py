@@ -38,6 +38,15 @@ def strategy_mtf_allowed(strategy_name: str, candles: dict[str, pd.DataFrame], d
     return mtf_direction_agrees(candles,direction,fast=fast,slow=slow,min_agree=min_agree)
 
 
+def exploration_mtf_allowed(strategy_name: str, signal_timeframe: str, candles: dict[str, pd.DataFrame],
+                            direction: str, fast: int=5, slow: int=13, min_agree: int=2) -> bool:
+    """Exploration uses the family frame for H1/H4/D1, M15 families retain MTF confirmation."""
+    timeframe=str(signal_timeframe).upper()
+    if timeframe in {'H1','H4','D1'}: return True
+    if timeframe=='M15': return strategy_mtf_allowed(strategy_name,candles,direction,enabled=True,fast=fast,slow=slow,min_agree=min_agree)
+    return False
+
+
 def stop_target_from_atr(entry: float, direction: str, atr: float, spread: float, sl_mult: float, tp_mult: float, horizon_minutes: float) -> tuple[float, float]:
     """Build symmetric directional stop and target distances for a short horizon."""
     horizon=max(1.0,float(horizon_minutes))

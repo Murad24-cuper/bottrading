@@ -324,6 +324,14 @@ def main():
         else: st.caption('Bu gün üçün kapital qeydi yoxdur.')
 
     with tab_report:
+        monthly_path=ROOT/'docs'/'MONTHLY_REPORT.md'
+        st.subheader('Aylıq DEMO araşdırma hesabatı')
+        if monthly_path.exists(): st.markdown(monthly_path.read_text(encoding='utf-8'))
+        else: st.caption('Aylıq hesabat növbəti ayın 1-də yaradılacaq.')
+        tracking=queries.get_exploration_forward_tracking(DB_PATH)
+        if tracking:
+            st.subheader('Canlı DEMO nəticələri və backtest müqayisəsi · forex + qızıl')
+            st.dataframe(pd.DataFrame(tracking),use_container_width=True,hide_index=True)
         now_utc=datetime.now(timezone.utc); seven_start=(now_utc-timedelta(days=7)).isoformat(); all_start='1970-01-01T00:00:00+00:00'
         for label,period_start,period_end in [('Bu gün',today_start,today_end),('Son 7 gün',seven_start,now_utc.isoformat()),('Bütün tarix',all_start,now_utc.isoformat())]:
             report=queries.get_performance_report(period_start,period_end,DB_PATH); overall=report['overall']

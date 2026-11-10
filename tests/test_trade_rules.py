@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from src.trade_rules import adverse_exit_score, confidence_allowed, mtf_direction_agrees, strategy_mtf_allowed, weekend_mode_active, scale_out_volume, should_exit_early, stop_only_tightens, stagnation_due, stop_protects_profit, continuation_metrics, stop_target_from_atr, spread_within_median, spread_within_expected_move, may_extend
+from src.trade_rules import adverse_exit_score, confidence_allowed, mtf_direction_agrees, strategy_mtf_allowed, exploration_mtf_allowed, weekend_mode_active, scale_out_volume, should_exit_early, stop_only_tightens, stagnation_due, stop_protects_profit, continuation_metrics, stop_target_from_atr, spread_within_median, spread_within_expected_move, may_extend
 
 
 def _frame(direction='buy', bars=80):
@@ -31,6 +31,12 @@ def test_mean_reversion_bypasses_only_generic_direction_agreement():
     candles={tf:_frame('sell') for tf in ('M1','M5','M15')}
     assert strategy_mtf_allowed('mean_reversion',candles,'buy',min_agree=2)
     assert not strategy_mtf_allowed('trend_pullback',candles,'buy',min_agree=2)
+
+def test_h4_exploration_ignores_lower_timeframe_disagreement_but_normal_does_not():
+    candles={tf:_frame('sell') for tf in ('M1','M5','M15')}
+    assert exploration_mtf_allowed('ts_momentum','H4',candles,'buy',min_agree=2)
+    assert not strategy_mtf_allowed('ts_momentum',candles,'buy',min_agree=2)
+    assert not exploration_mtf_allowed('ts_momentum','M15',candles,'buy',min_agree=2)
 
 def test_weekend_policy_activates_only_for_enabled_weekend_utc():
     from datetime import datetime,timezone
