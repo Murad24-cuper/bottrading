@@ -123,6 +123,7 @@ def test_incremental_refresh_includes_configured_jpy_crosses_with_broker_suffixe
     import src.history as history
     data_dir=tmp_path/'data'; brain=data_dir/'brain'; brain.mkdir(parents=True)
     (brain/'universe.json').write_text(json.dumps({'symbols':[{'symbol':'EURUSD'}]}),encoding='utf-8')
+    (data_dir/'history_refresh_cursor.json').write_text(json.dumps({'cursor':56}),encoding='utf-8')
     config={'universe':{'focus_symbols':['EURUSD','EURJPY','GBPJPY'],
         'symbol_aliases':{'EURUSD':['EURUSD'],'EURJPY':['EURJPYmicro','EURJPY.m','EURJPY'],
                           'GBPJPY':['GBPJPYmicro','GBPJPY.m','GBPJPY']}},
