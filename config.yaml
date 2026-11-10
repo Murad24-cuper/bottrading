@@ -314,3 +314,25 @@ runtime:
   location: local               # local | server; a mismatch refuses bot startup
 time:
   default_server_utc_offset_hours: 2
+
+# Profile presets (off by default, used for rehearsal / staged rollout)
+profiles:
+  micro_50:
+    enabled: false # Rehearsal mode; off by default; never auto-enabled
+    account:
+      mode: demo
+      assumed_balance: 50.0
+    risk:
+      risk_per_trade_pct: 0.25 # Feasible risk per trade from docs/MIN_LOT.md ($0.125 on $50; strictly respects 0.25% locked ceiling)
+      max_total_open_risk_pct: 3.0 # Within 5.0% locked ceiling
+      daily_loss_limit_pct: 3.0
+      weekly_loss_limit_pct: 6.0
+      max_open_positions: 4
+      max_positions_per_group: 3
+      max_positions_per_currency: 2
+    universe:
+      include_groups: [forex, metals]
+      focus_symbols: [EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, EURJPY, GBPJPY, GOLD]
+      weekend_symbols: [GOLD24-7]
+      exclude_symbols: [US500Cash, US100Cash, US30Cash, GER40Cash, UK100Cash, BTCUSD, ETHUSD, Altcoins_INDX, Crypto_10]
+    comment: "Prepared for 2-week XM Micro $50 rehearsal. Excludes indices and crypto where min lot dollar risk ($2-$15) exceeds the $0.50 risk ceiling."

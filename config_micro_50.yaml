@@ -1,0 +1,668 @@
+account:
+  mode: demo
+risk:
+  risk_per_trade_pct: 0.25
+  daily_loss_limit_pct: 3.0
+  weekly_loss_limit_pct: 8.0
+  max_trades_per_day: 150
+  max_open_positions: 4
+  max_positions_per_group: 3
+  max_positions_per_currency: 2
+  max_positions_per_underlying_group: 2
+  max_total_open_risk_pct: 3.0
+  symbol_cooldown_minutes: 20
+  max_trades_per_symbol_per_day: 4
+  max_group_share_today: 0.4
+  max_margin_usage_pct: 50
+  max_hold_minutes: 20
+  max_hold_extended_minutes: 60
+  extend_step_minutes: 10
+  first_target_r: 0.8
+  scale_out_pct: 50
+  trail_atr_mult: 1.0
+  stagnation_minutes: 6
+  move_horizon_minutes: 10
+  stagnation_min_r: 0.2
+  momentum_lookback_bars: 5
+  breakeven_cost_multiplier: 1.0
+  min_risk_reward: 1.2
+  max_cost_to_target_ratio: 0.3
+  max_spread_points: {}
+  no_entry_before_close_minutes: 60
+  max_session_gap_hours: 6
+  sl_move_mult: 0.8
+  tp_move_mult: 1.2
+  gating_window: 20
+  gating_disable_hours: 24
+  early_exit_enabled: true
+  early_exit_score_threshold: 3
+  early_exit_min_r: -0.7
+  early_exit_max_r: -0.2
+  early_exit_ema_fast: 5
+  early_exit_ema_slow: 13
+  early_exit_swing_lookback: 5
+  early_exit_rsi_period: 14
+  early_exit_roc_period: 5
+  early_exit_volume_lookback: 20
+  early_exit_volume_spike_ratio: 1.5
+  early_exit_weights:
+    ema_cross: 1
+    swing_break: 1
+    momentum: 1
+    volume_spike: 1
+universe:
+  include_groups:
+  - forex
+  - metals
+  refresh_minutes: 5
+  tick_freshness_seconds_by_group:
+    forex: 120
+    metals: 180
+    indices: 180
+    energy: 300
+    crypto: 300
+    stocks: 1800
+    other: 180
+  exclude_symbols:
+  - US500Cash
+  - US100Cash
+  - US30Cash
+  - GER40Cash
+  - UK100Cash
+  - BTCUSD
+  - ETHUSD
+  - Altcoins_INDX
+  - Crypto_10
+  exclude_dated_futures: true
+  symbol_aliases:
+    GOLD:
+    - GOLD
+    - XAUUSD
+    - GOLDmicro
+    - XAUUSDmicro
+    SILVER:
+    - SILVER
+    - XAGUSD
+    - SILVERmicro
+    - XAGUSDmicro
+    EURUSD:
+    - EURUSD
+    - EURUSDmicro
+    - EURUSD.m
+    GBPUSD:
+    - GBPUSD
+    - GBPUSDmicro
+    - GBPUSD.m
+    USDJPY:
+    - USDJPY
+    - USDJPYmicro
+    - USDJPY.m
+    AUDUSD:
+    - AUDUSD
+    - AUDUSDmicro
+    - AUDUSD.m
+    USDCAD:
+    - USDCAD
+    - USDCADmicro
+    - USDCAD.m
+    EURJPY:
+    - EURJPY
+    - EURJPYmicro
+    - EURJPY.m
+    GBPJPY:
+    - GBPJPY
+    - GBPJPYmicro
+    - GBPJPY.m
+    US30:
+    - US30Cash
+    - US30
+    - US30micro
+    - DJ30
+    US500:
+    - US500Cash
+    - US500
+    - SPX500
+    - SP500
+    - US500micro
+    NAS100:
+    - US100Cash
+    - US100
+    - NAS100
+    - USTEC
+    - US100micro
+    GER40:
+    - GER40Cash
+    - GER40
+    - DAX
+    - GER40micro
+    OIL:
+    - OIL
+    - WTI
+    - USOIL
+    - OILmicro
+    BTCUSD:
+    - BTCUSD
+    - BTC
+    - BTCUSDmicro
+    ETHUSD:
+    - ETHUSD
+    - ETH
+    - ETHUSDmicro
+    Altcoins_INDX:
+    - Altcoins_INDX
+    Crypto_10:
+    - Crypto_10
+  focus_symbols:
+  - EURUSD
+  - GBPUSD
+  - USDJPY
+  - AUDUSD
+  - USDCAD
+  - EURJPY
+  - GBPJPY
+  - GOLD
+  weekend_symbols:
+  - GOLD24-7
+  weekend_include_open_indices: true
+timeframes:
+- M1
+- M5
+- M15
+magic_number: 20260001
+executor:
+  deviation_points: 20
+strategies:
+  trend_pullback:
+    enabled: true
+    groups:
+    - forex
+    - metals
+    - indices
+    timeframes:
+    - M1
+    - M5
+    - M15
+    - H1
+    params:
+      trend_ema_fast: 20
+      trend_ema_slow: 50
+      adx_min: 18
+      adx_min_by_group:
+        forex: 18
+        indices: 16
+        metals: 16
+      slope_atr_min: 0.05
+      pullback_atr: 0.45
+      stop_atr: 1.5
+      reward_risk: 1.8
+  mean_reversion:
+    enabled: true
+    groups:
+    - forex
+    - metals
+    - indices
+    - energy
+    - crypto
+    - stocks
+    timeframes:
+    - M1
+    - M5
+    - M15
+    params:
+      bb_period: 20
+      bb_std: 2.0
+      rsi_period: 14
+      rsi_low: 35
+      rsi_high: 65
+      near_level_atr: 1.0
+      allow_quiet_regime: true
+      stop_atr: 1.2
+  breakout:
+    enabled: false
+    groups:
+    - forex
+    - metals
+    - indices
+    - energy
+    - crypto
+    - stocks
+    timeframes:
+    - M1
+    - M5
+    - M15
+    params:
+      range_bars: 20
+      atr_expansion: 1.0
+      volume_ratio: 1.0
+      reward_range: 1.5
+  volatility_scalp:
+    enabled: true
+    timeframes:
+    - M1
+    - M5
+    - M15
+    groups:
+    - forex
+    - metals
+    - indices
+    - energy
+    - crypto
+    - stocks
+    params:
+      atr_period: 14
+      atr_percentile: 0.7
+      percentile_lookback_bars: 7200
+      target_atr: 0.4
+      stop_atr: 0.65
+      max_spread_target_ratio: 0.35
+  session_breakout:
+    enabled: true
+    groups:
+    - forex
+    - metals
+    - indices
+    - crypto
+    timeframes:
+    - M15
+    - H1
+    params:
+      variant: v1
+      buf_mult: 0.1
+      sl_mult: 1.5
+      tp_mult: 2.0
+  opening_range_breakout:
+    enabled: true
+    groups:
+    - indices
+    timeframes:
+    - M15
+    - H1
+    params:
+      variant: v1
+      sl_mult: 1.0
+      tp_mult: 1.5
+      use_sma: false
+  vwap_reversion:
+    enabled: true
+    groups:
+    - forex
+    - metals
+    - indices
+    - crypto
+    timeframes:
+    - M15
+    - H1
+    params:
+      variant: v1
+      dev_mult: 2.0
+      sl_mult: 1.5
+      use_rsi: false
+  donchian_breakout:
+    enabled: true
+    groups:
+    - forex
+    - metals
+    - indices
+    - crypto
+    timeframes:
+    - H1
+    - M15
+    params:
+      variant: v1
+      period: 20
+      sl_mult: 2.0
+      tp_mult: 4.0
+  ts_momentum:
+    enabled: true
+    groups:
+    - forex
+    - metals
+    - indices
+    - crypto
+    timeframes:
+    - H1
+    - M15
+    params:
+      variant: v1
+      lookback: 12
+      sl_mult: 2.0
+      tp_mult: 3.0
+  index_pullback_200d:
+    enabled: true
+    groups:
+    - indices
+    timeframes:
+    - H1
+    - M15
+    params:
+      variant: v1
+      sl_mult: 1.5
+      tp_mult: 2.5
+loop:
+  interval_seconds: 15
+scanner:
+  max_seconds_per_cycle: 12
+  max_candidates: 10
+  candle_count: 250
+  min_score: 0.0
+  min_confidence: 0.55
+  target_open_positions: 10
+  full_rotation_seconds: 60
+  require_mtf_agreement: true
+  mtf_min_agree: 2
+  mtf_ema_fast: 5
+  mtf_ema_slow: 13
+  max_spread_vs_median: 1.8
+  spread_median_lookback_hours: 24
+  spread_median_cache_seconds: 300
+  extend_min_score: 0.7
+  top_movers: 40
+  movement_timeframe_minutes: 30
+  max_spread_volatility_ratio: 1.0
+  spread_volatility_horizon_minutes: 20
+  min_movers_per_group: 5
+  repeat_penalty: 0.15
+  group_repeat_penalty: 0.05
+  timeframe_point_sizes: {}
+live:
+  mode: trade
+  normal_trading_disabled: true
+  strategies:
+  - trend_pullback
+  - mean_reversion
+  - breakout
+  - volatility_scalp
+  - session_breakout
+  - opening_range_breakout
+  - vwap_reversion
+  - donchian_breakout
+  - ts_momentum
+  - index_pullback_200d
+  max_cycle_errors: 5
+  equity_snapshot_seconds: 30
+  heartbeat_seconds: 10
+  command_ttl_seconds: 60
+health:
+  stale_ticks_seconds: 120
+  reconnect_failures_before_pause: 3
+  min_margin_level_pct: 150
+  order_rejections_before_alert: 3
+  max_memory_mb: 1500
+  warn_disk_free_gb: 5
+  stop_downloads_free_gb: 2
+schedule:
+  hourly_minute_utc: 0
+  daily_rollover_hour_utc: 0
+  daily_backup_keep: 7
+  log_retention_days: 14
+  weekly_day_utc: 6
+  weekly_hour_utc: 2
+notify:
+  big_loss_usd: 5.0
+  daily_summary_utc: '21:00'
+  weekly_summary_utc: '21:00'
+  rate_limit_minutes: 5
+news:
+  enabled: true
+  blackout_minutes_before: 15
+  blackout_minutes_after: 15
+  stale_after_hours: 24
+  refresh_hours: 6
+  calendar_filename: calendar_events.csv
+cost_model:
+  enabled: true
+  lookback_hours: 24
+  sample_interval_seconds: 60
+  min_samples_per_cell: 5
+  max_stop_ratio: 0.1
+  slippage_points: 1.0
+  one_bar_delay: false
+  default_commission_per_lot: 0.0
+protections:
+  enabled: true
+  consecutive_losses: 3
+  cooldown_hours: 24
+  symbol_daily_loss_r: 2.0
+  drawdown_window_hours: 24
+  rolling_drawdown_pct: 2.0
+dashboard:
+  real_balance_default: 100
+  real_risk_pct_default: 1.0
+paths:
+  data_dir: data
+  logs_dir: logs
+db:
+  signals_retention_days: 7
+  events_retention_days: 30
+  equity_retention_days: 30
+  equity_downsample_minutes: 5
+  backup_keep_days: 7
+  vacuum_weekday_utc: 6
+supervisor:
+  hang_seconds: 90
+  restart_backoff_seconds:
+  - 10
+  - 30
+  - 60
+  max_restarts_per_hour: 5
+  restart_window_minutes: 60
+mt5:
+  call_timeout_seconds: 20
+confluence:
+  enabled: false
+  rules: []
+brain:
+  enabled: false
+  shadow: true
+  min_checklist: 0.55
+  min_probability: 0.55
+  min_ev_r: 0.05
+  k_neighbors: 300
+  kelly_fraction: 0.25
+  max_symbols: 15
+  max_reference_situations: 1500000
+  query_exclude_same_symbol_days: 1
+  checklist:
+    weights:
+      trend: 1.0
+      location: 1.0
+      pattern: 1.0
+      candle: 1.0
+      fibonacci: 0.7
+      levels: 1.0
+      momentum: 1.0
+      volatility: 0.8
+      session: 0.5
+      context: 0.5
+  acceptance:
+    min_trades: 500
+    min_profit_factor: 1.1
+    min_symbols: 7
+    calibration_error: 0.05
+  universe_quotas:
+    forex: 5
+    indices: 4
+    stocks: 0
+    crypto: 2
+    metals: 2
+    energy: 0
+  pca_components: 28
+  max_reference_memory_mb: 800
+  purge_gap_minutes: 20
+  sample_every_minutes: 30
+  rounds: 5
+  weekend_memory_file: weekend_reference.parquet
+  retrain_day_utc: 6
+self_learning:
+  bandit_enabled: true
+  bandit_history_trades: 1000
+  retrain_hour_utc: 2
+  live_drift_window: 100
+  live_max_calibration_error: 0.1
+  live_min_expectancy_r: 0.0
+history:
+  data_dir: data/history
+  incremental_refresh_enabled: true
+  incremental_timeframes:
+  - M1
+  - M5
+  - M15
+  - H1
+  - H4
+  - D1
+  incremental_batch_days:
+    M1: 1
+    M5: 7
+    M15: 14
+    H1: 30
+    H4: 180
+    D1: 365
+  download_chunk_days:
+    M1: 7
+    M5: 28
+    M15: 90
+    H1: 180
+    H4: 365
+    D1: 730
+  incremental_refresh_every_cycles: 1
+  incremental_budget_seconds: 1.5
+  ranges_months:
+    M1: 12
+    M5: 36
+    M15: 36
+    H1: 60
+    H4: 120
+    D1: 240
+  weekend_ranges_months:
+    M1: 6
+    M5: 24
+    M15: 24
+    H4: 60
+    D1: 120
+  weekend_timeframes:
+  - M1
+  - M5
+  - M15
+  - H4
+  - D1
+  max_storage_gb: 5
+  max_bars_per_request: 80000
+  liquid_aliases:
+  - EURUSD
+  - GBPUSD
+  - USDJPY
+  - AUDUSD
+  - USDCAD
+  - US500
+  - NAS100
+  - US30
+  - GER40
+  - GOLD
+  - BTCUSD
+  - ETHUSD
+  - GOLD24-7
+  - Altcoins_INDX
+  - Crypto_10
+weekend:
+  enabled: true
+  risk_per_trade_pct: 0.15
+  max_open_positions: 3
+  move_horizon_minutes: 60
+  max_hold_extended_minutes: 120
+demo_exploration:
+  enabled: true
+  risk_per_trade_pct: 0.1
+  max_open_positions: 5
+  max_trades_per_day: 40
+  min_confidence: 0.45
+  mtf_min_agree: 2
+  min_risk_reward: 1.0
+  max_cost_to_target_ratio: 0.45
+backtest:
+  start_equity: 1000
+  commission_per_lot_per_side: 0.0
+  slippage_points: 1.0
+  fallback_spread_points: 15.0
+  in_sample_pct: 0.7
+  walk_forward_optimize_months: 6
+  walk_forward_test_months: 2
+  signal_lookback_bars: 120
+  parameter_grid:
+    trend_pullback:
+      adx_min:
+      - 18
+      - 22
+      reward_risk:
+      - 1.5
+      - 2.0
+    mean_reversion:
+      rsi_low:
+      - 25
+      - 30
+      rsi_high:
+      - 70
+      - 75
+    breakout:
+      range_bars:
+      - 15
+      - 20
+      volume_ratio:
+      - 1.1
+      - 1.3
+    volatility_scalp:
+      target_atr:
+      - 0.3
+      - 0.4
+      max_spread_target_ratio:
+      - 0.15
+      - 0.2
+db_path: data/bot.db
+runtime:
+  location: local
+time:
+  default_server_utc_offset_hours: 2
+profiles:
+  micro_50:
+    enabled: false
+    account:
+      mode: demo
+      assumed_balance: 50.0
+    risk:
+      risk_per_trade_pct: 0.25
+      max_total_open_risk_pct: 3.0
+      daily_loss_limit_pct: 3.0
+      weekly_loss_limit_pct: 6.0
+      max_open_positions: 4
+      max_positions_per_group: 3
+      max_positions_per_currency: 2
+    universe:
+      include_groups:
+      - forex
+      - metals
+      focus_symbols:
+      - EURUSD
+      - GBPUSD
+      - USDJPY
+      - AUDUSD
+      - USDCAD
+      - EURJPY
+      - GBPJPY
+      - GOLD
+      weekend_symbols:
+      - GOLD24-7
+      exclude_symbols:
+      - US500Cash
+      - US100Cash
+      - US30Cash
+      - GER40Cash
+      - UK100Cash
+      - BTCUSD
+      - ETHUSD
+      - Altcoins_INDX
+      - Crypto_10
+    comment: Prepared for 2-week XM Micro $50 rehearsal. Excludes indices and crypto
+      where min lot dollar risk ($2-$15) exceeds the $0.50 risk ceiling.
+rehearsal:
+  profile: micro_50
+  enabled: false
+  target_balance: 50.0
