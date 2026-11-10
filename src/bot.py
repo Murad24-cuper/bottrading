@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from .config import Settings
 from .db import Database
 from .executor import Executor
-from .parquet_compat import assert_no_pyarrow_loaded
+from .parquet_compat import assert_fastparquet_available
 from .logger import get_logger
 from .market_data import get_account_state
 from .mt5_client import MT5Client
@@ -51,7 +51,7 @@ class CycleResult:
 
 class TradingBot:
     def __init__(self,settings:Settings,client=None,db=None,scanner=None,executor=None,clock=None,sleep=None,monotonic=None):
-        assert_no_pyarrow_loaded()
+        assert_fastparquet_available()
         self.settings=settings; self.client=client or MT5Client(settings); self.db=db or Database(settings.db_path)
         self.scanner=scanner; self.executor=executor; self.clock=clock or (lambda:datetime.now(timezone.utc)); self.sleep_fn=sleep or time.sleep; self.monotonic=monotonic or time.monotonic
         self.process_started_at=self._now()

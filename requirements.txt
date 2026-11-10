@@ -11,6 +11,7 @@ graphviz==0.21
 streamlit-autorefresh==1.0.1
 requests==2.34.2
 defusedxml==0.7.1
-# Runtime parquet I/O is pinned to fastparquet. Streamlit still runs without
-# its optional pyarrow acceleration package; do not install pyarrow here.
+# Runtime parquet I/O is pinned to fastparquet explicitly. Streamlit also
+# requires pyarrow; its import does not change the selected project engine.
 fastparquet==2026.9.0
+pyarrow==19.0.1

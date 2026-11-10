@@ -2,18 +2,18 @@
 from __future__ import annotations
 
 from datetime import timezone
+import importlib.util
 import pandas as pd
-import sys
 
 _orig_to_parquet = pd.DataFrame.to_parquet
 _orig_read_parquet = pd.read_parquet
 _installed = False
 
 
-def assert_no_pyarrow_loaded() -> None:
-    """Fail startup if an optional dependency imported the blocked extension."""
-    if any(name == 'pyarrow' or name.startswith('pyarrow.') for name in sys.modules):
-        raise RuntimeError('pyarrow was imported; project Parquet I/O must use fastparquet only')
+def assert_fastparquet_available() -> None:
+    """Ensure the explicitly selected Parquet engine is installed."""
+    if importlib.util.find_spec('fastparquet') is None:
+        raise RuntimeError('fastparquet is required; project Parquet I/O must use it explicitly')
 
 
 def write_parquet(frame, path, *args, **kwargs):

@@ -15,12 +15,12 @@ sys.path.insert(0,str(ROOT))
 from src.dashboard import queries
 from src.dashboard.readiness import readiness_checks, simulate_small_account
 from src.paths import project_paths
-from src.parquet_compat import assert_no_pyarrow_loaded
+from src.parquet_compat import assert_fastparquet_available
 from src.dashboard.presentation import (AZ_TZ, close_reason_label,
                                         direction_label, format_duration,
                                         feature_label, format_money, local_time,
                                         strategy_label, translate_message)
-assert_no_pyarrow_loaded()
+assert_fastparquet_available()
 load_dotenv(ROOT/'.env',override=False)
 DATA_DIR,LOG_DIR=project_paths(ROOT)
 _APP_CONFIG=yaml.safe_load((ROOT/'config.yaml').read_text(encoding='utf-8'))
