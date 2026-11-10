@@ -1,4 +1,4 @@
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
@@ -24,7 +24,9 @@ def test_native_slow_timeframes_are_supported_without_synthetic_resampling():
     assert TF_DELTA['H4'].total_seconds()==4*3600
     assert TF_DELTA['D1'].total_seconds()==24*3600
 
-def test_history_download_and_incremental_cache(tmp_path):
+def test_history_download_and_incremental_cache(tmp_path,monkeypatch):
+    import src.history as history
+    monkeypatch.setattr(history,'server_utc_offset',lambda mt5:timedelta(0))
     mt5=FakeMT5(); settings=SimpleNamespace(root=tmp_path,config={'history':{'data_dir':'data/history','ranges_months':{'M1':3}}})
     start=datetime(2025,1,1,tzinfo=timezone.utc); end=datetime(2025,1,1,0,3,tzinfo=timezone.utc)
     first=download_history(mt5,['EURUSD'],['M1'],start,end,settings)
@@ -50,7 +52,9 @@ def test_manifest_lists_gaps_without_synthesizing_rows(tmp_path):
     assert manifest['gaps'][0]['missing_bars']==3
     assert manifest['sha256']==hashlib.sha256(path.read_bytes()).hexdigest()
 
-def test_long_history_range_retries_in_chunks_and_keeps_available_bars(tmp_path):
+def test_long_history_range_retries_in_chunks_and_keeps_available_bars(tmp_path,monkeypatch):
+    import src.history as history
+    monkeypatch.setattr(history,'server_utc_offset',lambda mt5:timedelta(0))
     class ChunkOnlyMT5(FakeMT5):
         def copy_rates_range(self,symbol,tf,start,end):
             self.calls.append((start,end))
@@ -119,7 +123,6 @@ def test_incremental_refresh_includes_configured_jpy_crosses_with_broker_suffixe
     import src.history as history
     data_dir=tmp_path/'data'; brain=data_dir/'brain'; brain.mkdir(parents=True)
     (brain/'universe.json').write_text(json.dumps({'symbols':[{'symbol':'EURUSD'}]}),encoding='utf-8')
-    (data_dir/'history_refresh_cursor.json').write_text(json.dumps({'cursor':1}),encoding='utf-8')
     config={'universe':{'focus_symbols':['EURUSD','EURJPY','GBPJPY'],
         'symbol_aliases':{'EURUSD':['EURUSD'],'EURJPY':['EURJPYmicro','EURJPY.m','EURJPY'],
                           'GBPJPY':['GBPJPYmicro','GBPJPY.m','GBPJPY']}},
@@ -139,8 +142,9 @@ def test_incremental_refresh_includes_configured_jpy_crosses_with_broker_suffixe
     mt5=AliasMT5(); now=datetime(2026,1,10,tzinfo=timezone.utc)
     refresh_incremental_batch(mt5,settings,now)
     refresh_incremental_batch(mt5,settings,now)
+    refresh_incremental_batch(mt5,settings,now)
 
-    assert calls==[['EURJPY#'],['GBPJPY#']]
+    assert calls==[['EURUSD'],['EURJPY#'],['GBPJPY#']]
 
 def test_incremental_refresh_backfills_oldest_missing_chunk(tmp_path,monkeypatch):
     import json

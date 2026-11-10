@@ -183,11 +183,18 @@ def refresh_incremental_batch(mt5,settings,now=None):
     timeframes=[str(tf) for tf in cfg.get('incremental_timeframes',['M1','M5','M15','H1']) if tf in TF_MINUTES]
     if not symbols or not timeframes: return None
     cursor_path=Path(settings.data_dir)/'history_refresh_cursor.json'
-    try: cursor=max(0,int(json.loads(cursor_path.read_text(encoding='utf-8')).get('cursor',0)))
-    except (OSError,ValueError,TypeError,json.JSONDecodeError): cursor=0
+    try:
+        cursor_state=json.loads(cursor_path.read_text(encoding='utf-8'))
+        cursor=max(0,int(cursor_state.get('cursor',0)))
+        stored_schedule=str(cursor_state.get('schedule',''))
+    except (OSError,ValueError,TypeError,json.JSONDecodeError): cursor=0; stored_schedule=''
     weekend_names={str(name) for name in settings.config.get('universe',{}).get('weekend_symbols',[])}
     weekend_timeframes=cfg.get('weekend_timeframes',['M1','M5','M15'])
     pairs=[(symbol,tf) for symbol in symbols for tf in timeframes if symbol not in weekend_names or tf in weekend_timeframes]
+    schedule=hashlib.sha256('\n'.join(f'{symbol}|{tf}' for symbol,tf in pairs).encode()).hexdigest()
+    # A changed symbol/timeframe rotation invalidates the old numeric cursor;
+    # otherwise new focus pairs could sit behind an old research-universe index.
+    if stored_schedule!=schedule: cursor=0
     cursor%=len(pairs); symbol,timeframe=pairs[cursor]
     end=now or datetime.now(timezone.utc)
     end=end.replace(tzinfo=timezone.utc) if end.tzinfo is None else end.astimezone(timezone.utc)
@@ -216,6 +223,6 @@ def refresh_incremental_batch(mt5,settings,now=None):
     result=download_history(mt5,[symbol],[timeframe],request_start,request_end,settings)
     cursor_path.parent.mkdir(parents=True,exist_ok=True)
     temp=cursor_path.with_suffix('.tmp')
-    temp.write_text(json.dumps({'cursor':(cursor+1)%len(pairs),'updated_at':end.isoformat()}),encoding='utf-8')
+    temp.write_text(json.dumps({'cursor':(cursor+1)%len(pairs),'schedule':schedule,'updated_at':end.isoformat()}),encoding='utf-8')
     temp.replace(cursor_path)
     return {'symbol':symbol,'timeframe':timeframe,'bars':len(result.get(symbol,{}).get(timeframe,[])),'cursor':(cursor+1)%len(pairs)}
