@@ -428,29 +428,31 @@ class MarketScanner:
                 if cost_cfg.get('enabled',False):
                     since=now-timedelta(hours=float(cost_cfg.get('lookback_hours',24)))
                     cell=self.db.get_spread_cell(symbol,signal.timeframe,now.hour,since,now) if hasattr(self.db,'get_spread_cell') else {'samples':0,'median_spread_price':None}
-                    feature_snapshot['cost_map']={'hour_utc':now.hour,'samples':cell['samples'],'median_spread_price':cell['median_spread_price'],'commission_known':bool(cost.get('commission_known',False)),'commission_estimated':bool(cost.get('commission_estimated',False))}
-                    if int(cell['samples'])<int(cost_cfg.get('min_samples_per_cell',5)):
-                        cost_gate_reason='cost map cell not calibrated'
-                    elif not cost.get('commission_known',False):
-                        cost_gate_reason='cost map commission unknown'
-                    elif cost_cfg.get('one_bar_delay',False):
-                        cost_gate_reason='one-bar delay cost unavailable'
-                    else:
-                        from .costs import estimate_round_trip_cost
-                        tick_size=float(spec.get('trade_tick_size') or spec.get('tick_size') or 0)
-                        tick_value=float(spec.get('trade_tick_value_loss') or spec.get('trade_tick_value') or spec.get('tick_value') or 0)
-                        point_size=float(spec.get('point') or spec.get('point_size') or 0)
-                        try:
-                            mapped=estimate_round_trip_cost(spread_price=float(cell['median_spread_price']),
-                                stop_distance=abs(signal.entry_hint-signal.sl_price),tick_size=tick_size,
-                                tick_value=tick_value,volume=volume,
-                                commission_per_lot_round_trip=float(cost.get('commission',0))/volume,
-                                slippage_points=float(cost_cfg.get('slippage_points',0)),point_size=point_size)
-                            feature_snapshot['cost_map']['median_cost_stop_ratio']=mapped['cost_stop_ratio']
-                            if mapped['cost_stop_ratio']>=float(cost_cfg.get('max_stop_ratio',.1)):
-                                cost_gate_reason='median hourly costs exceed 10% of stop risk'
-                        except (TypeError,ValueError,ZeroDivisionError):
-                            cost_gate_reason='cost map contract data unavailable'
+                    from .costs import evaluate_live_cost_gate
+                    tick_size=float(spec.get('trade_tick_size') or spec.get('tick_size') or 0)
+                    tick_value=float(spec.get('trade_tick_value_loss') or spec.get('trade_tick_value') or spec.get('tick_value') or 0)
+                    point_size=float(spec.get('point') or spec.get('point_size') or 0)
+                    mapped,cost_gate_reason=evaluate_live_cost_gate(
+                        samples=int(cell['samples']),min_samples=int(cost_cfg.get('min_samples_per_cell',5)),
+                        median_spread_price=cell['median_spread_price'],
+                        symbol_info_spread_points=float(spec.get('spread') or 0),point_size=point_size,
+                        fallback_spread_multiplier=1.25,
+                        stop_distance=abs(signal.entry_hint-signal.sl_price),tick_size=tick_size,
+                        tick_value=tick_value,volume=volume,
+                        commission_per_lot_round_trip=(float(cost.get('commission',0))/volume
+                            if cost.get('commission_known',False) else None),
+                        slippage_points=float(cost_cfg.get('slippage_points',0)),
+                        max_stop_ratio=float(cost_cfg.get('max_stop_ratio',.1)),
+                        one_bar_delay=bool(cost_cfg.get('one_bar_delay',False)))
+                    feature_snapshot['cost_map']={'hour_utc':now.hour,'samples':cell['samples'],
+                        'median_spread_price':cell['median_spread_price'],
+                        'spread_source':mapped.get('spread_source'),
+                        'effective_spread_price':mapped.get('spread_price'),
+                        'commission_known':bool(cost.get('commission_known',False)),
+                        'commission_estimated':bool(cost.get('commission_estimated',False)),
+                        'commission':mapped.get('commission'),
+                        'slippage_cost':mapped.get('spread_slippage'),
+                        'cost_stop_ratio':mapped.get('cost_stop_ratio')}
                 feature_snapshot['brain']['risk_money']=risk_money
                 from .brain.sizing import fractional_kelly_risk_pct
                 feature_snapshot['brain']['decision']=decide_brain(brain_checklist,brain_memory,brain_cfg,float(cost.get('cost',0))/max(risk_money,1e-12))

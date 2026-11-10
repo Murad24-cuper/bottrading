@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from src.costs import estimate_round_trip_cost,hourly_cost_cells
+from src.costs import estimate_round_trip_cost,evaluate_live_cost_gate,hourly_cost_cells
 
 
 def test_shared_cost_estimate_converts_ticks_commission_and_unknown_flag():
@@ -24,3 +24,18 @@ def test_hourly_cost_map_requires_known_commission_to_pass():
     assert incomplete and all(not row['commission_known'] and not row['passes_10pct'] for row in incomplete)
     known=hourly_cost_cells({('X','H1'):frame},{'X':spec},{'X':1.})
     assert all(row['commission_known'] for row in known)
+
+
+def test_new_account_zero_samples_uses_live_symbol_info_cost_fallback():
+    result,reason=evaluate_live_cost_gate(samples=0,min_samples=5,
+        median_spread_price=None,symbol_info_spread_points=13,point_size=.001,
+        fallback_spread_multiplier=1.25,stop_distance=.754,tick_size=.001,
+        tick_value=.92,volume=.01,commission_per_lot_round_trip=7,
+        slippage_points=1,max_stop_ratio=.10)
+
+    assert reason==''
+    assert result['spread_source']=='symbol_info_fallback'
+    assert result['spread_price']==pytest.approx(.01625)
+    assert result['commission']==pytest.approx(.07)
+    assert result['cost']>result['spread_slippage']
+    assert result['cost_stop_ratio']<.10

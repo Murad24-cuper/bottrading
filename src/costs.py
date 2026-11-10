@@ -39,6 +39,53 @@ def estimate_round_trip_cost(*, spread_price: float, stop_distance: float,
             "risk_money":risk}
 
 
+def evaluate_live_cost_gate(*, samples: int, min_samples: int,
+                            median_spread_price: float | None,
+                            symbol_info_spread_points: float,
+                            point_size: float, fallback_spread_multiplier: float,
+                            stop_distance: float, tick_size: float,
+                            tick_value: float, volume: float,
+                            commission_per_lot_round_trip: float | None,
+                            slippage_points: float, max_stop_ratio: float,
+                            one_bar_delay: bool = False) -> tuple[dict, str]:
+    """Evaluate a live entry using a sampled spread or conservative live fallback.
+
+    New broker symbols/accounts cannot have enough historical spread samples.
+    For those cells, use the current MT5 symbol_info spread with the configured
+    conservative multiplier instead of failing calibration. Commission and
+    two-sided slippage still enter the same stop-risk calculation.
+    """
+    if int(samples) >= int(min_samples):
+        if median_spread_price is None:
+            return {"spread_source": "sample_median"}, "cost map spread unavailable"
+        spread_price=float(median_spread_price)
+        spread_source="sample_median"
+    else:
+        if not math.isfinite(float(symbol_info_spread_points)) or float(symbol_info_spread_points)<=0:
+            return {"spread_source": "symbol_info_fallback"}, "live symbol_info spread unavailable"
+        if not math.isfinite(float(point_size)) or float(point_size)<=0:
+            return {"spread_source": "symbol_info_fallback"}, "cost map contract data unavailable"
+        multiplier=float(fallback_spread_multiplier)
+        if not math.isfinite(multiplier) or multiplier<1.25:
+            raise ValueError("fallback spread multiplier cannot be below 1.25")
+        spread_price=float(symbol_info_spread_points)*float(point_size)*multiplier
+        spread_source="symbol_info_fallback"
+    if commission_per_lot_round_trip is None:
+        return {"spread_source": spread_source, "spread_price": spread_price}, "cost map commission unknown"
+    if one_bar_delay:
+        return {"spread_source": spread_source, "spread_price": spread_price}, "one-bar delay cost unavailable"
+    try:
+        estimate=estimate_round_trip_cost(spread_price=spread_price,
+            stop_distance=stop_distance,tick_size=tick_size,tick_value=tick_value,
+            volume=volume,commission_per_lot_round_trip=commission_per_lot_round_trip,
+            slippage_points=slippage_points,point_size=point_size)
+    except (TypeError,ValueError,ZeroDivisionError):
+        return {"spread_source": spread_source, "spread_price": spread_price}, "cost map contract data unavailable"
+    result={**estimate,"spread_source":spread_source,"spread_price":spread_price}
+    reason="median hourly costs exceed 10% of stop risk" if estimate["cost_stop_ratio"]>=float(max_stop_ratio) else ""
+    return result,reason
+
+
 def hourly_cost_cells(frames: dict[tuple[str,str],'pd.DataFrame'], specs: dict[str,dict],
                       commission_per_lot_round_trip: dict[str,float] | None = None,
                       slippage_points: float = 0.0) -> list[dict]:
