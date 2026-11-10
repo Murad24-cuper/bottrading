@@ -164,6 +164,18 @@ def test_executor_sends_flat_typed_order_fields_and_rounds_for_strict_mt5(tmp_pa
     with pytest.raises((AssertionError,KeyError)):
         mt5.order_send(request=request)
 
+def test_build_open_request_is_flat_plain_typed_and_marked_for_demo_diagnostic(tmp_path):
+    exe,mt5,_=_make_exe(tmp_path)
+    signal=Signal('EURUSD#','buy','M15',1.1011,1.10001234,1.10309876,.8,'diagnostic')
+    features={'trade_mode':'exploration','exploration':{'family':'e2e_test','variant':'v1','timeframe':'M15'}}
+    prepared=exe.build_open_request(signal,.019,mt5._info,mt5._tick,mt5.ORDER_FILLING_FOK,features)
+    request=prepared['request']
+    assert request['symbol']=='EURUSD#' and request['volume']==.01
+    assert request['sl']==1.10001 and request['tp']==1.1031
+    assert request['comment']=='exp:e2e_test:v1:M15'
+    assert all(type(value) in (int,float,str) for value in request.values())
+    assert 'request' not in request
+
 
 def test_executor_request_normalizers_use_symbol_precision_and_plain_ascii():
     info=SimpleNamespace(digits=3,volume_min=.01,volume_step=.01)

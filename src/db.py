@@ -539,7 +539,7 @@ class Database:
             return dict(row) if row else None
     def insert_command(self,command,ttl_seconds=60):
         created=datetime.now(timezone.utc); expires=created+timedelta(seconds=int(ttl_seconds))
-        if command not in {'close_all','pause','resume','stop','close_all_stop','status','today','positions','health','diagnose_order'}: raise ValueError('Unsupported bot command')
+        if command not in {'close_all','pause','resume','stop','close_all_stop','status','today','positions','health','diagnose_order','demo_executor_e2e'}: raise ValueError('Unsupported bot command')
         with self.connect() as connection:
             connection.execute('BEGIN IMMEDIATE')
             active=connection.execute("SELECT id FROM commands WHERE command=? AND status IN ('pending','running') ORDER BY id LIMIT 1",(str(command),)).fetchone()

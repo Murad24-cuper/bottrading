@@ -47,6 +47,16 @@ class Executor:
     @staticmethod
     def _comment(value):
         return str(value).encode('ascii','replace').decode('ascii')[:31]
+    def build_open_request(self,signal,volume,info,tick,filling,features=None):
+        """Build the flat keyword payload accepted by the installed MT5 wrapper."""
+        buy=signal.direction=='buy'; volume=self._volume(info,volume)
+        price=self._price(info,tick.ask if buy else tick.bid)
+        stop=self._price(info,signal.sl_price); target=self._price(info,signal.tp_price)
+        exp_info=features.get('exploration',{}) if isinstance(features,dict) else {}
+        fam=exp_info.get('family',signal.strategy_name); var=exp_info.get('variant','v1'); tf=exp_info.get('timeframe',getattr(signal,'timeframe','M15'))
+        trade_comment=f"exp:{fam[:10]}:{var[:4]}:{tf[:3]}" if (features and features.get('trade_mode') in ('exploration','weekend_exploration')) else signal.strategy_name
+        request={'action':int(self.mt5.TRADE_ACTION_DEAL),'symbol':str(signal.symbol),'volume':float(volume),'type':int(self.mt5.ORDER_TYPE_BUY if buy else self.mt5.ORDER_TYPE_SELL),'price':float(price),'sl':float(stop),'tp':float(target),'deviation':int(self.settings.config['executor']['deviation_points']),'magic':int(self.settings.magic_number),'comment':self._comment(trade_comment),'type_time':int(self.mt5.ORDER_TIME_GTC),'type_filling':int(filling)}
+        return {'request':request,'volume':volume,'price':price,'sl':stop,'tp':target}
     def open_trade(self,signal,volume,expected_cost=None,features=None):
         m=self.mt5
         exploration_mode=bool(features and features.get('trade_mode') in ('exploration','weekend_exploration'))
@@ -89,8 +99,8 @@ class Executor:
             return self._failure('Refused open: SL/TP inside broker trade_stops_level',volume)
         filling=self._filling_mode(info)
         if filling is None: return self._failure('Refused open: no supported filling mode for market execution',volume)
-        price=self._price(info,tick.ask if buy else tick.bid)
-        stop=self._price(info,signal.sl_price); target=self._price(info,signal.tp_price)
+        prepared=self.build_open_request(signal,volume,info,tick,filling,features)
+        volume=float(prepared['volume']); price=prepared['price']; stop=prepared['sl']; target=prepared['tp']
         if buy and not stop<price<target: return self._failure('Refused open: rounded stop/target do not bracket buy price',volume)
         if not buy and not target<price<stop: return self._failure('Refused open: rounded stop/target do not bracket sell price',volume)
         minimum=float(getattr(info,'volume_min',0) or 0); step=float(getattr(info,'volume_step',0) or 0); maximum=float(getattr(info,'volume_max',0) or 0)
@@ -99,10 +109,9 @@ class Executor:
         safe_volume,why=calc_volume(float(account.equity),risk_pct,float(price),stop,info._asdict())
         if safe_volume<=0 or float(volume)>safe_volume+1e-9:
             return self._failure(f'Refused open: requested volume exceeds stop-risk size ({why})',volume)
+        req=prepared['request']
         exp_info=features.get('exploration',{}) if isinstance(features,dict) else {}
         fam=exp_info.get('family',signal.strategy_name); var=exp_info.get('variant','v1'); tf=exp_info.get('timeframe',getattr(signal,'timeframe','M15'))
-        trade_comment=f"exp:{fam[:10]}:{var[:4]}:{tf[:3]}" if (features and features.get('trade_mode') in ('exploration','weekend_exploration')) else signal.strategy_name
-        req={'action':int(m.TRADE_ACTION_DEAL),'symbol':str(signal.symbol),'volume':float(volume),'type':int(m.ORDER_TYPE_BUY if buy else m.ORDER_TYPE_SELL),'price':float(price),'sl':float(stop),'tp':float(target),'deviation':int(self.settings.config['executor']['deviation_points']),'magic':int(self.settings.magic_number),'comment':self._comment(trade_comment),'type_time':int(m.ORDER_TIME_GTC),'type_filling':int(filling)}
         result=m.order_send(**req)
         if result and result.retcode in (getattr(m,'TRADE_RETCODE_REQUOTE',10004),getattr(m,'TRADE_RETCODE_PRICE_CHANGED',10020)):
             tick=m.symbol_info_tick(signal.symbol)

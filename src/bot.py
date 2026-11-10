@@ -355,6 +355,65 @@ class TradingBot:
                             variant=dict(tagged); variant['type_filling']=int(getattr(mt5,fill_name)); probe(f'fill_{fill_name}',variant)
                     variant=dict(tagged); variant.pop('type_filling',None); probe('without_type_filling',variant)
                     self._event('INFO',f'Order-check diagnostic complete; executor-shaped retcode={tagged_outcome.get("retcode")}, comment={tagged_outcome.get("comment")!r}. No order was opened.')
+                elif action=='demo_executor_e2e':
+                    pause_path=self.settings.root/'STOP'
+                    if not pause_path.is_file() or 'PAUSE' not in pause_path.read_text(encoding='utf-8').upper():
+                        raise RuntimeError('DEMO executor E2E requires STOP=PAUSE before the guarded test.')
+                    mt5=self.client.mt5; symbol='EURUSD#'; account=mt5.account_info(); info=mt5.symbol_info(symbol); tick=mt5.symbol_info_tick(symbol)
+                    if account is None or account.trade_mode!=getattr(mt5,'ACCOUNT_TRADE_MODE_DEMO',0):
+                        raise RuntimeError('DEMO executor E2E refused: live terminal is not DEMO.')
+                    terminal=mt5.terminal_info()
+                    if terminal is None or not bool(getattr(terminal,'trade_allowed',False)):
+                        raise RuntimeError('DEMO executor E2E refused: terminal trade_allowed is false.')
+                    if info is None or tick is None or info.trade_mode!=getattr(mt5,'SYMBOL_TRADE_MODE_FULL',4):
+                        raise RuntimeError(f'DEMO executor E2E refused: {symbol} is unavailable or not fully tradable.')
+                    if mt5.positions_get(symbol=symbol) or any(int(p.magic)==self.settings.magic_number for p in (mt5.positions_get() or [])):
+                        raise RuntimeError('DEMO executor E2E refused: an existing position could conflict with the controlled test.')
+                    from .models import Signal
+                    digits=int(info.digits); pip=float(info.point)*(10 if digits in (3,5) else 1); volume=float(info.volume_min)
+                    entry=float(tick.ask); sl=round(entry-35*pip,digits); tp=round(entry+70*pip,digits)
+                    signal=Signal(symbol,'buy','M15',entry,sl,tp,1.0,'e2e_diagnostic','controlled DEMO executor verification')
+                    features={'trade_mode':'exploration','exploration':{'family':'e2e_test','variant':'v1','timeframe':'M15','diagnostic_only':True}}
+                    filling=self.executor._filling_mode(info)
+                    if filling is None: raise RuntimeError('DEMO executor E2E refused: no supported filling mode.')
+                    prepared=self.executor.build_open_request(signal,volume,info,tick,filling,features)
+                    checked=mt5.order_check(**prepared['request'])
+                    self._event('INFO',f'DEMO E2E order_check: symbol={symbol} volume={volume} entry={prepared["price"]} SL={prepared["sl"]} TP={prepared["tp"]} retcode={getattr(checked,"retcode",None)} comment={getattr(checked,"comment",None)!r} last_error={mt5.last_error()!r}')
+                    if checked is None or getattr(checked,'retcode',None)!=0:
+                        raise RuntimeError(f'DEMO executor E2E order_check rejected request: {getattr(checked,"comment",None)!r}')
+                    ticket=None; close_ok=False
+                    try:
+                        pause_path.unlink(missing_ok=True)
+                        self._event('WARNING','DEMO E2E temporarily cleared STOP inside serialized bot command; opening only the guarded EURUSD# test position.')
+                        opened=self.executor.open_trade(signal,volume,features=features)
+                        if not opened.success: raise RuntimeError(f'DEMO executor E2E open failed: {opened.message}')
+                        ticket=int(opened.ticket); positions=mt5.positions_get(symbol=symbol) or []
+                        position=next((p for p in positions if int(p.ticket)==ticket and int(p.magic)==self.settings.magic_number),None)
+                        if position is None or float(getattr(position,'sl',0) or 0)<=0:
+                            raise RuntimeError(f'DEMO executor E2E ticket {ticket} did not have a server-side SL.')
+                        self._event('INFO',f'DEMO E2E opened server position ticket={ticket} symbol={symbol} volume={position.volume} entry={position.price_open} SL={position.sl} TP={position.tp}')
+                        tightened=round(float(position.sl)+pip,digits)
+                        if not self.executor.modify_sl_tp(ticket,tightened,float(position.tp)):
+                            raise RuntimeError(f'DEMO executor E2E failed to tighten server SL for ticket {ticket}.')
+                        position=next((p for p in (mt5.positions_get(symbol=symbol) or []) if int(p.ticket)==ticket),None)
+                        if position is None or float(position.sl)<tightened-10**(-digits):
+                            raise RuntimeError(f'DEMO executor E2E modified SL was not confirmed server-side for ticket {ticket}.')
+                        self._event('INFO',f'DEMO E2E modified server SL ticket={ticket} new_SL={position.sl}')
+                    finally:
+                        if ticket is not None:
+                            for attempt in range(1,4):
+                                if not any(int(p.ticket)==ticket for p in (mt5.positions_get(symbol=symbol) or [])):
+                                    close_ok=True; break
+                                result=self.executor.close_position(ticket,'manual')
+                                self._event('INFO' if result.success else 'WARNING',f'DEMO E2E close attempt={attempt} ticket={ticket} success={result.success} message={result.message}')
+                            if not any(int(p.ticket)==ticket for p in (mt5.positions_get(symbol=symbol) or [])):
+                                close_ok=True
+                            if not close_ok:
+                                self._event('CRITICAL',f'DEMO E2E could not close ticket={ticket}; protective server SL remains active.')
+                        pause_path.write_text('PAUSE\n',encoding='utf-8')
+                        self._event('INFO','DEMO E2E restored STOP=PAUSE.')
+                    if ticket is not None and not close_ok:
+                        raise RuntimeError(f'DEMO executor E2E ticket {ticket} remains open; STOP=PAUSE restored and server SL retained.')
                 elif action in {'status','health','today','positions'}:
                     status=self.db.get_bot_status() or {}; positions=self._owned_positions()
                     if action in {'status','health'}:
