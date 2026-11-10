@@ -19,7 +19,8 @@ def test_exploration_signal_comment_format(tmp_path, monkeypatch):
         risk=SimpleNamespace(risk_per_trade_pct=0.25),
         config={
             'executor': {'deviation_points': 20, 'filling_modes': {}},
-            'risk': {'risk_per_trade_pct': 0.25}
+            'risk': {'risk_per_trade_pct': 0.25},
+            'demo_exploration': {'risk_per_trade_pct': 0.1}
         }
     )
     mt5 = MagicMock()
@@ -78,6 +79,11 @@ def test_exploration_signal_comment_format(tmp_path, monkeypatch):
     res = executor.open_trade(sig, volume=0.01, features=features)
     assert not res.success
     assert res.message == 'Refused open: exploration trades are DEMO only'
+    assert mt5.order_send.call_count == 1
+    mt5.account_info.return_value.trade_mode = 0
+    res = executor.open_trade(sig, volume=0.3, features=features)
+    assert not res.success
+    assert 'requested volume exceeds stop-risk size' in res.message
     assert mt5.order_send.call_count == 1
 
 

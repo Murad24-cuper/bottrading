@@ -34,6 +34,14 @@ class Executor:
         return m.ORDER_FILLING_RETURN
     def open_trade(self,signal,volume,expected_cost=None,features=None):
         m=self.mt5
+        exploration_mode=bool(features and features.get('trade_mode') in ('exploration','weekend_exploration'))
+        if exploration_mode:
+            demo_cfg=self.settings.config.get('demo_exploration',{})
+            risk_pct=float(demo_cfg.get('risk_per_trade_pct',0.1))
+            if features.get('trade_mode')=='weekend_exploration':
+                risk_pct=min(risk_pct,float(self.settings.config.get('weekend',{}).get('risk_per_trade_pct',risk_pct)))
+        else:
+            risk_pct=float(self.settings.risk.risk_per_trade_pct)
         if self.kill_switch_active(): return self._failure('Refused open: STOP kill switch is active',volume)
         if signal.sl_price is None: return self._failure('Refused open: stop-loss is required',volume)
         if signal.tp_price is None: return self._failure('Refused open: take-profit is required',volume)
@@ -49,7 +57,6 @@ class Executor:
         account=m.account_info()
         if account is None: return self._failure(f'Account info unavailable: {m.last_error()}',volume)
         demo_mode=getattr(m,'ACCOUNT_TRADE_MODE_DEMO',0)
-        exploration_mode=bool(features and features.get('trade_mode') in ('exploration','weekend_exploration'))
         if exploration_mode and account.trade_mode!=demo_mode:
             return self._failure('Refused open: exploration trades are DEMO only',volume)
         if account.trade_mode!=demo_mode and (not self.settings.allow_real or self.settings.config['account']['mode']!='real'):
@@ -70,7 +77,7 @@ class Executor:
         minimum=float(getattr(info,'volume_min',0) or 0); step=float(getattr(info,'volume_step',0) or 0); maximum=float(getattr(info,'volume_max',0) or 0)
         if minimum<=0 or step<=0 or maximum<minimum or volume<minimum or volume>maximum or abs((float(volume)-minimum)/step-round((float(volume)-minimum)/step))>1e-7:
             return self._failure('Refused open: volume is outside the broker minimum/step/maximum grid',volume)
-        safe_volume,why=calc_volume(float(account.equity),self.settings.risk.risk_per_trade_pct,float(price),signal.sl_price,info._asdict())
+        safe_volume,why=calc_volume(float(account.equity),risk_pct,float(price),signal.sl_price,info._asdict())
         if safe_volume<=0 or float(volume)>safe_volume+1e-9:
             return self._failure(f'Refused open: requested volume exceeds stop-risk size ({why})',volume)
         exp_info=features.get('exploration',{}) if isinstance(features,dict) else {}
@@ -91,9 +98,9 @@ class Executor:
             costs=expected_cost if isinstance(expected_cost,dict) else {}
             cost_per_lot=float(costs.get('cost',0) or 0)/float(volume) if float(volume)>0 else 0.0
             if cost_per_lot>0:
-                new_safe_volume,why=calc_volume_stressed(float(account.equity),self.settings.risk.risk_per_trade_pct,float(new_price),signal.sl_price,info._asdict(),cost_per_lot)
+                new_safe_volume,why=calc_volume_stressed(float(account.equity),risk_pct,float(new_price),signal.sl_price,info._asdict(),cost_per_lot)
             else:
-                new_safe_volume,why=calc_volume(float(account.equity),self.settings.risk.risk_per_trade_pct,float(new_price),signal.sl_price,info._asdict())
+                new_safe_volume,why=calc_volume(float(account.equity),risk_pct,float(new_price),signal.sl_price,info._asdict())
             if new_safe_volume<=0 or new_safe_volume<minimum:
                 return self._failure(f'Requote cancelled: safe volume below minimum lot ({why})',volume,retcode=result.retcode)
             new_volume=round(min(float(volume),float(new_safe_volume)),8)
