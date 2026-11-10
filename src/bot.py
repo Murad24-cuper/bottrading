@@ -397,6 +397,14 @@ class TradingBot:
         spec=candidate.symbol_spec
         weekend=self._weekend_mode(now)
         weekend_cfg=self.settings.config.get('weekend',{})
+        if exploration_eligible:
+            max_exp=min(int(exploration_cfg.get('max_open_positions',3)),3)
+            exp_positions=[p for p in positions if str(getattr(p,'comment','')).startswith('exp:')]
+            live_open_exp=max(self.db.count_mode_trades_since('exploration',now,open_only=True),len(exp_positions))
+            if live_open_exp>=max_exp:
+                self._signal_update(candidate,False,f'max open exploration positions cap ({max_exp}) reached'); return False
+            if any(str(getattr(p,'symbol',''))==candidate.symbol for p in exp_positions):
+                self._signal_update(candidate,False,f'max 1 open exploration trade for symbol {candidate.symbol} reached'); return False
         weekend_gate=self.db.weekend_gate(now,20,7) if weekend and hasattr(self.db,'weekend_gate') else {}
         if weekend_gate.get('disabled_until') and weekend_gate['disabled_until']>now.isoformat():
             self._signal_update(candidate,False,'weekend mode disabled after negative 20-trade expectancy')
@@ -414,7 +422,7 @@ class TradingBot:
             gate_settings=SimpleNamespace(config={**self.settings.config,'risk':risk_config},root=self.settings.root)
         if exploration_eligible:
             risk_config=dict(gate_settings.config['risk'])
-            risk_config['max_open_positions']=min(int(risk_config['max_open_positions']),int(exploration_cfg.get('max_open_positions',5)))
+            risk_config['max_open_positions']=min(int(risk_config['max_open_positions']),int(exploration_cfg.get('max_open_positions',3)),3)
             gate_settings=SimpleNamespace(config={**gate_settings.config,'risk':risk_config},root=self.settings.root)
         planned_volume,planned_reason=calc_volume(state.equity,risk_pct,signal.entry_hint,signal.sl_price,spec)
         if planned_volume<=0:
@@ -482,9 +490,8 @@ class TradingBot:
             if why=='weekly loss limit reached': self._notify('weekly_loss','🛑 Həftəlik zərər limiti doldu; yeni əməliyyatlar dayandırıldı.')
             if not allowed: self._signal_update(candidate,False,why); return False
         if exploration_eligible:
-            count_open=self.db.count_mode_trades_since('exploration',now,open_only=True)
             count_today=self.db.count_mode_trades_since('exploration',day_start)
-            if count_open>=int(exploration_cfg.get('max_open_positions',5)) or count_today>=int(exploration_cfg.get('max_trades_per_day',40)):
+            if count_today>=int(exploration_cfg.get('max_trades_per_day',40)):
                 self._signal_update(candidate,False,'exploration trade limit reached'); return False
         candidate_features.setdefault('trade_mode',trade_mode)
         candidate_features['process_review']={'good_process':True,'grade':'good',

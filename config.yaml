@@ -58,15 +58,15 @@ universe:
   exclude_symbols: []
   exclude_dated_futures: true    # Exclude names ending in month/year contract codes
   symbol_aliases:
-    GOLD: [GOLD, XAUUSD, GOLDmicro, XAUUSDmicro]
-    SILVER: [SILVER, XAGUSD, SILVERmicro, XAGUSDmicro]
-    EURUSD: [EURUSD, EURUSDmicro, EURUSD.m]
-    GBPUSD: [GBPUSD, GBPUSDmicro, GBPUSD.m]
-    USDJPY: [USDJPY, USDJPYmicro, USDJPY.m]
-    AUDUSD: [AUDUSD, AUDUSDmicro, AUDUSD.m]
-    USDCAD: [USDCAD, USDCADmicro, USDCAD.m]
-    EURJPY: [EURJPY, EURJPYmicro, EURJPY.m]
-    GBPJPY: [GBPJPY, GBPJPYmicro, GBPJPY.m]
+    GOLD: [GOLDmicro, XAUUSDmicro, GOLD, XAUUSD]
+    SILVER: [SILVERmicro, XAGUSDmicro, SILVER, XAGUSD]
+    EURUSD: [EURUSDmicro, EURUSD.m, EURUSD]
+    GBPUSD: [GBPUSDmicro, GBPUSD.m, GBPUSD]
+    USDJPY: [USDJPYmicro, USDJPY.m, USDJPY]
+    AUDUSD: [AUDUSDmicro, AUDUSD.m, AUDUSD]
+    USDCAD: [USDCADmicro, USDCAD.m, USDCAD]
+    EURJPY: [EURJPYmicro, EURJPY.m, EURJPY]
+    GBPJPY: [GBPJPYmicro, GBPJPY.m, GBPJPY]
     US30: [US30Cash, US30, US30micro, DJ30]
     US500: [US500Cash, US500, SPX500, SP500, US500micro]
     NAS100: [US100Cash, US100, NAS100, USTEC, US100micro]
@@ -123,12 +123,12 @@ strategies:
   donchian_breakout:
     enabled: true
     groups: [forex, metals, indices, crypto]
-    timeframes: [H1, M15]
+    timeframes: [H4, H1, M15]
     params: {variant: v1, period: 20, sl_mult: 2.0, tp_mult: 4.0}
   ts_momentum:
     enabled: true
     groups: [forex, metals, indices, crypto]
-    timeframes: [H1, M15]
+    timeframes: [H4, H1, M15]
     params: {variant: v1, lookback: 12, sl_mult: 2.0, tp_mult: 3.0}
   index_pullback_200d:
     enabled: true

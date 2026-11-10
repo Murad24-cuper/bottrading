@@ -49,6 +49,9 @@ class Executor:
         account=m.account_info()
         if account is None: return self._failure(f'Account info unavailable: {m.last_error()}',volume)
         demo_mode=getattr(m,'ACCOUNT_TRADE_MODE_DEMO',0)
+        exploration_mode=bool(features and features.get('trade_mode') in ('exploration','weekend_exploration'))
+        if exploration_mode and account.trade_mode!=demo_mode:
+            return self._failure('Refused open: exploration trades are DEMO only',volume)
         if account.trade_mode!=demo_mode and (not self.settings.allow_real or self.settings.config['account']['mode']!='real'):
             return self._failure('Refused open: real account requires account.mode=real and ALLOW_REAL=true',volume)
         if account.margin_mode==getattr(m,'ACCOUNT_MARGIN_MODE_RETAIL_NETTING',0):
@@ -71,8 +74,8 @@ class Executor:
         if safe_volume<=0 or float(volume)>safe_volume+1e-9:
             return self._failure(f'Refused open: requested volume exceeds stop-risk size ({why})',volume)
         exp_info=features.get('exploration',{}) if isinstance(features,dict) else {}
-        fam=exp_info.get('family',signal.strategy_name); var=exp_info.get('variant','v1')
-        trade_comment=f"exp:{fam[:14]}:{var[:6]}" if (features and features.get('trade_mode') in ('exploration','weekend_exploration')) else signal.strategy_name[:31]
+        fam=exp_info.get('family',signal.strategy_name); var=exp_info.get('variant','v1'); tf=exp_info.get('timeframe',getattr(signal,'timeframe','M15'))
+        trade_comment=f"exp:{fam[:10]}:{var[:4]}:{tf[:3]}" if (features and features.get('trade_mode') in ('exploration','weekend_exploration')) else signal.strategy_name[:31]
         req={'action':m.TRADE_ACTION_DEAL,'symbol':signal.symbol,'volume':float(volume),'type':m.ORDER_TYPE_BUY if buy else m.ORDER_TYPE_SELL,'price':price,'sl':signal.sl_price,'tp':signal.tp_price,'deviation':self.settings.config['executor']['deviation_points'],'magic':self.settings.magic_number,'comment':trade_comment,'type_time':m.ORDER_TIME_GTC,'type_filling':filling}
         result=m.order_send(req)
         if result and result.retcode in (getattr(m,'TRADE_RETCODE_REQUOTE',10004),getattr(m,'TRADE_RETCODE_PRICE_CHANGED',10020)):
@@ -113,6 +116,11 @@ class Executor:
             costs=expected_cost if isinstance(expected_cost,dict) else {}
             import json
             trade_features=dict(features or {}); trade_mode=str(trade_features.pop('trade_mode','main'))
+            if trade_mode in ('exploration','weekend_exploration'):
+                trade_features.setdefault('exploration',{})
+                trade_features['exploration']['family']=fam
+                trade_features['exploration']['variant']=var
+                trade_features['exploration']['timeframe']=tf
             self.db.insert_trade(ticket=ticket,symbol=signal.symbol,asset_group=self._asset_group(signal.symbol),direction=signal.direction,volume=filled_volume,initial_volume=filled_volume,open_time=now,open_price=result.price,sl=signal.sl_price,tp=signal.tp_price,profit=0,commission=0,swap=0,strategy=signal.strategy_name,reason=signal.reason,magic=self.settings.magic_number,status='open',timeframe=signal.timeframe,initial_risk=abs(float(result.price)-float(signal.sl_price)),scale_out_done=0,peak_favorable_r=0,estimated_spread_cost=float(costs.get('spread_cost',0) or 0),estimated_commission_cost=float(costs.get('commission',0) or 0),features=json.dumps(trade_features,sort_keys=True,default=str),mode=trade_mode)
         except Exception as exc:
             # The broker position is open; surface the persistence failure loudly for reconciliation.

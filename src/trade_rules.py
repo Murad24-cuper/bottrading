@@ -51,6 +51,15 @@ def stop_target_from_atr(entry: float, direction: str, atr: float, spread: float
     return float(entry) - sign * stop_distance, float(entry) + sign * target_distance
 
 
+def rebase_signal_levels(signal_entry: float, stop: float, target: float, direction: str,
+                         executable_entry: float) -> tuple[float, float]:
+    """Keep strategy-defined stop/target distances when moving to the live quote."""
+    stop_distance=abs(float(signal_entry)-float(stop))
+    target_distance=abs(float(target)-float(signal_entry))
+    sign=1 if direction=='buy' else -1
+    return float(executable_entry)-sign*stop_distance, float(executable_entry)+sign*target_distance
+
+
 def spread_within_median(current: float, median: float, ratio: float) -> bool:
     """Reject absent/invalid baseline spreads and abnormally wide current spreads."""
     return all(math.isfinite(float(x)) for x in (current, median, ratio)) and median > 0 and current <= median * ratio

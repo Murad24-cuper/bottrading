@@ -12,7 +12,7 @@ from .features import build_features
 from .risk import calc_volume
 from .strategies import load_strategies
 from .symbols import SymbolService
-from .trade_rules import confidence_allowed, strategy_mtf_allowed, stop_target_from_atr, spread_within_median, spread_within_expected_move, weekend_mode_active
+from .trade_rules import confidence_allowed, strategy_mtf_allowed, stop_target_from_atr, rebase_signal_levels, spread_within_median, spread_within_expected_move, weekend_mode_active
 from .patterns.chart import detect_chart_patterns
 from .patterns.candles import detect_candlestick_patterns
 from .patterns.fibonacci import fibonacci_retracement
@@ -371,10 +371,13 @@ class MarketScanner:
                     feature_snapshot['exploration'].setdefault('soft_failures',[]).append('no strategy passed the edge gate; DEMO exploration only')
                     feature_snapshot['exploration']['family']=getattr(strategy,'family',strategy.name)
                     feature_snapshot['exploration']['variant']=getattr(strategy,'variant','v1')
+                    feature_snapshot['exploration']['timeframe']=getattr(signal,'timeframe','M15')
                 if not confidence_allowed(signal.confidence,float(cfg.get('min_confidence',0.0))):
                     if not exploration_enabled or not confidence_allowed(signal.confidence,float(exploration_cfg.get('min_confidence',.45))):
                         reason='confidence below scanner.min_confidence'; self._write_signal(signal,0,reason,features=feature_snapshot); strategy_diagnostics[strategy.name]['confidence_below_minimum']+=1; continue
-                    feature_snapshot['exploration']={'eligible':True,'soft_failures':['confidence below scanner.min_confidence']}
+                    explore=feature_snapshot.setdefault('exploration',{'eligible':True,'soft_failures':[]})
+                    explore['eligible']=True
+                    explore.setdefault('soft_failures',[]).append('confidence below scanner.min_confidence')
                 mtf_args={'enabled':cfg.get('require_mtf_agreement',True),'fast':int(cfg.get('mtf_ema_fast',5)),'slow':int(cfg.get('mtf_ema_slow',13))}
                 main_mtf=strategy_mtf_allowed(strategy.name,candles,signal.direction,min_agree=int(cfg.get('mtf_min_agree',3)),**mtf_args)
                 if not main_mtf:
@@ -383,12 +386,7 @@ class MarketScanner:
                         feature_snapshot.setdefault('exploration',{'eligible':True,'soft_failures':[]})['soft_failures'].append('main MTF agreement threshold not met')
                     else:
                         reason='M1/M5/M15 direction disagreement'; self._write_signal(signal,0,reason,features=feature_snapshot); strategy_diagnostics[strategy.name]['mtf_disagreement']+=1; continue
-                if 'M1' not in candles:
-                    horizon=int(self.settings.config['risk']['move_horizon_minutes'])
-                    self._write_signal(signal,0,f'M1 history missing for {horizon}-minute target',features=feature_snapshot); continue
-                m1_atr=float(ind.atr(candles['M1']).iloc[-1])
-                if not math.isfinite(m1_atr) or m1_atr<=0:
-                    self._write_signal(signal,0,'M1 ATR unavailable',features=feature_snapshot); continue
+                family_entry=float(signal.entry_hint) if signal.entry_hint is not None else None
                 tick=self.mt5.symbol_info_tick(symbol)
                 if tick is None:
                     self._write_signal(signal,0,'tick unavailable at entry sizing',features=feature_snapshot); continue
@@ -401,15 +399,24 @@ class MarketScanner:
                     forex_open=self.symbols.forex_session_open(now)
                 except Exception: forex_open=False
                 weekend=weekend_mode_active(now,self.settings.config,forex_open)
-                move_horizon=float(self.settings.config.get('weekend',{}).get('move_horizon_minutes',60)) if weekend else float(risk_cfg['move_horizon_minutes'])
-                signal.sl_price,signal.tp_price=stop_target_from_atr(float(signal.entry_hint),signal.direction,m1_atr,spread,float(risk_cfg['sl_move_mult']),float(risk_cfg['tp_move_mult']),move_horizon)
+                if exploration_enabled and signal.sl_price is not None and signal.tp_price is not None and family_entry is not None:
+                    signal.sl_price,signal.tp_price=rebase_signal_levels(family_entry,signal.sl_price,signal.tp_price,signal.direction,signal.entry_hint)
+                else:
+                    if 'M1' not in candles:
+                        horizon=int(self.settings.config['risk']['move_horizon_minutes'])
+                        self._write_signal(signal,0,f'M1 history missing for {horizon}-minute target',features=feature_snapshot); continue
+                    m1_atr=float(ind.atr(candles['M1']).iloc[-1])
+                    if not math.isfinite(m1_atr) or m1_atr<=0:
+                        self._write_signal(signal,0,'M1 ATR unavailable',features=feature_snapshot); continue
+                    move_horizon=float(self.settings.config.get('weekend',{}).get('move_horizon_minutes',60)) if weekend else float(risk_cfg['move_horizon_minutes'])
+                    signal.sl_price,signal.tp_price=stop_target_from_atr(float(signal.entry_hint),signal.direction,m1_atr,spread,float(risk_cfg['sl_move_mult']),float(risk_cfg['tp_move_mult']),move_horizon)
                 if signal.sl_price is None or signal.tp_price is None or signal.entry_hint is None:
                     self._write_signal(signal,0,'signal missing entry, SL, or TP',features=feature_snapshot); continue
                 if signal.direction=='buy' and not signal.sl_price<signal.entry_hint<signal.tp_price:
                     self._write_signal(signal,0,'invalid stop/target side',features=feature_snapshot); continue
                 if signal.direction=='sell' and not signal.tp_price<signal.entry_hint<signal.sl_price:
                     self._write_signal(signal,0,'invalid stop/target side',features=feature_snapshot); continue
-                risk_pct=min(self.settings.risk.risk_per_trade_pct,float(self.settings.config.get('weekend',{}).get('risk_per_trade_pct',self.settings.risk.risk_per_trade_pct))) if weekend else self.settings.risk.risk_per_trade_pct
+                risk_pct=float(exploration_cfg.get('risk_per_trade_pct',0.1)) if exploration_enabled else (min(self.settings.risk.risk_per_trade_pct,float(self.settings.config.get('weekend',{}).get('risk_per_trade_pct',self.settings.risk.risk_per_trade_pct))) if weekend else self.settings.risk.risk_per_trade_pct)
                 volume,volume_reason=calc_volume(account.equity,risk_pct,signal.entry_hint,signal.sl_price,spec)
                 if volume<=0:
                     self._write_signal(signal,0,volume_reason,features=feature_snapshot); continue

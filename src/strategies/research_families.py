@@ -208,7 +208,7 @@ class VWAPReversionStrategy(Strategy):
 
 class DonchianBreakoutStrategy(Strategy):
     name = 'donchian_breakout'
-    required_timeframes = ['H1', 'M15']  # Runs on available H1/M15 in live
+    required_timeframes = ['H4', 'H1', 'M15']  # Prioritize H4 for swing breakout
     
     def __init__(self, params: dict | None = None):
         super().__init__()
@@ -219,8 +219,7 @@ class DonchianBreakoutStrategy(Strategy):
         self.tp_mult = float(p.get('tp_mult', 4.0))
         
     def generate_signal(self, symbol: str, candles: dict[str, pd.DataFrame]) -> Signal | None:
-        # Use H1 if present, otherwise M15
-        tf = 'H1' if 'H1' in candles else 'M15'
+        tf = 'D1' if 'v3' in self.variant else ('H4' if 'H4' in candles else ('H1' if 'H1' in candles else 'M15'))
         df = frame(candles, tf, minimum=self.period + 10)
         if df is None:
             return self._skip('insufficient_bars')
@@ -254,7 +253,7 @@ class DonchianBreakoutStrategy(Strategy):
 
 class TSMomentumStrategy(Strategy):
     name = 'ts_momentum'
-    required_timeframes = ['H1', 'M15']
+    required_timeframes = ['H4', 'H1', 'M15']
     
     def __init__(self, params: dict | None = None):
         super().__init__()
@@ -265,7 +264,7 @@ class TSMomentumStrategy(Strategy):
         self.tp_mult = float(p.get('tp_mult', 3.0))
         
     def generate_signal(self, symbol: str, candles: dict[str, pd.DataFrame]) -> Signal | None:
-        tf = 'H1' if 'H1' in candles else 'M15'
+        tf = 'D1' if 'v3' in self.variant else ('H4' if 'H4' in candles else ('H1' if 'H1' in candles else 'M15'))
         df = frame(candles, tf, minimum=self.lookback + 10)
         if df is None:
             return self._skip('insufficient_bars')
