@@ -136,6 +136,12 @@ def test_duplicate_pending_commands_are_refused(tmp_path):
     with pytest.raises(ValueError,match='already pending or running'):
         db.insert_command('pause')
 
+def test_guarded_demo_executor_e2e_command_is_queueable(tmp_path):
+    db=Database(tmp_path/'demo-e2e-command.db')
+    command=db.insert_command('demo_executor_e2e')
+    pending=db.get_pending_commands()
+    assert [row['id'] for row in pending]==[command]
+
 def test_profitable_sl_close_migration_is_one_time_and_preserves_losing_sl(tmp_path):
     path=tmp_path/'close-reasons.db'; db=Database(path)
     db.insert_trade(ticket=21,status='closed',close_reason='sl',profit=2.5)

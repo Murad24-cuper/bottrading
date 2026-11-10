@@ -1,22 +1,32 @@
-# Blockers and incomplete work
+# Current execution blocker
 
-| Part | Exact technical reason | Safe next action |
-|---|---|---|
-| 0 — Telegram delivery | Supervisor restarted the bot and its new child reconnected to the existing MT5 session. `scripts/test_telegram.py` returned HTTP 400, Telegram description `Bad Request: chat not found`; the recipient configured at test time is not a chat the bot can address. Notification code routes scheduled daily/weekly summaries and incident alerts through `TelegramNotifier`, but delivery cannot be confirmed until Telegram accepts the recipient. | Start a direct conversation with the bot (or add it to the intended group), then correct `TELEGRAM_CHAT_ID` in `.env` yourself and rerun the test. `.env` was not opened or printed. |
-| 1 — broker/account cost facts | After supervisor restart, the existing MT5 owner logged a successful reconnect in DEMO/hedging mode, but `bot_status` and other persisted records do not contain server, leverage, per-symbol contract size/swap/tick value/volume constraints or `deal.commission`. There is no authenticated read-only request/export channel into that running owner, and a second MT5 connection is disallowed. `.env` was not opened. | Add a bounded read-only snapshot request handled by the bot-owned MT5 session, then export its result. |
-| 3 — complete strategy/brain causal and warm-up audit | Tests perturb future bars for indicator and feature primitives, but no full per-strategy truncated/full dataset report was run. The requested brain-gate holdout is explicitly off limits. | Run the causal audit on train/validation only, with history-start sensitivity recorded; use a fresh unseen holdout for any gate. |
-| 4 — shared calibrated cost map | Shared cost utilities and fail-closed entry gate exist. Six of the eight focus symbols have 650+ live spread samples; EURJPY/GBPJPY have 57/58. Samples span at most 8 UTC hours, verified broker commission is unavailable, and legacy backtest/replay arithmetic is not fully unified. | Obtain verified broker fees and complete cost-map coverage before using costs as calibrated research facts; keep the `<10%` gate fail-closed. |
-| 2 — validation toolkit | The v3 run now reports positive-window share across six walk-forward windows, a 200-repetition random-entry benchmark and DSR. It still lacks random fills matched on holding time/SL/TP, exit-reason/session breakdowns, and fully broker-calibrated costs. | Extend the train/validation-only toolkit with matched fills and breakdowns after verified commission and spread inputs are available. |
-| 3 — edge research v2 | Superseded by the corrected v3 run in `reports/edge_research_v3.md`: six families and 18 variants were evaluated with train/validation boundary purging and no holdout simulation; zero variants qualified. Broker-calibrated costs and a maximum-history completeness proof are still unavailable. | Preserve Case B. Obtain verified broker cost facts and history completeness before claiming a strategy qualifies. |
-| 4 — apply the real result | The corrected v3 report still finds no qualifying strategy; Case B remains active, ordinary live entries stay disabled and the 2026-11-08 brain holdout remains untouched. | Keep Case B in force until a family passes every criterion on a new, unseen qualification holdout. |
-| 5 — DEMO exploration | Since the latest supervisor restart, the scanner recorded two `ts_momentum` signals on USDJPY/H4; the M1/M5/M15 agreement gate rejected it. No exploration trade has opened. Six focus symbols have 650+ spread samples, while EURJPY/GBPJPY have 57/58; samples span at most 8 UTC hours and broker commission is unverified; candidates may fail the `<10%` cost ratio, MTF, minimum-lot sizing or other hard gates. | Keep current cost/news/protection gates intact; continue DEMO collection and report only entries that pass every gate. |
-| 6 — historical error resolution | Read-only database query confirmed 21 event rows (13 ERROR, 8 CRITICAL). A per-row ledger records 7 fixed code defects, 8 operational MT5 recoveries, and 6 watchdog-triggered restarts whose hang causes remain unresolved. No new ERROR/CRITICAL appeared after the supervised restart. | Identify and correct the recurring causes behind the six stale-heartbeat watchdog events; retain the ledger and keep readiness FAIL until resolved. |
-| 10 — out-of-distribution guard | A validated distance metric/calibrated threshold against the train memory is absent; the brain remains shadow-only. | Fit and validate a dissimilarity guard using train/validation data without reading the 2026-11-08 gate holdout. |
-| 11 — live/backtest reconciliation | Persisted trades do not include enough verified fill-side spread/slippage/commission evidence to calculate a reliable weekly bias correction. | Collect broker deal and quote cost evidence in the bot loop; update estimates only conservatively. |
-| 17 — Telegram approval mode | Ticket approval lifecycle and expiry are not implemented. A real approval can place a DEMO order; no isolated fake-executor approval integration exists yet. Mode stays off. | Implement full fake-executor lifecycle/expiry tests before enabling; only then use an isolated DEMO test. |
-| 18 — weekly self-learning | The scheduled weekly job explicitly defers retraining: no complete train/validation/walk-forward/holdout promotion pipeline is available. Risk ceilings are locked; bandit remains priority-only. | Build versioned rolling unseen holdouts and champion/challenger evaluation before enabling promotion or tuning. |
-| 20 — automated readiness report | `docs/LIVE_READINESS.md` remains a point-in-time report and is not regenerated/sent weekly. `docs/ERROR_LEDGER.md` now reconciles all 21 historical ERROR/CRITICAL rows; six watchdog hang causes remain unresolved. | Add a read-only weekly report job; retain the ledger and keep report-only, never switching account mode. |
+Updated: 2026-11-10 19:36 Asia/Baku
 
-Part 2 calendar fallback and Part 16 incident alerts are implemented. Part 19
-has the scheduled task, supervisor, system-awake request and bounded backup/log
-retention, but weekly learning/readiness work remains explicitly deferred.
+Windows Application Control blocks loading
+`.venv/Lib/site-packages/pandas/_libs/pandas_parser.cp312-win_amd64.pyd`
+with `ImportError: DLL load failed ... An Application Control policy has
+blocked this file.` The error occurs during pandas import, before pytest
+collection or bot startup. Reinstalling pandas 3.1.1 from the configured
+Python package index did not change the result. I did not modify policy,
+unblock binaries, or disable Smart App Control.
+
+Consequences for this run:
+
+- The bot/supervisor process recorded in `data/bot.lock` and
+  `data/supervisor.pid` is no longer running; the last heartbeat in
+  `data/bot.db` is 2026-11-10 15:30:32 UTC (19:30:32 Baku). The database
+  status at that time was DEMO, MT5 connected, trade allowed, with no
+  recorded open trade. That is stale status, not confirmation of current
+  connectivity.
+- `start_bot.bat` did not produce a new supervisor process or heartbeat.
+- Focused pytest collection failed at the blocked pandas extension.
+- The guarded live DEMO order-check/open/modify/close command cannot be
+  executed until this environment can import pandas under its current
+  application-control policy.
+- Brain dataset regeneration, holdout_v2 evaluation, dashboard startup,
+  and final post-restart health checks are similarly blocked.
+
+Safe continuation: restore a supported runtime whose installed pandas
+extension is accepted by the existing Windows policy, then rerun the full
+test suite and supervisor startup. Do not clear STOP or attempt the guarded
+order while the bot cannot be supervised. STOP remains `PAUSE`.
