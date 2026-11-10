@@ -15,7 +15,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.research.validation import random_entry_benchmark, walk_forward_share, deflated_sharpe_ratio
-from src.indicators import atr, rsi
+from src.indicators import atr, rsi as _rsi_raw
+
+def rsi_close(df, period=14):
+    """Return RSI of the close column only (Series)."""
+    r = _rsi_raw(df, period=period)
+    return r['close'] if isinstance(r, pd.DataFrame) else r
 
 FOCUS_SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'US500Cash', 'US100Cash', 'US30Cash', 'GER40Cash', 'GOLD']
 INDEX_SYMBOLS = ['US500Cash', 'US100Cash', 'US30Cash', 'GER40Cash']
@@ -324,7 +329,7 @@ def run_research():
             short_sig = (dist > band) & (dist.shift(1) <= band)
             
             if use_rsi_filt:
-                rsi_s = rsi(df, period=14)
+                rsi_s = rsi_close(df, period=14)
                 long_sig = long_sig & (rsi_s < 30)
                 short_sig = short_sig & (rsi_s > 70)
                 
@@ -432,7 +437,7 @@ def run_research():
                 sma200 = df['close'].rolling(200).mean()
                 uptrend = df['close'] > sma200
                 if rule == "rsi40":
-                    rsi_s = rsi(df, period=14)
+                    rsi_s = rsi_close(df, period=14)
                     sig = uptrend & (rsi_s < 40) & (rsi_s.shift(1) >= 40)
                 else: # 3 down days
                     c = df['close']
@@ -440,7 +445,7 @@ def run_research():
             else: # H4
                 sma1200 = df['close'].rolling(1200).mean()
                 uptrend = df['close'] > sma1200
-                rsi_s = rsi(df, period=14)
+                rsi_s = rsi_close(df, period=14)
                 sig = uptrend & (rsi_s < 30) & (rsi_s.shift(1) >= 30)
                 
             stop_s = sl_mult * atr_s
