@@ -78,8 +78,19 @@ def simulate_trades(df: pd.DataFrame, signals: pd.Series, stop_series: pd.Series
             break
             
         entry_idx = idx + 1
-        entry_price = opens[entry_idx]
         entry_time = stamps[entry_idx]
+
+        split = 'train' if entry_time <= train_end else ('val' if val_start <= entry_time <= val_end else 'holdout')
+        if split == 'holdout':
+            continue
+        split_end = train_end if split == 'train' else val_end
+        split_end_idx = int(np.searchsorted(stamps, split_end, side='right') - 1)
+        # Purge boundary-crossing trades: every simulated exit bar must belong to
+        # the same split as its entry. Never evaluate the protected holdout.
+        if entry_idx + int(max_hold_bars) > split_end_idx + 1:
+            continue
+
+        entry_price = opens[entry_idx]
         
         stop_dist = stop_series.iloc[idx]
         target_dist = target_series.iloc[idx]
@@ -144,16 +155,14 @@ def simulate_trades(df: pd.DataFrame, signals: pd.Series, stop_series: pd.Series
             
         last_exit_idx = exit_idx
         
-        split = 'train' if entry_time <= train_end else ('val' if val_start <= entry_time <= val_end else 'holdout')
-        if split in ('train', 'val'):
-            trades.append({
-                'symbol': symbol,
-                'entry_time': entry_time.isoformat(),
-                'direction': direction,
-                'net_r': float(exit_r),
-                'cost_r': float(cost_r),
-                'split': split
-            })
+        trades.append({
+            'symbol': symbol,
+            'entry_time': entry_time.isoformat(),
+            'direction': direction,
+            'net_r': float(exit_r),
+            'cost_r': float(cost_r),
+            'split': split
+        })
             
     return trades
 
@@ -165,6 +174,7 @@ def compute_buy_and_hold(history_dir: Path) -> dict:
         if not p.exists():
             continue
         df = pd.read_parquet(p)
+        df = df.loc[df.index <= M_VAL_END]
         # M window
         tr_m = df[(df.index >= '2023-11-09') & (df.index <= M_TRAIN_END)]
         val_m = df[(df.index >= M_VAL_START) & (df.index <= M_VAL_END)]
@@ -195,7 +205,8 @@ def run_research():
         for tf in ['M15', 'H1', 'H4', 'D1']:
             p = history_dir / f"{s}_{tf}.parquet"
             if p.exists():
-                data[s][tf] = pd.read_parquet(p)
+                frame = pd.read_parquet(p)
+                data[s][tf] = frame.loc[frame.index <= M_VAL_END]
             else:
                 data[s][tf] = None
 
@@ -586,7 +597,8 @@ def run_research():
         "**Splits Applied:**",
         "- **M15/H1 Intraday:** Train `<= 2025-12-31`, Validation `2026-01-01` .. `2026-09-30` (9 months).",
         "- **H4/D1 Swing:** Train `<= 2024-06-30`, Validation `2024-07-01` .. `2026-09-30` (27 months).",
-        "- **Brain Holdout:** `2026-10-20` onwards strictly untouched.",
+        "- **Protected holdout:** observations from `2026-10-20` onward are excluded from feature and outcome scoring.",
+        "- Trades whose full holding horizon would cross a train/validation cutoff are purged; holdout entries are not simulated.",
         "**Cost Model:** Conservative Cost Model v1 (1.25x spread + slippage + commission).",
         "**Benchmark Included:** Buy-and-hold returns for indices and gold to isolate strategy skill from secular drift.",
         "**Multiple Testing Control:** Deflated Sharpe Ratio with $M=18$ trials (threshold $DSR > 0$).",
