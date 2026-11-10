@@ -52,9 +52,9 @@ risk:
 
 # Broker names vary by XM server and account type. These are search patterns.
 universe:
-  include_groups: [forex, metals, indices, energy, crypto, stocks]
+  include_groups: [forex, metals]
   refresh_minutes: 5           # Refresh broker symbol discovery/cache interval
-  tick_freshness_seconds_by_group: {forex: 120, metals: 180, indices: 180, energy: 300, crypto: 300, stocks: 1800, other: 180}
+  tick_freshness_seconds_by_group: {forex: 120, metals: 180, other: 180}
   exclude_symbols: []
   exclude_dated_futures: true    # Exclude names ending in month/year contract codes
   symbol_aliases:
@@ -76,9 +76,9 @@ universe:
     ETHUSD: [ETHUSD, ETH, ETHUSDmicro]
     Altcoins_INDX: [Altcoins_INDX]
     Crypto_10: [Crypto_10]
-  focus_symbols: [EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, US500, NAS100, US30, GER40, GOLD]
-  weekend_symbols: [BTCUSD, ETHUSD, GOLD24-7, Altcoins_INDX, Crypto_10]
-  weekend_include_open_indices: true
+  focus_symbols: [EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, EURJPY, GBPJPY, GOLD]
+  weekend_symbols: [GOLD24-7]
+  weekend_include_open_indices: false
 
 timeframes: [M1, M5, M15]
 magic_number: 20260001
@@ -289,7 +289,7 @@ weekend:
 demo_exploration:
   enabled: true
   risk_per_trade_pct: 0.1
-  max_open_positions: 5
+  max_open_positions: 3
   max_trades_per_day: 40
   min_confidence: 0.45
   mtf_min_agree: 2
