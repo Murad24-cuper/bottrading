@@ -8,6 +8,7 @@ def expected_value_r(probability: float, avg_win_r: float, avg_loss_r: float, co
 def decide(checklist: dict, memory: dict, config: dict, cost_r: float=0.0) -> dict:
     """Evaluate brain entry rules while remaining descriptive when memory is absent."""
     reasons=[]; p=memory.get('probability'); win=float(memory.get('avg_win_r',0)); loss=float(memory.get('avg_loss_r',0))
+    if memory.get('out_of_distribution') is True: reasons.append('out of distribution; brain abstains')
     ev=expected_value_r(float(p),win,loss,cost_r) if p is not None else None
     if float(checklist.get('score',0))<float(config.get('min_checklist',.55)): reasons.append('checklist below floor')
     if checklist.get('blocking_failures'): reasons.extend(checklist['blocking_failures'])
