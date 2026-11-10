@@ -311,6 +311,48 @@ class TradingBot:
                     (self.settings.root/'STOP').write_text('PAUSE\n',encoding='utf-8')
                 elif action=='resume':
                     (self.settings.root/'STOP').unlink(missing_ok=True)
+                elif action=='diagnose_order':
+                    pause_path=self.settings.root/'STOP'
+                    if not pause_path.is_file() or 'PAUSE' not in pause_path.read_text(encoding='utf-8').upper():
+                        raise RuntimeError('Order diagnostic requires STOP=PAUSE; no requests were checked.')
+                    mt5=self.client.mt5; symbol='USDJPY#'; info=mt5.symbol_info(symbol); tick=mt5.symbol_info_tick(symbol)
+                    account=mt5.account_info()
+                    if account is None or account.trade_mode!=getattr(mt5,'ACCOUNT_TRADE_MODE_DEMO',0):
+                        raise RuntimeError('Order diagnostic refused: live account is not DEMO.')
+                    if info is None or tick is None: raise RuntimeError(f'Order diagnostic quote unavailable: {mt5.last_error()}')
+                    digits=int(getattr(info,'digits',3)); point=float(info.point); pip=point*(10 if digits in (3,5) else 1)
+                    volume=float(info.volume_min); entry=float(tick.ask); stop=round(entry-35*pip,digits); target=round(entry+70*pip,digits)
+                    filling=self.executor._filling_mode(info)
+                    if filling is None: raise RuntimeError('Order diagnostic refused: no supported filling mode.')
+                    base={'action':mt5.TRADE_ACTION_DEAL,'symbol':symbol,'volume':volume,'type':mt5.ORDER_TYPE_BUY,'price':entry,'sl':stop,
+                          'deviation':int(self.settings.config['executor']['deviation_points']),'magic':int(self.settings.magic_number),
+                          'type_time':mt5.ORDER_TIME_GTC,'type_filling':int(filling),'comment':'diag:USDJPY'}
+                    def probe(label,request):
+                        typed={key:{'value':value,'type':type(value).__name__} for key,value in request.items()}
+                        result=mt5.order_check(**request)
+                        checked=getattr(result,'request',None)
+                        checked_dict=checked._asdict() if checked is not None and hasattr(checked,'_asdict') else checked
+                        outcome={'retcode':getattr(result,'retcode',None),'comment':getattr(result,'comment',None),'last_error':mt5.last_error(),'checked_request':checked_dict}
+                        self._event('INFO',f'order_check {label} account={{mode:{account.trade_mode},margin_mode:{account.margin_mode},currency:{getattr(account,"currency",None)!r}}} symbol_info={{visible:{getattr(info,"visible",None)},trade_mode:{info.trade_mode},digits:{digits},point:{point},volume_min:{info.volume_min},volume_step:{info.volume_step},filling_mode:{info.filling_mode},trade_exemode:{info.trade_exemode},trade_stops_level:{info.trade_stops_level}}} request={json.dumps(typed,sort_keys=True)} result={json.dumps(outcome,default=str)}')
+                        return outcome
+                    outcome=probe('minimal',dict(base))
+                    positional_result=mt5.order_check(dict(base))
+                    self._event('INFO',f'order_check minimal_positional result={{retcode:{getattr(positional_result,"retcode",None)},comment:{getattr(positional_result,"comment",None)!r},last_error:{mt5.last_error()!r}}}')
+                    unpacked_result=mt5.order_check(**dict(base))
+                    unpacked_request=getattr(unpacked_result,'request',None)
+                    unpacked_request=unpacked_request._asdict() if unpacked_request is not None and hasattr(unpacked_request,'_asdict') else unpacked_request
+                    self._event('INFO',f'order_check minimal_unpacked result={{retcode:{getattr(unpacked_result,"retcode",None)},comment:{getattr(unpacked_result,"comment",None)!r},request:{unpacked_request!r},last_error:{mt5.last_error()!r}}}')
+                    request=dict(base); request['tp']=target
+                    outcome=probe('plus_tp',request)
+                    tagged=dict(request); tagged['comment']='exp:ts_mome:v1:H4'
+                    tagged_outcome=probe('executor_tag',tagged)
+                    for key in ('comment','tp','type_time','deviation','magic','price','sl'):
+                        variant=dict(tagged); variant.pop(key,None); probe(f'without_{key}',variant)
+                    for fill_name in ('ORDER_FILLING_FOK','ORDER_FILLING_IOC','ORDER_FILLING_RETURN'):
+                        if hasattr(mt5,fill_name):
+                            variant=dict(tagged); variant['type_filling']=int(getattr(mt5,fill_name)); probe(f'fill_{fill_name}',variant)
+                    variant=dict(tagged); variant.pop('type_filling',None); probe('without_type_filling',variant)
+                    self._event('INFO',f'Order-check diagnostic complete; executor-shaped retcode={tagged_outcome.get("retcode")}, comment={tagged_outcome.get("comment")!r}. No order was opened.')
                 elif action in {'status','health','today','positions'}:
                     status=self.db.get_bot_status() or {}; positions=self._owned_positions()
                     if action in {'status','health'}:

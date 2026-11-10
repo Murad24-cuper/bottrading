@@ -2,6 +2,7 @@
 from __future__ import annotations
 from datetime import datetime,timezone,timedelta
 import math,json
+from decimal import Decimal,ROUND_FLOOR
 from .models import TradeResult
 from .logger import get_logger
 from .time_utils import mt5_epoch_to_utc
@@ -32,6 +33,20 @@ class Executor:
         if flags & int(getattr(m,'SYMBOL_FILLING_IOC',2)): return m.ORDER_FILLING_IOC
         if getattr(info,'trade_exemode',None)==getattr(m,'SYMBOL_TRADE_EXECUTION_MARKET',2): return None
         return m.ORDER_FILLING_RETURN
+    @staticmethod
+    def _price(info,value):
+        digits=max(0,int(getattr(info,'digits',5) or 0))
+        return float(round(float(value),digits))
+    @staticmethod
+    def _volume(info,value):
+        minimum=Decimal(str(getattr(info,'volume_min',0) or 0)); step=Decimal(str(getattr(info,'volume_step',0) or 0))
+        requested=Decimal(str(float(value)))
+        if minimum<=0 or step<=0 or requested<minimum: return float(requested)
+        steps=((requested-minimum)/step).to_integral_value(rounding=ROUND_FLOOR)
+        return float(minimum+steps*step)
+    @staticmethod
+    def _comment(value):
+        return str(value).encode('ascii','replace').decode('ascii')[:31]
     def open_trade(self,signal,volume,expected_cost=None,features=None):
         m=self.mt5
         exploration_mode=bool(features and features.get('trade_mode') in ('exploration','weekend_exploration'))
@@ -64,6 +79,7 @@ class Executor:
         if account.margin_mode==getattr(m,'ACCOUNT_MARGIN_MODE_RETAIL_NETTING',0):
             existing=m.positions_get(symbol=signal.symbol) or []
             if existing: return self._failure('Refused open: netting account already has a position on this symbol',volume)
+        volume=self._volume(info,volume)
         buy=signal.direction=='buy'
         if signal.direction not in ('buy','sell'): return self._failure('Refused open: direction must be buy or sell',volume)
         if buy and not signal.sl_price<tick.ask<signal.tp_price: return self._failure('Refused open: invalid stop/target side for buy',volume)
@@ -73,22 +89,25 @@ class Executor:
             return self._failure('Refused open: SL/TP inside broker trade_stops_level',volume)
         filling=self._filling_mode(info)
         if filling is None: return self._failure('Refused open: no supported filling mode for market execution',volume)
-        price=tick.ask if buy else tick.bid
+        price=self._price(info,tick.ask if buy else tick.bid)
+        stop=self._price(info,signal.sl_price); target=self._price(info,signal.tp_price)
+        if buy and not stop<price<target: return self._failure('Refused open: rounded stop/target do not bracket buy price',volume)
+        if not buy and not target<price<stop: return self._failure('Refused open: rounded stop/target do not bracket sell price',volume)
         minimum=float(getattr(info,'volume_min',0) or 0); step=float(getattr(info,'volume_step',0) or 0); maximum=float(getattr(info,'volume_max',0) or 0)
         if minimum<=0 or step<=0 or maximum<minimum or volume<minimum or volume>maximum or abs((float(volume)-minimum)/step-round((float(volume)-minimum)/step))>1e-7:
             return self._failure('Refused open: volume is outside the broker minimum/step/maximum grid',volume)
-        safe_volume,why=calc_volume(float(account.equity),risk_pct,float(price),signal.sl_price,info._asdict())
+        safe_volume,why=calc_volume(float(account.equity),risk_pct,float(price),stop,info._asdict())
         if safe_volume<=0 or float(volume)>safe_volume+1e-9:
             return self._failure(f'Refused open: requested volume exceeds stop-risk size ({why})',volume)
         exp_info=features.get('exploration',{}) if isinstance(features,dict) else {}
         fam=exp_info.get('family',signal.strategy_name); var=exp_info.get('variant','v1'); tf=exp_info.get('timeframe',getattr(signal,'timeframe','M15'))
-        trade_comment=f"exp:{fam[:10]}:{var[:4]}:{tf[:3]}" if (features and features.get('trade_mode') in ('exploration','weekend_exploration')) else signal.strategy_name[:31]
-        req={'action':m.TRADE_ACTION_DEAL,'symbol':signal.symbol,'volume':float(volume),'type':m.ORDER_TYPE_BUY if buy else m.ORDER_TYPE_SELL,'price':price,'sl':signal.sl_price,'tp':signal.tp_price,'deviation':self.settings.config['executor']['deviation_points'],'magic':self.settings.magic_number,'comment':trade_comment,'type_time':m.ORDER_TIME_GTC,'type_filling':filling}
-        result=m.order_send(request=req)
+        trade_comment=f"exp:{fam[:10]}:{var[:4]}:{tf[:3]}" if (features and features.get('trade_mode') in ('exploration','weekend_exploration')) else signal.strategy_name
+        req={'action':int(m.TRADE_ACTION_DEAL),'symbol':str(signal.symbol),'volume':float(volume),'type':int(m.ORDER_TYPE_BUY if buy else m.ORDER_TYPE_SELL),'price':float(price),'sl':float(stop),'tp':float(target),'deviation':int(self.settings.config['executor']['deviation_points']),'magic':int(self.settings.magic_number),'comment':self._comment(trade_comment),'type_time':int(m.ORDER_TIME_GTC),'type_filling':int(filling)}
+        result=m.order_send(**req)
         if result and result.retcode in (getattr(m,'TRADE_RETCODE_REQUOTE',10004),getattr(m,'TRADE_RETCODE_PRICE_CHANGED',10020)):
             tick=m.symbol_info_tick(signal.symbol)
             if tick is None: return self._failure(f'Retry tick unavailable: {m.last_error()}',volume,result.retcode)
-            new_price=tick.ask if buy else tick.bid
+            new_price=self._price(info,tick.ask if buy else tick.bid)
             if buy and not signal.sl_price<new_price<signal.tp_price:
                 return self._failure(f'Requote cancelled: price {new_price} violates stop/target side for buy',volume,retcode=result.retcode)
             if not buy and not signal.tp_price<new_price<signal.sl_price:
@@ -98,18 +117,18 @@ class Executor:
             costs=expected_cost if isinstance(expected_cost,dict) else {}
             cost_per_lot=float(costs.get('cost',0) or 0)/float(volume) if float(volume)>0 else 0.0
             if cost_per_lot>0:
-                new_safe_volume,why=calc_volume_stressed(float(account.equity),risk_pct,float(new_price),signal.sl_price,info._asdict(),cost_per_lot)
+                new_safe_volume,why=calc_volume_stressed(float(account.equity),risk_pct,float(new_price),stop,info._asdict(),cost_per_lot)
             else:
-                new_safe_volume,why=calc_volume(float(account.equity),risk_pct,float(new_price),signal.sl_price,info._asdict())
+                new_safe_volume,why=calc_volume(float(account.equity),risk_pct,float(new_price),stop,info._asdict())
             if new_safe_volume<=0 or new_safe_volume<minimum:
                 return self._failure(f'Requote cancelled: safe volume below minimum lot ({why})',volume,retcode=result.retcode)
-            new_volume=round(min(float(volume),float(new_safe_volume)),8)
+            new_volume=self._volume(info,min(float(volume),float(new_safe_volume)))
             if new_volume<minimum:
                 return self._failure(f'Requote cancelled: volume {new_volume} below minimum lot {minimum}',volume,retcode=result.retcode)
             volume=new_volume
-            req['price']=new_price
+            req['price']=float(new_price)
             req['volume']=float(volume)
-            result=m.order_send(request=req)
+            result=m.order_send(**req)
         if result is None: return self._failure(f'order_send failed: {m.last_error()}',volume)
         if result.retcode!=m.TRADE_RETCODE_DONE: return self._failure(f'order_send rejected ({result.retcode}): {result.comment}',volume,retcode=result.retcode)
         ticket=int(getattr(result,'position',0) or getattr(result,'order',0) or getattr(result,'deal',0))
@@ -141,11 +160,12 @@ class Executor:
         if p is None: return self._failure(f'Refused close: owned position {ticket} not found',ticket=ticket)
         tick=m.symbol_info_tick(p.symbol)
         if tick is None: return self._failure(f'Close tick failed: {m.last_error()}',p.volume,ticket)
-        is_buy=p.type==m.POSITION_TYPE_BUY; order_type=m.ORDER_TYPE_SELL if is_buy else m.ORDER_TYPE_BUY; price=tick.bid if is_buy else tick.ask
-        info=m.symbol_info(p.symbol); filling=self._filling_mode(info) if info else None
+        is_buy=p.type==m.POSITION_TYPE_BUY; order_type=m.ORDER_TYPE_SELL if is_buy else m.ORDER_TYPE_BUY
+        info=m.symbol_info(p.symbol); price=self._price(info,tick.bid if is_buy else tick.ask) if info else float(tick.bid if is_buy else tick.ask)
+        volume=self._volume(info,p.volume) if info else float(p.volume); filling=self._filling_mode(info) if info else None
         if filling is None: return self._failure('Refused close: unsupported filling mode',p.volume,ticket)
-        req={'action':m.TRADE_ACTION_DEAL,'symbol':p.symbol,'position':p.ticket,'volume':p.volume,'type':order_type,'price':price,'deviation':self.settings.config['executor']['deviation_points'],'magic':self.settings.magic_number,'comment':str(reason)[:31],'type_time':m.ORDER_TIME_GTC,'type_filling':filling}
-        result=m.order_send(request=req)
+        req={'action':int(m.TRADE_ACTION_DEAL),'symbol':str(p.symbol),'position':int(p.ticket),'volume':float(volume),'type':int(order_type),'price':float(price),'deviation':int(self.settings.config['executor']['deviation_points']),'magic':int(self.settings.magic_number),'comment':self._comment(reason),'type_time':int(m.ORDER_TIME_GTC),'type_filling':int(filling)}
+        result=m.order_send(**req)
         if result is None or result.retcode!=m.TRADE_RETCODE_DONE:
             return self._failure(f'Close ticket {ticket} failed: {getattr(result,"comment",m.last_error())}',p.volume,ticket,getattr(result,'retcode',None))
         aliases={int(ticket),int(p.ticket),int(getattr(p,'identifier',p.ticket) or p.ticket)}
@@ -161,15 +181,17 @@ class Executor:
         if int(getattr(p,'magic',0))!=self.settings.magic_number: return self._failure('Refused partial close: position is not owned',volume,int(p.ticket))
         if info is None: return self._failure(f'Partial close symbol unavailable: {m.last_error()}',volume,int(p.ticket))
         minimum=float(getattr(info,'volume_min',0) or 0); step=float(getattr(info,'volume_step',0) or 0)
-        if minimum<=0 or step<=0 or volume<minimum-1e-9 or volume>float(p.volume)+1e-9 or abs((float(volume)-minimum)/step-round((float(volume)-minimum)/step))>1e-7:
+        if minimum<=0 or step<=0 or volume<minimum-1e-9 or volume>float(p.volume)+1e-9:
             return self._failure('Refused partial close: volume is outside the open volume or broker minimum/step grid',volume,int(p.ticket))
+        volume=self._volume(info,volume)
+        if volume<minimum-1e-9: return self._failure('Refused partial close: rounded volume is below broker minimum',volume,int(p.ticket))
         tick=m.symbol_info_tick(p.symbol)
         if tick is None: return self._failure(f'Partial close quote unavailable: {m.last_error()}',volume,int(p.ticket))
-        buy=p.type==m.POSITION_TYPE_BUY; order_type=m.ORDER_TYPE_SELL if buy else m.ORDER_TYPE_BUY; price=tick.bid if buy else tick.ask
+        buy=p.type==m.POSITION_TYPE_BUY; order_type=m.ORDER_TYPE_SELL if buy else m.ORDER_TYPE_BUY; price=self._price(info,tick.bid if buy else tick.ask)
         filling=self._filling_mode(info)
         if filling is None: return self._failure('Refused partial close: unsupported filling mode',volume,int(p.ticket))
-        req={'action':m.TRADE_ACTION_DEAL,'symbol':p.symbol,'position':p.ticket,'volume':float(volume),'type':order_type,'price':price,'deviation':self.settings.config['executor']['deviation_points'],'magic':self.settings.magic_number,'comment':reason[:31],'type_time':m.ORDER_TIME_GTC,'type_filling':filling}
-        result=m.order_send(request=req)
+        req={'action':int(m.TRADE_ACTION_DEAL),'symbol':str(p.symbol),'position':int(p.ticket),'volume':float(volume),'type':int(order_type),'price':float(price),'deviation':int(self.settings.config['executor']['deviation_points']),'magic':int(self.settings.magic_number),'comment':self._comment(reason),'type_time':int(m.ORDER_TIME_GTC),'type_filling':int(filling)}
+        result=m.order_send(**req)
         if result is None or result.retcode!=m.TRADE_RETCODE_DONE: return self._failure(f'Partial close ticket {p.ticket} failed: {getattr(result,"comment",m.last_error())}',volume,int(p.ticket),getattr(result,'retcode',None))
         self.sync_positions()
         self.db.update_open_trade(int(p.ticket),scale_out_done=1,volume=max(0.0,float(p.volume)-float(volume)))
@@ -181,14 +203,17 @@ class Executor:
             self._event(f'Refused SL/TP modification: ticket={ticket} is not owned','WARNING'); return False
         if float(sl or 0)<=0 or float(tp or 0)<=0:
             self._event(f'Refused SL/TP modification: ticket={ticket} must retain positive SL and TP','WARNING'); return False
+        info=self.mt5.symbol_info(p.symbol)
+        if info is None: return False
+        sl=self._price(info,sl); tp=self._price(info,tp)
         is_buy=p.type==self.mt5.POSITION_TYPE_BUY; current_sl=float(p.sl or 0)
         if current_sl>0 and not stop_only_tightens('buy' if is_buy else 'sell',current_sl,float(sl)):
             self._event(f'Refused SL/TP modification: ticket={ticket} would loosen its stop','WARNING'); return False
         tick=self.mt5.symbol_info_tick(p.symbol)
         if tick is None or (is_buy and float(sl)>=float(tick.bid)) or (not is_buy and float(sl)<=float(tick.ask)):
             self._event(f'Refused SL/TP modification: ticket={ticket} stop is not on the protective side of the market','WARNING'); return False
-        req={'action':m.TRADE_ACTION_SLTP,'position':ticket,'symbol':p.symbol,'sl':sl,'tp':tp,'magic':self.settings.magic_number}
-        result=m.order_send(request=req); ok=bool(result and result.retcode==m.TRADE_RETCODE_DONE)
+        req={'action':int(m.TRADE_ACTION_SLTP),'position':int(ticket),'symbol':str(p.symbol),'sl':float(sl),'tp':float(tp),'magic':int(self.settings.magic_number)}
+        result=m.order_send(**req); ok=bool(result and result.retcode==m.TRADE_RETCODE_DONE)
         if ok:
             try: self.db.update_open_trade(int(p.ticket),sl=float(sl),tp=float(tp))
             except Exception as exc: self._event(f'Could not persist updated SL/TP for ticket={p.ticket}: {exc}','WARNING')
@@ -224,8 +249,9 @@ class Executor:
         if not tp_candidate or (is_buy and tp_candidate<=market_price) or (not is_buy and tp_candidate>=market_price):
             tp_candidate=round(market_price+2.0*abs(market_price-sl_candidate) if is_buy else market_price-2.0*abs(market_price-sl_candidate),5)
         for attempt in range(1,max_retries+1):
-            req={'action':self.mt5.TRADE_ACTION_SLTP,'position':ticket,'symbol':symbol,'sl':sl_candidate,'tp':tp_candidate,'magic':self.settings.magic_number}
-            res=self.mt5.order_send(request=req)
+            sl_candidate=self._price(info,sl_candidate); tp_candidate=self._price(info,tp_candidate)
+            req={'action':int(self.mt5.TRADE_ACTION_SLTP),'position':int(ticket),'symbol':str(symbol),'sl':float(sl_candidate),'tp':float(tp_candidate),'magic':int(self.settings.magic_number)}
+            res=self.mt5.order_send(**req)
             if res and res.retcode==getattr(self.mt5,'TRADE_RETCODE_DONE',10009):
                 self._event(f'Recovered missing SL for ticket={ticket} symbol={symbol} sl={sl_candidate} (attempt {attempt})','WARNING')
                 try: self.db.update_open_trade(ticket,sl=sl_candidate,tp=tp_candidate)

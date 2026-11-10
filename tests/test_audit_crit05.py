@@ -72,7 +72,7 @@ def test_partial_fill_stores_actual_filled_volume(tmp_path):
         def symbol_info_tick(self, symbol):
             return SimpleNamespace(ask=100.00, bid=99.98, time_msc=int(datetime.now(timezone.utc).timestamp()*1000))
         def copy_rates_from_pos(self, symbol, tf, start, count): return [{"time": 1234567890}]
-        def order_send(self, request):
+        def order_send(self, **request):
             # Broker partial fill: requested 1.0, but filled 0.4
             return SimpleNamespace(retcode=10009, comment="Done", price=100.00, position=555, volume=0.4)
         def positions_get(self, **kwargs):

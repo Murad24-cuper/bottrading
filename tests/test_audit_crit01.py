@@ -59,7 +59,7 @@ class FakeMT5:
     def last_error(self):
         return (0, 'ok')
 
-    def order_send(self, request):
+    def order_send(self, **request):
         self.orders.append(request)
         if request.get('action') == self.TRADE_ACTION_SLTP:
             self.modify_attempts += 1

@@ -64,7 +64,7 @@ class FakeMT52:
     @staticmethod
     def _make_info():
         info = SimpleNamespace(
-            trade_mode=4, trade_stops_level=0, point=.00001,
+            trade_mode=4, trade_stops_level=0, point=.00001, digits=5,
             volume_min=.01, volume_step=.01, volume_max=10.0,
             trade_tick_size=.0001, trade_tick_value=1.0,
             trade_tick_value_loss=1.0, trade_tick_value_profit=1.0,
@@ -81,7 +81,26 @@ class FakeMT52:
                                margin_free=10000, margin_mode=2, trade_mode=0,
                                margin_level=0, currency='USD', leverage=100)
     def symbols_get(self): return []
-    def order_send(self, request):
+    def order_send(self, **request):
+        assert request and all(value is not None for value in request.values())
+        assert all(type(value) in (int, float, str) for value in request.values())
+        action=request['action']
+        common={'action','symbol','magic'}
+        if action==self.TRADE_ACTION_DEAL:
+            allowed=common|{'volume','type','price','sl','tp','deviation','comment','type_time','type_filling','position'}
+            assert type(request['volume']) is float
+            assert request['volume']>=self._info.volume_min
+            assert abs((request['volume']-self._info.volume_min)/self._info.volume_step-round((request['volume']-self._info.volume_min)/self._info.volume_step))<1e-7
+            assert type(request['price']) is float and request['price']==round(request['price'],self._info.digits)
+            if 'comment' in request:
+                assert len(request['comment'])<=31 and request['comment'].isascii()
+        elif action==self.TRADE_ACTION_SLTP:
+            allowed=common|{'position','sl','tp'}
+            assert request['sl']==round(request['sl'],self._info.digits)
+            assert request['tp']==round(request['tp'],self._info.digits)
+        else:
+            raise AssertionError(f'unknown MT5 action {action}')
+        assert set(request)<=allowed
         self.orders.append(dict(request))
         return SimpleNamespace(retcode=10009, price=request.get('price', 0),
                                comment='done', position=request.get('position', 100),
@@ -129,6 +148,28 @@ def _make_exe(tmp_path, extra_risk=None):
 
     mt5 = FakeMT52(); db = FakeDB2()
     return Executor(mt5, settings, db, Service()), mt5, db
+
+
+def test_executor_sends_flat_typed_order_fields_and_rounds_for_strict_mt5(tmp_path):
+    exe,mt5,db=_make_exe(tmp_path)
+    signal=Signal('EURUSD','buy','M5',1.1011,1.10001234,1.10309876,.8,'test')
+    result=exe.open_trade(signal,.019,features={'trade_mode':'exploration','exploration':{'family':'ts_momentum_long_name','variant':'variant_long','timeframe':'H4'}})
+    assert result.success
+    request=mt5.orders[0]
+    assert set(request)=={'action','symbol','volume','type','price','sl','tp','deviation','magic','comment','type_time','type_filling'}
+    assert request['volume']==0.01
+    assert request['price']==1.1011 and request['sl']==1.10001 and request['tp']==1.1031
+    assert len(request['comment'])<=31 and request['comment'].isascii()
+    assert db.inserted[0]['features']
+    with pytest.raises((AssertionError,KeyError)):
+        mt5.order_send(request=request)
+
+
+def test_executor_request_normalizers_use_symbol_precision_and_plain_ascii():
+    info=SimpleNamespace(digits=3,volume_min=.01,volume_step=.01)
+    assert Executor._price(info,158.123456)==158.123
+    assert Executor._volume(info,.019)==.01
+    assert Executor._comment('é'*40)=='?'*31
 
 
 def _buy_row(ticket=9):
@@ -325,7 +366,7 @@ def test_open_trade_requote_tick_unavailable(tmp_path):
             return SimpleNamespace(bid=1.101, ask=1.1011)
         return None  # second call fails
     mt5.symbol_info_tick = tick_side_effect
-    mt5.order_send = lambda request: SimpleNamespace(retcode=10004, comment='requote',
+    mt5.order_send = lambda **request: SimpleNamespace(retcode=10004, comment='requote',
                                                  position=0, order=0, deal=0, volume=0, price=0)
     sig = Signal('EURUSD', 'buy', 'M5', 1.1011, 1.1, 1.103, 0.8, 'test')
     res = exe.open_trade(sig, 0.01)
@@ -336,7 +377,7 @@ def test_open_trade_requote_price_violates_buy_stops(tmp_path):
     exe, mt5, db = _make_exe(tmp_path)
     # Initial order triggers requote
     call_count = [0]
-    def order_side(request):
+    def order_side(**request):
         call_count[0] += 1
         return SimpleNamespace(retcode=10004, comment='requote',
                                position=0, order=0, deal=0, volume=0, price=0)
@@ -356,7 +397,7 @@ def test_open_trade_requote_price_violates_buy_stops(tmp_path):
 def test_open_trade_order_send_fails_returns_none(tmp_path):
     """When order_send returns None, failure is returned."""
     exe, mt5, db = _make_exe(tmp_path)
-    mt5.order_send = lambda request: None
+    mt5.order_send = lambda **request: None
     sig = Signal('EURUSD', 'buy', 'M5', 1.1011, 1.1, 1.103, 0.8, 'test')
     res = exe.open_trade(sig, 0.01)
     assert not res.success and 'order_send failed' in res.message
@@ -364,18 +405,18 @@ def test_open_trade_order_send_fails_returns_none(tmp_path):
 def test_open_trade_broker_rejects_with_retcode(tmp_path):
     """When broker returns non-DONE retcode, failure is returned."""
     exe, mt5, db = _make_exe(tmp_path)
-    mt5.order_send = lambda request: SimpleNamespace(retcode=10006, comment='rejected',
+    mt5.order_send = lambda **request: SimpleNamespace(retcode=10006, comment='rejected',
                                                  position=0, order=0, deal=0, volume=0.01, price=0)
     sig = Signal('EURUSD', 'buy', 'M5', 1.1011, 1.1, 1.103, 0.8, 'test')
     res = exe.open_trade(sig, 0.01)
     assert not res.success and 'rejected' in res.message
 
-def test_open_trade_volume_outside_grid(tmp_path):
-    """Volume not on lot step grid is rejected before order_send."""
+def test_open_trade_volume_is_rounded_down_to_broker_grid(tmp_path):
+    """A requested volume between broker steps is rounded down, never up."""
     exe, mt5, db = _make_exe(tmp_path)
     sig = Signal('EURUSD', 'buy', 'M5', 1.1011, 1.1, 1.103, 0.8, 'test')
-    res = exe.open_trade(sig, 0.015)  # not on 0.01 step
-    assert not res.success and 'minimum/step/maximum' in res.message
+    res = exe.open_trade(sig, 0.015)  # between 0.01 steps
+    assert res.success and mt5.orders[0]['volume'] == 0.01
 
 def test_open_trade_symbol_unavailable(tmp_path):
     """When symbol_info or tick is None, failure is returned."""
@@ -423,7 +464,7 @@ def test_remediate_missing_sl_all_retries_fail_closes_position(tmp_path):
     mt5._positions = [pos]
     db.open = [_buy_row()]
     # Make order_send always fail
-    mt5.order_send = lambda request: SimpleNamespace(retcode=10006, comment='fail',
+    mt5.order_send = lambda **request: SimpleNamespace(retcode=10006, comment='fail',
                                                  position=0, order=0, deal=0, volume=0, price=0)
     result = exe.remediate_missing_sl(pos, planned_sl=0, max_retries=2)
     assert result is False

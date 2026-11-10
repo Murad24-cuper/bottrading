@@ -73,7 +73,8 @@ def test_exploration_signal_comment_format(tmp_path, monkeypatch):
     res = executor.open_trade(sig, volume=0.01, features=features)
     assert res.success
     # Check that comment passed to order_send matched exp:{fam[:10]}:{var[:4]}:{tf[:3]}
-    sent_req = mt5.order_send.call_args.kwargs['request']
+    sent_req = mt5.order_send.call_args.kwargs
+    assert mt5.order_send.call_args.args == ()
     assert sent_req['comment'] == 'exp:donchian_b:v1:H4'
     mt5.account_info.return_value.trade_mode = 1
     res = executor.open_trade(sig, volume=0.01, features=features)
