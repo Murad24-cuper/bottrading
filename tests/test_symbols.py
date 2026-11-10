@@ -84,6 +84,14 @@ def test_main_profile_prefers_micro_names_for_all_focus_forex_and_gold():
     service.settings.config['universe'].update(config['universe'])
     assert {name:service.resolve_alias(name) for name in logicals}==dict(zip(logicals,names))
 
+def test_alias_prefers_enabled_suffix_when_exact_broker_symbol_is_disabled():
+    service=make_service(['EURUSD','EURUSD#'])
+    service.settings.config['universe']['symbol_aliases']={'EURUSD':['EURUSD']}
+    modes={'EURUSD':0,'EURUSD#':4}
+    service.mt5.symbol_info=lambda name: SimpleNamespace(trade_mode=modes[name],point=0.00001)
+
+    assert service.resolve_alias('EURUSD')=='EURUSD#'
+
 def test_weekend_universe_is_crypto_gold247_plus_fresh_open_indices(monkeypatch):
     service=make_service(['BTCUSD','ETHUSD','GOLD24-7','US500Cash','US30Cash'])
     service.settings.config['universe'].update({

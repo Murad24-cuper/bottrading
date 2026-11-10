@@ -99,7 +99,16 @@ class SymbolService:
    if matches:
     # Prefer an exact match to avoid resolving e.g. BTC to a similarly named CFD.
     exact=next((n for n in matches if n.lower()==pat.lower()),None)
-    selected=exact or matches[0]
+    # Some brokers expose an exact alias as disabled while the tradable
+    # contract uses a suffix (for example EURUSD and EURUSD#). Prefer a full
+    # trading-mode match within this alias before falling back to name order.
+    full_mode=getattr(self.mt5,'SYMBOL_TRADE_MODE_FULL',4)
+    tradable=[]
+    for name in matches:
+     info=self.mt5.symbol_info(name)
+     if info is not None and getattr(info,'trade_mode',None)==full_mode:
+      tradable.append(name)
+    selected=(exact if exact in tradable else None) or (tradable[0] if tradable else (exact or matches[0]))
     self.mt5.symbol_select(selected,True)
     return selected
   return None
