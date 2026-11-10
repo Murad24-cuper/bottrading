@@ -9,6 +9,7 @@ from src.backtest.engine import Backtester
 from src.backtest.report import save_report,walk_forward
 from src.strategies import REGISTRY,load_strategies
 from src.history import history_path
+from src.parquet_compat import read_parquet
 
 def _settings(): return load_settings(require_credentials=False)
 
@@ -34,7 +35,7 @@ def _read_history(settings,mode,strategy_names,requested_timeframes=None):
         history[symbol]={}
         for tf in sorted(timeframes):
             path=history_path(base,symbol,tf)
-            if path.exists(): history[symbol][tf]=pd.read_parquet(path)
+            if path.exists(): history[symbol][tf]=read_parquet(path)
         if not history[symbol]: print(f'No cached bars for {symbol}; skipped.')
     history={s:frames for s,frames in history.items() if frames}
     return history,specs

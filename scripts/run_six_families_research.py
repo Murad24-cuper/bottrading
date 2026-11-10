@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.research.validation import random_entry_benchmark, walk_forward_share, deflated_sharpe_ratio
 from src.indicators import atr, rsi
+from src.parquet_compat import read_parquet
 
 FOCUS_SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'US500Cash', 'US100Cash', 'US30Cash', 'GER40Cash', 'GOLD']
 INDEX_SYMBOLS = ['US500Cash', 'US100Cash', 'US30Cash', 'GER40Cash']
@@ -164,7 +165,7 @@ def run_research():
         for tf in ['M15', 'H1', 'H4', 'D1']:
             p = history_dir / f"{sym}_{tf}.parquet"
             if p.exists():
-                df = pd.read_parquet(p)
+                df = read_parquet(p)
                 df.index = pd.DatetimeIndex(df.index)
                 if df.index.tz is None:
                     df.index = df.index.tz_localize('UTC')

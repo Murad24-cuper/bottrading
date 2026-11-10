@@ -17,10 +17,12 @@ def test_parquet_fallback_preserves_dataframe_structure(tmp_path):
     )
 
     path = tmp_path / "EURUSD_M15.parquet"
-    df.to_parquet(path)
+    from src.parquet_compat import write_parquet
+    write_parquet(df,path)
     assert path.exists()
 
-    loaded = pd.read_parquet(path)
+    from src.parquet_compat import read_parquet
+    loaded = read_parquet(path)
     assert loaded.shape == df.shape
     assert list(loaded.columns) == list(df.columns)
     assert loaded.index.tz == df.index.tz

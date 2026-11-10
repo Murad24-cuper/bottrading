@@ -6,12 +6,13 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import pandas as pd
 from src.config import load_settings
 from src.brain.evaluation import evaluate_test_period,render_report
+from src.parquet_compat import read_parquet
 
 def main():
     settings=load_settings(require_credentials=False); root=settings.root
     source=settings.data_dir/'brain'/'test_predictions.parquet'
     if not source.exists(): raise SystemExit(f'No final test predictions at {source}; build/train/validate first. Brain remains shadow-only.')
-    result=evaluate_test_period(pd.read_parquet(source),settings.config.get('brain',{}))
+    result=evaluate_test_period(read_parquet(source),settings.config.get('brain',{}))
     report_dir=root/'reports'; report_dir.mkdir(parents=True,exist_ok=True)
     target=report_dir/f"brain_eval_{pd.Timestamp.now(tz='UTC').date().isoformat()}.md"
     target.write_text(render_report(result),encoding='utf-8')

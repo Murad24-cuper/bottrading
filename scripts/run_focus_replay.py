@@ -10,6 +10,7 @@ from src.config import load_settings
 from src.history import history_path
 from src.strategies import load_strategies
 from src.backtest.engine import Backtester
+from src.parquet_compat import read_parquet
 
 
 def main():
@@ -33,7 +34,7 @@ def main():
         for tf in ('M1','M5','M15','H1'):
             path=history_path(base,symbol,tf)
             if not path.is_file(): continue
-            frame=pd.read_parquet(path); frame.index=pd.to_datetime(frame.index,utc=True)
+            frame=read_parquet(path); frame.index=pd.to_datetime(frame.index,utc=True)
             frame=frame.loc[(frame.index>=context_start)&(frame.index<end)]
             if not frame.empty: frames[tf]=frame
         if frames: history[symbol]=frames; available[symbol]=specs[symbol]

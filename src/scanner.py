@@ -6,7 +6,7 @@ from datetime import datetime,timezone,timedelta
 from collections import Counter, defaultdict
 import math
 import json
-from . import market_data
+from . import market_data, parquet_compat
 from . import indicators as ind
 from .features import build_features
 from .risk import calc_volume
@@ -147,7 +147,7 @@ class MarketScanner:
         path=data_dir/'brain'/'reference.parquet'
         if not path.exists(): return {}
         try:
-            frame=__import__('pandas').read_parquet(path)
+            frame=parquet_compat.read_parquet(path)
             required={'time','symbol','asset_group','vector','win','net_r'}
             if not required.issubset(frame.columns): raise ValueError(f'missing {sorted(required-set(frame.columns))}')
             from .brain.memory import prepare_memory

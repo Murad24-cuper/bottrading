@@ -53,7 +53,7 @@ def build_labeled_outcomes(history_dir: str|Path, symbols: list[str], specs: dic
     forex_path=history/'EURUSD_M1.parquet'
     forex_index=None
     if forex_path.is_file():
-        forex_frame=_as_utc_index(pd.read_parquet(forex_path,columns=['close']))
+        forex_frame=_as_utc_index(parquet_compat.read_parquet(forex_path,columns=['close']))
         forex_index=forex_frame.index
     def forex_open_at(stamp):
         if stamp.weekday()<5: return True
@@ -63,7 +63,7 @@ def build_labeled_outcomes(history_dir: str|Path, symbols: list[str], specs: dic
     for symbol in symbols:
         paths={tf:history/f'{symbol}_{tf}.parquet' for tf in ('M1','M5','M15')}
         if not all(path.is_file() for path in paths.values()): continue
-        frames={tf:_as_utc_index(pd.read_parquet(path)) for tf,path in paths.items()}
+        frames={tf:_as_utc_index(parquet_compat.read_parquet(path)) for tf,path in paths.items()}
         m1,m5,m15=frames['M1'],frames['M5'],frames['M15']
         spec=specs.get(symbol,{})
         group=str(spec.get('asset_group','other'))

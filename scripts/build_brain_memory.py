@@ -10,6 +10,7 @@ import threading
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 import pandas as pd
+from src.parquet_compat import write_parquet
 
 from src.brain.dataset import build_labeled_outcomes
 from src.brain.memory import apply_pca, fit_pca
@@ -55,7 +56,7 @@ def main() -> int:
     outcomes=build_labeled_outcomes(history,symbols,specs,split,settings.config,
                                     int(settings.config.get('brain',{}).get('sample_every_minutes',30)))
     if outcomes.empty: raise SystemExit('No labeled examples were produced from the configured focus/weekend history.')
-    outcome_path=brain_dir/'labeled_outcomes.parquet'; outcomes.to_parquet(outcome_path,index=False)
+    outcome_path=brain_dir/'labeled_outcomes.parquet'; write_parquet(outcomes,outcome_path,index=False)
     train=outcomes[outcomes.split=='train'].copy()
     if train.empty: raise SystemExit('Frozen train split has no labeled examples; refusing to fit memory.')
     maximum=int(settings.config.get('brain',{}).get('max_reference_situations',1_500_000))
@@ -77,11 +78,11 @@ def main() -> int:
     # Reference memory contains TRAIN rows only; validation/holdout labels never enter it.
     train_ids=set(train.index)
     reference=outcomes.loc[sorted(train_ids)].copy()
-    reference_path=brain_dir/'reference.parquet'; reference.to_parquet(reference_path,index=False)
-    reference[reference.weekend.astype(bool)].to_parquet(brain_dir/'weekend_reference.parquet',index=False)
-    reference[~reference.weekend.astype(bool)].to_parquet(brain_dir/'weekday_reference.parquet',index=False)
+    reference_path=brain_dir/'reference.parquet'; write_parquet(reference,reference_path,index=False)
+    write_parquet(reference[reference.weekend.astype(bool)],brain_dir/'weekend_reference.parquet',index=False)
+    write_parquet(reference[~reference.weekend.astype(bool)],brain_dir/'weekday_reference.parquet',index=False)
     # Store transformed vectors in the labeled set after keeping a separate full outcome file.
-    outcomes.to_parquet(outcome_path,index=False)
+    write_parquet(outcomes,outcome_path,index=False)
     stats={split_name:int((outcomes.split==split_name).sum()) for split_name in ('train','validation','test','purged')}
     stop_monitor.set(); watcher.join(timeout=2)
     used=_memory_mb()

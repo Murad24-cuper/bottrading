@@ -15,7 +15,8 @@ def bars(index):
 def test_labeled_dataset_is_causal_and_contains_both_directions(tmp_path):
     m1_index=pd.date_range('2026-01-01',periods=24*60,freq='min',tz='UTC')
     m1=bars(m1_index); m5=bars(m1_index[::5]); m15=bars(m1_index[::15])
-    for tf,frame in [('M1',m1),('M5',m5),('M15',m15)]: frame.to_parquet(tmp_path/f'EURUSD_{tf}.parquet')
+    from src.parquet_compat import write_parquet
+    for tf,frame in [('M1',m1),('M5',m5),('M15',m15)]: write_parquet(frame,tmp_path/f'EURUSD_{tf}.parquet')
     times=[stamp.to_pydatetime() for stamp in m1_index[::30]]
     split=chronological_splits(times,purge_minutes=120)
     config={'universe':{'focus_symbols':['EURUSD'],'weekend_symbols':[],'symbol_aliases':{'EURUSD':['EURUSD']}},

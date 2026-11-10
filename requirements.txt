@@ -4,12 +4,11 @@ numpy
 python-dotenv
 pyyaml
 pytest
-pyarrow
 matplotlib
 streamlit
 graphviz>=0.19.0
 streamlit-autorefresh
 requests
 defusedxml
-# Windows WDAC/AppLocker blocks pyarrow native _parquet.pyd DLL; fastparquet provides pure/fallback parquet engine
+# Parquet I/O is pinned to fastparquet because Smart App Control blocks pyarrow's native DLL.
 fastparquet==2026.9.0

@@ -12,6 +12,7 @@ from src.config import load_settings
 from src.history import download_history
 from src.mt5_client import MT5Client
 from src.symbols import SymbolService
+from src.parquet_compat import read_parquet
 
 
 def _resolve(service,logical):
@@ -55,7 +56,7 @@ def main():
                 path=history_dir/f'{symbol}_{timeframe}.parquet'
                 if not path.exists(): continue
                 import pandas as pd
-                frame=pd.read_parquet(path); index=pd.to_datetime(frame.index,utc=True)
+                frame=read_parquet(path); index=pd.to_datetime(frame.index,utc=True)
                 ranges.append((symbol,timeframe,len(frame),index.min().isoformat(),index.max().isoformat()))
     target=root/'docs'/'HISTORY_RANGES.md'; target.parent.mkdir(parents=True,exist_ok=True)
     lines=['# History ranges','',f'Refreshed at {now.isoformat()} via the local DEMO terminal. Missing broker history is recorded as provided; no order functions are called.','','| Symbol | Timeframe | Bars | First UTC bar | Last UTC bar |','|---|---|---:|---|---|']

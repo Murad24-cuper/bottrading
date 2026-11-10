@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.research.validation import random_entry_benchmark, walk_forward_share, deflated_sharpe_ratio
+from src.parquet_compat import read_parquet
 from src.indicators import atr, rsi as _rsi_raw
 
 def rsi_close(df, period=14):
@@ -178,7 +179,7 @@ def compute_buy_and_hold(history_dir: Path) -> dict:
         p = history_dir / f"{s}_D1.parquet"
         if not p.exists():
             continue
-        df = pd.read_parquet(p)
+        df = read_parquet(p)
         df = df.loc[df.index <= M_VAL_END]
         # M window
         tr_m = df[(df.index >= '2023-11-09') & (df.index <= M_TRAIN_END)]
@@ -210,7 +211,7 @@ def run_research():
         for tf in ['M15', 'H1', 'H4', 'D1']:
             p = history_dir / f"{s}_{tf}.parquet"
             if p.exists():
-                frame = pd.read_parquet(p)
+                frame = read_parquet(p)
                 data[s][tf] = frame.loc[frame.index <= M_VAL_END]
             else:
                 data[s][tf] = None

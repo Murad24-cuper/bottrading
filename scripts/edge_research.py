@@ -6,6 +6,7 @@ import json, math, sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np
 import pandas as pd
+from src.parquet_compat import read_parquet
 from src.brain.training import label_trade, split_name
 from src.config import load_settings
 from src.indicators import atr
@@ -33,7 +34,7 @@ def main():
         for tf,mins in TFS.items():
             p=data_dir/f'{symbol}_{tf}.parquet'
             if p.exists():
-                f=pd.read_parquet(p).sort_index(); f.index=pd.DatetimeIndex(f.index)
+                f=read_parquet(p).sort_index(); f.index=pd.DatetimeIndex(f.index)
                 f.index=f.index.tz_localize('UTC') if f.index.tz is None else f.index.tz_convert('UTC')
                 f=f.loc[(f.index>=start)&(f.index<=finish)].copy()
                 if len(f): fs[tf]=f
@@ -134,7 +135,7 @@ def main():
     for key in sorted({r[:4] for r in g_rows}):
         tr=metric(grid.get((*key,'train'),[])); va=metric(grid.get((*key,'validation'),[]))
         if tr['n']>=300 and va['n']>=300 and tr['ev']>0 and va['ev']>0: viable.append((key,tr,va))
-    pred=pd.read_parquet(brain/'test_predictions.parquet'); pool=pred.net_r.to_numpy(float); chosen=pred.loc[pred.checklist_only.astype(bool),'net_r'].to_numpy(float)
+    pred=read_parquet(brain/'test_predictions.parquet'); pool=pred.net_r.to_numpy(float); chosen=pred.loc[pred.checklist_only.astype(bool),'net_r'].to_numpy(float)
     rng=np.random.default_rng(20261109); rand=np.asarray([rng.choice(pool,len(chosen),replace=False).mean() for _ in range(1000)])
     bmet=metric(baseline); lines=['# Edge research','','Offline-only diagnostic. No MT5 connection, live code path, or trading/risk configuration changes.',
       f"Frozen periods: train ends {split['train_end']}; validation {split['validation_start']} to {split['validation_end']}; holdout begins {split['test_start']}.",

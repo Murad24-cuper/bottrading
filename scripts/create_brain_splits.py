@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pandas as pd
 from src.brain.training import chronological_splits
 from src.config import load_settings
+from src.parquet_compat import read_parquet
 
 
 def main() -> int:
@@ -36,7 +37,7 @@ def main() -> int:
     ranges = {}
     for symbol in symbols:
         path = history / f'{symbol}_M1.parquet'
-        frame = pd.read_parquet(path, columns=['close'])
+        frame = read_parquet(path, columns=['close'])
         index = pd.DatetimeIndex(frame.index)
         if index.tz is None:
             index = index.tz_localize('UTC')

@@ -109,7 +109,7 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
         for tf in timeframes:
             path=base/f'{_safe_name(symbol)}_{tf}.parquet'; path.parent.mkdir(parents=True,exist_ok=True)
             if path.exists():
-                existing=pd.read_parquet(path)
+                existing=parquet_compat.read_parquet(path)
                 if not isinstance(existing.index,pd.DatetimeIndex):
                     if 'time' not in existing: raise ValueError(f'Invalid history file: {path}')
                     existing['time']=pd.to_datetime(existing.time,utc=True); existing=existing.set_index('time')
@@ -135,7 +135,7 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
             completed_before=datetime.now(timezone.utc)
             combined=combined[[stamp+timedelta(minutes=TF_MINUTES[tf])<=completed_before for stamp in combined.index]]
             temporary=path.with_suffix(path.suffix+'.tmp')
-            combined.to_parquet(temporary)
+            parquet_compat.write_parquet(combined,temporary)
             existing_bytes=sum(file.stat().st_size for file in base.glob('*.parquet') if file!=path)
             projected=existing_bytes+temporary.stat().st_size
             if projected>max_bytes:
@@ -210,7 +210,7 @@ def refresh_incremental_batch(mt5,settings,now=None):
     request_end=end
     if cached.is_file():
         try:
-            frame=pd.read_parquet(cached)
+            frame=parquet_compat.read_parquet(cached)
             index=frame.index if isinstance(frame.index,pd.DatetimeIndex) else pd.to_datetime(frame['time'],utc=True)
             oldest=pd.Timestamp(index.min()).to_pydatetime()
             if oldest.tzinfo is None: oldest=oldest.replace(tzinfo=timezone.utc)

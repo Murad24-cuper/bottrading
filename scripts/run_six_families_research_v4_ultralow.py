@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.config import load_settings
 from src.symbols import underlying_key
+from src.parquet_compat import read_parquet
 from scripts import run_six_families_research_v3 as engine
 
 FOREX_SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'EURJPY', 'GBPJPY']
@@ -279,7 +280,7 @@ def run() -> tuple[bool,list[dict]]:
     history_dir=ROOT/'data'/'history'
     for logical in FOCUS_SYMBOLS:
         for timeframe in ('M15','H1','H4','D1'):
-            frame=engine.pd.read_parquet(history_dir/f'{logical}_{timeframe}.parquet')
+            frame=read_parquet(history_dir/f'{logical}_{timeframe}.parquet')
             series=engine.atr(frame,period=14)
             window=series[(series.index>='2026-01-01T00:00:00Z') & (series.index<='2026-09-30T23:59:59Z')].dropna()
             if window.empty: raise RuntimeError(f'No typical ATR data for {logical} {timeframe}')

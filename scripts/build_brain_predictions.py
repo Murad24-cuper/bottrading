@@ -6,6 +6,7 @@ import json,sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np
 import pandas as pd
+from src.parquet_compat import read_parquet,write_parquet
 
 from src.brain.checklist import evaluate as evaluate_checklist
 from src.brain.memory import prepare_memory,query_memory
@@ -27,7 +28,7 @@ def _load_frames(history:Path,symbols:list[str]) -> dict:
         for tf in ('M1','M5','M15','H1'):
             path=history/f'{symbol}_{tf}.parquet'
             if path.is_file():
-                frame=pd.read_parquet(path).sort_index(); ix=pd.DatetimeIndex(frame.index)
+                frame=read_parquet(path).sort_index(); ix=pd.DatetimeIndex(frame.index)
                 frame.index=ix.tz_localize('UTC') if ix.tz is None else ix.tz_convert('UTC')
                 frames[tf]=frame
         data[symbol]=frames
@@ -103,8 +104,8 @@ def _predict(rows:pd.DataFrame,indexes:dict,calibration:dict|None,config:dict,ch
 def main() -> int:
     settings=load_settings(require_credentials=False)
     if settings.config['account']['mode']!='demo' or settings.allow_real: raise SystemExit('Prediction build requires DEMO configuration and ALLOW_REAL=false.')
-    brain=settings.data_dir/'brain'; source=pd.read_parquet(brain/'labeled_outcomes.parquet')
-    reference=pd.read_parquet(brain/'reference.parquet'); weekend_ref=pd.read_parquet(brain/'weekend_reference.parquet')
+    brain=settings.data_dir/'brain'; source=read_parquet(brain/'labeled_outcomes.parquet')
+    reference=read_parquet(brain/'reference.parquet'); weekend_ref=read_parquet(brain/'weekend_reference.parquet')
     indexes={}
     for weekend,frame in ((False,reference[~reference.weekend.astype(bool)]),(True,weekend_ref)):
         for group,group_rows in frame.groupby('asset_group'):
@@ -130,7 +131,7 @@ def main() -> int:
         rounds.append({'round':round_no,'probability_floor':threshold,'trades':len(eligible),'expectancy_r':float(eligible.net_r.mean()),'positive_groups':sorted(active_groups),'change':'Retain validation-positive asset groups.'})
         if not active_groups: break
     validation['both']=validation.checklist_only & validation.memory_only & validation.asset_group.isin(active_groups)
-    validation.to_parquet(brain/'validation_predictions.parquet',index=False)
+    write_parquet(validation,brain/'validation_predictions.parquet',index=False)
     (brain/'calibration.json').write_text(json.dumps(calibration,indent=2),encoding='utf-8')
     (brain/'validation_rounds.json').write_text(json.dumps({'rounds':rounds,'active_groups':sorted(active_groups),'built_at_utc':datetime.now(timezone.utc).isoformat()},indent=2),encoding='utf-8')
     # Freeze all choices before this sole holdout prediction pass.
@@ -140,7 +141,7 @@ def main() -> int:
     if len(test):
         stamps=pd.to_datetime(test.time,utc=True); edges=np.linspace(stamps.min().value,stamps.max().value,4)
         test['subperiod']=pd.cut(stamps.astype('int64'),edges,labels=['1','2','3'],include_lowest=True).astype(str)
-    test.to_parquet(brain/'test_predictions.parquet',index=False)
+    write_parquet(test,brain/'test_predictions.parquet',index=False)
     print(f'Validation rows: {len(validation):,}; usable raw predictions: {int(valid.sum()):,}; tuning rounds: {len(rounds)}; active groups: {sorted(active_groups)}')
     print(f'Holdout predictions written once: {len(test):,} rows; {brain / "test_predictions.parquet"}')
     print('Current-rule baseline is unavailable; current_rule remains false.')
