@@ -98,6 +98,22 @@ def test_incremental_refresh_rotates_one_symbol_timeframe_on_same_mt5_session(tm
     assert (calls[1][4]-calls[1][3]).days==7
     assert first['cursor']==1 and second['cursor']==2
 
+def test_incremental_history_reresolves_stale_standard_names_to_micro(tmp_path,monkeypatch):
+    import json
+    import src.history as history
+    data_dir=tmp_path/'data'; brain=data_dir/'brain'; brain.mkdir(parents=True)
+    (brain/'universe.json').write_text(json.dumps({'symbols':[{'symbol':'USDJPY'}]}),encoding='utf-8')
+    config={'universe':{'focus_symbols':['USDJPY'],'symbol_aliases':{'USDJPY':['USDJPYmicro','USDJPY']}},
+        'history':{'data_dir':'data/history','incremental_refresh_enabled':True,'incremental_timeframes':['M1'],'incremental_batch_days':{'M1':1}}}
+    settings=SimpleNamespace(root=tmp_path,data_dir=data_dir,config=config)
+    class AliasMT5:
+        def symbols_get(self): return [SimpleNamespace(name='USDJPY'),SimpleNamespace(name='USDJPYmicro')]
+        def symbol_select(self,*args): return True
+    calls=[]
+    monkeypatch.setattr(history,'download_history',lambda mt5,symbols,timeframes,start,end,settings:calls.append(symbols) or {symbols[0]:{timeframes[0]:pd.DataFrame(index=[])}})
+    refresh_incremental_batch(AliasMT5(),settings,datetime(2026,1,10,tzinfo=timezone.utc))
+    assert calls==[['USDJPYmicro']]
+
 def test_incremental_refresh_backfills_oldest_missing_chunk(tmp_path,monkeypatch):
     import json
     import src.history as history

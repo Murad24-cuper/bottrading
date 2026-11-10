@@ -73,6 +73,17 @@ def test_focus_universe_resolves_only_ten_configured_logical_symbols():
     found=service.active_logical_universe(datetime(2026,11,9,12,tzinfo=timezone.utc))
     assert found==['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','US500Cash','US100Cash','US30Cash','GER40Cash','GOLD']
 
+def test_main_profile_prefers_micro_names_for_all_focus_forex_and_gold():
+    import yaml
+    from pathlib import Path
+    config=yaml.safe_load((Path(__file__).parents[1]/'config.yaml').read_text(encoding='utf-8'))
+    logicals=['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','EURJPY','GBPJPY','GOLD']
+    aliases=config['universe']['symbol_aliases']
+    names=[f'{name}micro' for name in logicals]
+    service=make_service(names)
+    service.settings.config['universe'].update(config['universe'])
+    assert {name:service.resolve_alias(name) for name in logicals}==dict(zip(logicals,names))
+
 def test_weekend_universe_is_crypto_gold247_plus_fresh_open_indices(monkeypatch):
     service=make_service(['BTCUSD','ETHUSD','GOLD24-7','US500Cash','US30Cash'])
     service.settings.config['universe'].update({

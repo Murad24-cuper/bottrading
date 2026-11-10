@@ -99,7 +99,7 @@ def download_history(mt5,symbols,timeframes,date_from=None,date_to=None,settings
         info=mt5.symbol_info(symbol)
         if info:
             raw=info._asdict()
-            metadata[symbol]={key:raw.get(key) for key in ('digits','point','trade_tick_size','trade_tick_value','trade_tick_value_profit','trade_tick_value_loss','volume_min','volume_step','volume_max')}
+            metadata[symbol]={key:raw.get(key) for key in ('digits','point','trade_contract_size','trade_tick_size','trade_tick_value','trade_tick_value_profit','trade_tick_value_loss','volume_min','volume_step','volume_max')}
             metadata[symbol]['point_size']=float(info.point)
             metadata[symbol]['asset_group']=symbol_service.get_asset_group(symbol) if symbol_service else 'other'
             tick=mt5.symbol_info_tick(symbol) if hasattr(mt5,'symbol_info_tick') else None
@@ -159,7 +159,21 @@ def refresh_incremental_batch(mt5,settings,now=None):
     universe_path=Path(settings.data_dir)/'brain'/'universe.json'
     if not universe_path.is_file(): return None
     payload=json.loads(universe_path.read_text(encoding='utf-8'))
-    symbols=[str(row['symbol']) for row in payload.get('symbols',[]) if isinstance(row,dict) and row.get('symbol')]
+    aliases=settings.config.get('universe',{}).get('symbol_aliases',{})
+    symbols=[]
+    service=SymbolService(mt5,settings)
+    for row in payload.get('symbols',[]):
+        if not isinstance(row,dict) or not row.get('symbol'): continue
+        stored=str(row['symbol']); actual=stored
+        # The brain universe can outlive broker alias changes. Resolve configured
+        # instruments again so new micro contracts are used for fresh history.
+        logical=next((name for name,patterns in aliases.items()
+            if stored.casefold()==str(name).casefold()
+            or any(str(pattern).casefold() in stored.casefold() for pattern in patterns)),None)
+        if logical and settings.config.get('universe',{}).get('focus_symbols'):
+            actual=service.resolve_alias(str(logical)) or stored
+        symbols.append(actual)
+    symbols=list(dict.fromkeys(symbols))
     timeframes=[str(tf) for tf in cfg.get('incremental_timeframes',['M1','M5','M15','H1']) if tf in TF_MINUTES]
     if not symbols or not timeframes: return None
     cursor_path=Path(settings.data_dir)/'history_refresh_cursor.json'
