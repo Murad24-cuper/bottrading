@@ -16,7 +16,14 @@ def read_pid(path):
     try: return int(Path(path).read_text(encoding='utf-8').split()[0])
     except (OSError,ValueError,IndexError): return None
 
+def configure_console_encoding(stream=None):
+    stream=stream or sys.stdout
+    if hasattr(stream,'reconfigure'):
+        try: stream.reconfigure(encoding='utf-8',errors='replace')
+        except (OSError,ValueError): pass
+
 def main():
+    configure_console_encoding()
     config=yaml.safe_load((ROOT/'config.yaml').read_text(encoding='utf-8'))
     data_dir,_=project_paths(ROOT)
     db_path=Path(os.getenv('BOT_DB_PATH') or config['db_path']); db_path=db_path if db_path.is_absolute() else ROOT/db_path

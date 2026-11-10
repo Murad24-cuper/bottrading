@@ -30,3 +30,12 @@ def test_health_check_reads_database_without_mt5_connection(tmp_path,monkeypatch
     output=capsys.readouterr().out
     assert 'MT5 bağlantısı: Bəli' in output and 'Balans: 100.00 $' in output
     assert 'MT5' not in output.splitlines()[0]
+
+def test_health_check_configures_utf8_output_for_windows_console():
+    from scripts.health_check import configure_console_encoding
+    class Console:
+        def __init__(self): self.options=None
+        def reconfigure(self,**options): self.options=options
+    console=Console()
+    configure_console_encoding(console)
+    assert console.options=={'encoding':'utf-8','errors':'replace'}
