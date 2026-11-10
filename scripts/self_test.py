@@ -5,6 +5,7 @@ from datetime import datetime,timezone
 import argparse,os,shutil,socket,sqlite3,subprocess,sys,json
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from src.config import load_settings
+from src.dashboard.health import check_dashboard_render
 
 def main():
     if hasattr(sys.stdout,'reconfigure'): sys.stdout.reconfigure(encoding='utf-8',errors='replace')
@@ -35,7 +36,9 @@ def main():
     try:
         with socket.create_connection(('127.0.0.1',8501),timeout=2): dashboard=True
     except OSError: dashboard=False
-    check('Panel',dashboard,'Panel 127.0.0.1:8501 ünvanında dinləməlidir.')
+    check('Panel socket',dashboard,'Panel 127.0.0.1:8501 ünvanında dinləməlidir.')
+    dashboard_render, dashboard_detail = check_dashboard_render(root)
+    check('Panel render',dashboard_render,dashboard_detail)
     if args.mt5:
         from src.mt5_client import MT5Client
         try:
