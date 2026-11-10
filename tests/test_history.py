@@ -114,6 +114,34 @@ def test_incremental_history_reresolves_stale_standard_names_to_micro(tmp_path,m
     refresh_incremental_batch(AliasMT5(),settings,datetime(2026,1,10,tzinfo=timezone.utc))
     assert calls==[['USDJPYmicro']]
 
+def test_incremental_refresh_includes_configured_jpy_crosses_with_broker_suffixes(tmp_path,monkeypatch):
+    import json
+    import src.history as history
+    data_dir=tmp_path/'data'; brain=data_dir/'brain'; brain.mkdir(parents=True)
+    (brain/'universe.json').write_text(json.dumps({'symbols':[{'symbol':'EURUSD'}]}),encoding='utf-8')
+    (data_dir/'history_refresh_cursor.json').write_text(json.dumps({'cursor':1}),encoding='utf-8')
+    config={'universe':{'focus_symbols':['EURUSD','EURJPY','GBPJPY'],
+        'symbol_aliases':{'EURUSD':['EURUSD'],'EURJPY':['EURJPYmicro','EURJPY.m','EURJPY'],
+                          'GBPJPY':['GBPJPYmicro','GBPJPY.m','GBPJPY']}},
+        'history':{'data_dir':'data/history','incremental_refresh_enabled':True,
+                   'incremental_timeframes':['M1'],'incremental_batch_days':{'M1':1}}}
+    settings=SimpleNamespace(root=tmp_path,data_dir=data_dir,config=config)
+    class AliasMT5:
+        SYMBOL_TRADE_MODE_FULL=4
+        def symbols_get(self):
+            return [SimpleNamespace(name=name) for name in ('EURUSD','EURJPY#','GBPJPY#')]
+        def symbol_info(self,name): return SimpleNamespace(trade_mode=4)
+        def symbol_select(self,*args): return True
+    calls=[]
+    monkeypatch.setattr(history,'download_history',lambda mt5,symbols,timeframes,start,end,settings:
+        calls.append(symbols) or {symbols[0]:{timeframes[0]:pd.DataFrame(index=[])}})
+
+    mt5=AliasMT5(); now=datetime(2026,1,10,tzinfo=timezone.utc)
+    refresh_incremental_batch(mt5,settings,now)
+    refresh_incremental_batch(mt5,settings,now)
+
+    assert calls==[['EURJPY#'],['GBPJPY#']]
+
 def test_incremental_refresh_backfills_oldest_missing_chunk(tmp_path,monkeypatch):
     import json
     import src.history as history

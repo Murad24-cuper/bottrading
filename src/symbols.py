@@ -105,7 +105,8 @@ class SymbolService:
     full_mode=getattr(self.mt5,'SYMBOL_TRADE_MODE_FULL',4)
     tradable=[]
     for name in matches:
-     info=self.mt5.symbol_info(name)
+     get_info=getattr(self.mt5,'symbol_info',None)
+     info=get_info(name) if callable(get_info) else None
      if info is not None and getattr(info,'trade_mode',None)==full_mode:
       tradable.append(name)
     selected=(exact if exact in tradable else None) or (tradable[0] if tradable else (exact or matches[0]))
