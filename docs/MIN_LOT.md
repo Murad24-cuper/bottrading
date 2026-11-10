@@ -1,118 +1,72 @@
-# Small-Account Feasibility Analysis: XM Micro Account ($50 Target & Current $1,000)
+# Minimum-lot risk on the live XM Ultra Low DEMO account
 
-**Date:** 2026-11-10  
-**Context:** Evaluation of minimum contract sizes, tick values, and minimum volume constraints for a real XM Micro account targeted at a \$50 initial balance vs. current \$1,000 DEMO balance.  
-**Purpose:** Pure decision-support report. No risk settings or hard ceilings are altered by this document.
+Live snapshot: `2026-11-10T11:16:33.485795+00:00` · account ending `323` · balance/equity `$10,000.00 USD` · server `XMGlobal-MT5 5`.
 
----
+This replaces the prior estimates. The earlier Micro-account figures were **not taken from a live MT5 account**; they assumed micro contracts that the current terminal does not offer. MT5 currently resolves these seven forex pairs and GOLD to the standard-contract names below.
 
-## 1. Specification Foundations: Standard vs. Micro
+## Live instrument specifications
 
-| Asset Class | Standard Contract Size | Micro Contract Size | Tick Size | Standard Tick Value (per lot) | Micro Tick Value (per lot) | Min Volume | Min Step |
-|---|---|---|---|---|---|---|---|
-| **Forex Majors** (EURUSD, GBPUSD, AUDUSD) | 100,000 units | 1,000 units | 0.00001 | \$1.00 | **\$0.01** | 0.01 (or 0.10) | 0.01 |
-| **Forex Yen Crosses** (USDJPY, EURJPY) | 100,000 units | 1,000 units | 0.001 | ~\$0.634 | **~\$0.00634** | 0.01 (or 0.10) | 0.01 |
-| **Gold** (GOLD / GOLDmicro) | 100 oz | 1 oz (or 10 oz) | 0.01 | \$1.00 | **\$0.01** | 0.01 (or 0.10) | 0.01 |
-| **Silver** (SILVER / SILVERmicro) | 5,000 oz | 50 oz | 0.001 | \$5.00 | **\$0.05** | 0.10 | 0.01 |
-| **US500** (US500Cash) | 1 contract | 1 contract | 0.01 | \$0.01 | **\$0.01** | 0.10 | 0.10 |
-| **US100 / NAS100** (US100Cash) | 1 contract | 1 contract | 0.01 | \$0.01 | **\$0.01** | 0.10 | 0.10 |
-| **US30** (US30Cash) | 1 contract | 1 contract | 0.01 | \$0.01 | **\$0.01** | 0.10 | 0.10 |
-| **GER40** (GER40Cash) | 1 contract | 1 contract | 0.01 | ~\$0.0108 | **~\$0.0108** | 0.10 | 0.10 |
-| **BTCUSD** | 1 coin | 1 coin | 0.01 | \$0.01 | **\$0.01** | 0.01 | 0.01 |
-| **ETHUSD** | 1 coin | 1 coin | 0.01 | \$0.01 | **\$0.01** | 0.02 | 0.01 |
+| Logical instrument | Live MT5 symbol | Contract size | Min / step | Tick size | Tick value (loss/lot) | Current spread |
+|---|---|---:|---:|---:|---:|---:|
+| EURUSD | `EURUSD` | 100,000 units | 0.01 / 0.01 | 1e-05 | $1.000000 | 2.00 pips |
+| GBPUSD | `GBPUSD` | 100,000 units | 0.01 / 0.01 | 1e-05 | $1.000000 | 2.30 pips |
+| USDJPY | `USDJPY` | 100,000 units | 0.01 / 0.01 | 0.001 | $0.632371 | 2.50 pips |
+| AUDUSD | `AUDUSD` | 100,000 units | 0.01 / 0.01 | 1e-05 | $1.000000 | 2.40 pips |
+| USDCAD | `USDCAD` | 100,000 units | 0.01 / 0.01 | 1e-05 | $0.707980 | 3.00 pips |
+| EURJPY | `EURJPY#` | 100,000 units | 0.01 / 0.01 | 0.001 | $0.632347 | 2.00 pips |
+| GBPJPY | `GBPJPY#` | 100,000 units | 0.01 / 0.01 | 0.001 | $0.632347 | 2.70 pips |
+| GOLD | `GOLD#` | 100 oz | 0.01 / 0.01 | 0.01 | $1.000000 | $0.32 (32 points) |
 
----
+## Risk budgets
 
-## 2. Dollar Risk of Minimum Volume per Symbol
+| Risk rate | $10,000 live balance | $50 comparison balance |
+|---:|---:|---:|
+| 0.1% | $10.00 | $0.050 |
+| 0.25% | $25.00 | $0.125 |
+| 0.5% | $50.00 | $0.250 |
+| 1% | $100.00 | $0.500 |
 
-The minimum dollar risk is determined by:
-$$\text{Min Dollar Risk} = \frac{\text{Stop Distance}}{\text{Tick Size}} \times \text{Tick Value per Lot} \times \text{Volume Min}$$
+Minimum-lot stop risk is `abs(entry − stop) / tick_size × trade_tick_value_loss × volume_min`. JPY and CAD tick values are the live MT5 USD-converted values at snapshot time and can vary with conversion rates.
 
-| Symbol | Broker Symbol | Typical Stop | Stop Distance | Volume Min | Risk per 1 Lot | **Min Dollar Risk** |
-|---|---|---|---|---|---|---|
-| **EURUSD** | `EURUSDmicro` | 30 pips | 0.0030 (300 ticks) | 0.01 lot | \$3.00 | **\$0.030** |
-| **GBPUSD** | `GBPUSDmicro` | 35 pips | 0.0035 (350 ticks) | 0.01 lot | \$3.50 | **\$0.035** |
-| **USDJPY** | `USDJPYmicro` | 35 pips | 0.350 (350 ticks) | 0.01 lot | \$2.22 | **\$0.022** |
-| **AUDUSD** | `AUDUSDmicro` | 30 pips | 0.0030 (300 ticks) | 0.01 lot | \$3.00 | **\$0.030** |
-| **USDCAD** | `USDCADmicro` | 30 pips | 0.0030 (300 ticks) | 0.01 lot | \$2.12 | **\$0.021** |
-| **EURJPY** | `EURJPYmicro` | 35 pips | 0.350 (350 ticks) | 0.01 lot | \$2.22 | **\$0.022** |
-| **GBPJPY** | `GBPJPYmicro` | 40 pips | 0.400 (400 ticks) | 0.01 lot | \$2.54 | **\$0.025** |
-| **GOLD** | `GOLDmicro` (1 oz) | \$10.00 move | 10.00 (1,000 ticks) | 0.01 lot | \$10.00 | **\$0.100** |
-| **GOLD (0.1 min)**| `GOLDmicro` (0.1 min) | \$10.00 move | 10.00 (1,000 ticks) | 0.10 lot | \$10.00 | **\$1.000** |
-| **SILVER** | `SILVERmicro` | \$0.50 move | 0.500 (500 ticks) | 0.10 lot | \$25.00 | **\$2.500** |
-| **US500** | `US500Cash` | 20 index pts | 20.00 (2,000 ticks) | 0.10 lot | \$20.00 | **\$2.000** |
-| **NAS100** | `US100Cash` | 60 index pts | 60.00 (6,000 ticks) | 0.10 lot | \$60.00 | **\$6.000** |
-| **US30** | `US30Cash` | 150 index pts | 150.00 (15,000 ticks) | 0.10 lot | \$150.00 | **\$15.000** |
-| **GER40** | `GER40Cash` | 60 index pts | 60.00 (6,000 ticks) | 0.10 lot | \$65.00 | **\$6.500** |
-| **BTCUSD** | `BTCUSD` | \$1,000 move | 1,000.00 (100k ticks) | 0.01 lot | \$1,000.00 | **\$10.000** |
-| **ETHUSD** | `ETHUSD` | \$40 move | 40.00 (4,000 ticks) | 0.02 lot | \$40.00 | **\$0.800** |
-| **GOLD24-7** | `GOLD24-7` | \$10.00 move | 10.00 (1,000 ticks) | 0.01 lot | \$10.00 | **\$0.100** |
-| **Altcoins_INDX** | `Altcoins_INDX` | 50 pts | 50.00 (5,000 ticks) | 0.10 lot | \$50.00 | **\$5.000** |
-| **Crypto_10** | `Crypto_10` | 50 pts | 50.00 (5,000 ticks) | 0.10 lot | \$50.00 | **\$5.000** |
+## Typical minimum-lot stop risk by family and timeframe
 
----
+“Typical stop” is the unchanged research variant stop multiplier times the median ATR(14) for that instrument and timeframe, computed from closed MT5 history for 2026-01-01 through 2026-09-30. FX distances are pips; GOLD distances are dollars. Cells show `stop distance / risk at live volume_min`. The 18 research variants are listed.
 
-## 3. Tradability Matrix at Target \$50 Balance
+### M15
 
-Risk budget per trade at \$50:
-- **0.10%:** \$0.050
-- **0.25%:** \$0.125
-- **0.50%:** \$0.250
-- **1.00%:** \$0.500
+| Family / variant | Stop multiple | EURUSD | GBPUSD | USDJPY | AUDUSD | USDCAD | EURJPY | GBPJPY | GOLD |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Session Breakout · v1 M15 | 1.5×ATR | 7.7 / $0.77 | 10.3 / $1.03 | 12.4 / $0.78 | 7.3 / $0.73 | 7.6 / $0.54 | 13.1 / $0.83 | 17.0 / $1.08 | $14.02 / $14.02 |
+| Session Breakout · v2 M15 | 1×ATR | 5.1 / $0.51 | 6.9 / $0.69 | 8.3 / $0.52 | 4.8 / $0.48 | 5.0 / $0.36 | 8.7 / $0.55 | 11.4 / $0.72 | $9.35 / $9.35 |
+| Opening Range Breakout · v1 M15 | 1×ATR | 5.1 / $0.51 | 6.9 / $0.69 | 8.3 / $0.52 | 4.8 / $0.48 | 5.0 / $0.36 | 8.7 / $0.55 | 11.4 / $0.72 | $9.35 / $9.35 |
+| Opening Range Breakout · v2 M15 | 1×ATR | 5.1 / $0.51 | 6.9 / $0.69 | 8.3 / $0.52 | 4.8 / $0.48 | 5.0 / $0.36 | 8.7 / $0.55 | 11.4 / $0.72 | $9.35 / $9.35 |
+| VWAP Reversion · v1 M15 | 1.5×ATR | 7.7 / $0.77 | 10.3 / $1.03 | 12.4 / $0.78 | 7.3 / $0.73 | 7.6 / $0.54 | 13.1 / $0.83 | 17.0 / $1.08 | $14.02 / $14.02 |
+| VWAP Reversion · v2 M15 | 1×ATR | 5.1 / $0.51 | 6.9 / $0.69 | 8.3 / $0.52 | 4.8 / $0.48 | 5.0 / $0.36 | 8.7 / $0.55 | 11.4 / $0.72 | $9.35 / $9.35 |
+### H1
 
-| Symbol | Min Dollar Risk | \$50 @ 0.10% (\$0.05) | \$50 @ 0.25% (\$0.125) | \$50 @ 0.50% (\$0.25) | \$50 @ 1.00% (\$0.50) | Feasibility Summary |
-|---|---|---|---|---|---|---|
-| **EURUSDmicro** | \$0.030 | **YES** | **YES** | **YES** | **YES** | Tradable at all risk tiers |
-| **GBPUSDmicro** | \$0.035 | **YES** | **YES** | **YES** | **YES** | Tradable at all risk tiers |
-| **USDJPYmicro** | \$0.022 | **YES** | **YES** | **YES** | **YES** | Tradable at all risk tiers |
-| **AUDUSDmicro** | \$0.030 | **YES** | **YES** | **YES** | **YES** | Tradable at all risk tiers |
-| **USDCADmicro** | \$0.021 | **YES** | **YES** | **YES** | **YES** | Tradable at all risk tiers |
-| **EURJPYmicro** | \$0.022 | **YES** | **YES** | **YES** | **YES** | Tradable at all risk tiers |
-| **GBPJPYmicro** | \$0.025 | **YES** | **YES** | **YES** | **YES** | Tradable at all risk tiers |
-| **GOLDmicro (0.01)**| \$0.100 | NO | **YES** | **YES** | **YES** | Tradable from 0.25% risk upwards |
-| **GOLDmicro (0.10)**| \$1.000 | NO | NO | NO | NO | Requires \$100+ account or 2% risk |
-| **SILVERmicro** | \$2.500 | NO | NO | NO | NO | Not tradable at \$50 |
-| **US500Cash** | \$2.000 | NO | NO | NO | NO | Min risk is 4.0% of \$50 |
-| **US100Cash** | \$6.000 | NO | NO | NO | NO | Min risk is 12.0% of \$50 |
-| **US30Cash** | \$15.000 | NO | NO | NO | NO | Min risk is 30.0% of \$50 |
-| **GER40Cash** | \$6.500 | NO | NO | NO | NO | Min risk is 13.0% of \$50 |
-| **BTCUSD** | \$10.000 | NO | NO | NO | NO | Min risk is 20.0% of \$50 |
-| **ETHUSD** | \$0.800 | NO | NO | NO | NO | Min risk is 1.6% of \$50 |
-| **GOLD24-7** | \$0.100 | NO | **YES** | **YES** | **YES** | Tradable from 0.25% risk upwards |
+| Family / variant | Stop multiple | EURUSD | GBPUSD | USDJPY | AUDUSD | USDCAD | EURJPY | GBPJPY | GOLD |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Session Breakout · v3 H1 | 1.5×ATR | 16.3 / $1.63 | 22.0 / $2.20 | 26.9 / $1.70 | 15.1 / $1.51 | 15.8 / $1.12 | 26.8 / $1.69 | 35.0 / $2.21 | $29.33 / $29.33 |
+| Opening Range Breakout · v3 H1 | 1.2×ATR | 13.0 / $1.30 | 17.6 / $1.76 | 21.5 / $1.36 | 12.1 / $1.21 | 12.7 / $0.90 | 21.4 / $1.35 | 28.0 / $1.77 | $23.47 / $23.47 |
+| VWAP Reversion · v3 H1 | 1.5×ATR | 16.3 / $1.63 | 22.0 / $2.20 | 26.9 / $1.70 | 15.1 / $1.51 | 15.8 / $1.12 | 26.8 / $1.69 | 35.0 / $2.21 | $29.33 / $29.33 |
+### H4
 
----
+| Family / variant | Stop multiple | EURUSD | GBPUSD | USDJPY | AUDUSD | USDCAD | EURJPY | GBPJPY | GOLD |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Donchian Breakout · v1 H4 | 2×ATR | 45.8 / $4.58 | 60.7 / $6.07 | 76.9 / $4.86 | 41.4 / $4.14 | 43.7 / $3.10 | 76.9 / $4.86 | 97.6 / $6.17 | $79.72 / $79.72 |
+| Donchian Breakout · v2 H4 | 2.5×ATR | 57.2 / $5.72 | 75.8 / $7.58 | 96.1 / $6.08 | 51.8 / $5.18 | 54.7 / $3.87 | 96.1 / $6.08 | 122.0 / $7.72 | $99.65 / $99.65 |
+| Time-Series Momentum · v1 H4 | 2×ATR | 45.8 / $4.58 | 60.7 / $6.07 | 76.9 / $4.86 | 41.4 / $4.14 | 43.7 / $3.10 | 76.9 / $4.86 | 97.6 / $6.17 | $79.72 / $79.72 |
+| Time-Series Momentum · v2 H4 | 2.5×ATR | 57.2 / $5.72 | 75.8 / $7.58 | 96.1 / $6.08 | 51.8 / $5.18 | 54.7 / $3.87 | 96.1 / $6.08 | 122.0 / $7.72 | $99.65 / $99.65 |
+| Index Pullback 200-Day · v3 H4 | 1.5×ATR | 34.3 / $3.43 | 45.5 / $4.55 | 57.7 / $3.65 | 31.1 / $3.11 | 32.8 / $2.32 | 57.7 / $3.65 | 73.2 / $4.63 | $59.79 / $59.79 |
+### D1
 
-## 4. Tradability Matrix at Current \$1,000 DEMO Balance
+| Family / variant | Stop multiple | EURUSD | GBPUSD | USDJPY | AUDUSD | USDCAD | EURJPY | GBPJPY | GOLD |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Donchian Breakout · v3 D1 | 2×ATR | 124.1 / $12.41 | 166.7 / $16.67 | 212.8 / $13.46 | 117.1 / $11.71 | 115.6 / $8.18 | 212.5 / $13.44 | 266.1 / $16.83 | $221.45 / $221.45 |
+| Time-Series Momentum · v3 D1 | 2.5×ATR | 155.1 / $15.51 | 208.4 / $20.84 | 266.0 / $16.82 | 146.3 / $14.63 | 144.5 / $10.23 | 265.6 / $16.80 | 332.7 / $21.04 | $276.82 / $276.82 |
+| Index Pullback 200-Day · v1 D1 | 1.5×ATR | 93.0 / $9.30 | 125.0 / $12.50 | 159.6 / $10.09 | 87.8 / $8.78 | 86.7 / $6.14 | 159.4 / $10.08 | 199.6 / $12.62 | $166.09 / $166.09 |
+| Index Pullback 200-Day · v2 D1 | 2×ATR | 124.1 / $12.41 | 166.7 / $16.67 | 212.8 / $13.46 | 117.1 / $11.71 | 115.6 / $8.18 | 212.5 / $13.44 | 266.1 / $16.83 | $221.45 / $221.45 |
 
-Risk budget per trade at \$1,000:
-- **0.10%:** \$1.00
-- **0.25%:** \$2.50
-- **0.50%:** \$5.00
-- **1.00%:** \$10.00
+## Feasibility
 
-| Symbol | Min Dollar Risk | \$1,000 @ 0.10% (\$1.00) | \$1,000 @ 0.25% (\$2.50) | \$1,000 @ 0.50% (\$5.00) | \$1,000 @ 1.00% (\$10.00) |
-|---|---|---|---|---|---|
-| **Forex Majors (Micro)** | \$0.02 - \$0.03 | **YES** | **YES** | **YES** | **YES** |
-| **Forex Crosses (Micro)**| \$0.02 - \$0.03 | **YES** | **YES** | **YES** | **YES** |
-| **GOLDmicro (0.01)** | \$0.10 | **YES** | **YES** | **YES** | **YES** |
-| **GOLDmicro (0.10)** | \$1.00 | **YES** | **YES** | **YES** | **YES** |
-| **ETHUSD** | \$0.80 | **YES** | **YES** | **YES** | **YES** |
-| **US500Cash** | \$2.00 | NO | **YES** | **YES** | **YES** |
-| **SILVERmicro** | \$2.50 | NO | **YES** | **YES** | **YES** |
-| **US100Cash** | \$6.00 | NO | NO | NO | **YES** |
-| **GER40Cash** | \$6.50 | NO | NO | NO | **YES** |
-| **BTCUSD** | \$10.00 | NO | NO | NO | **YES** |
-| **US30Cash** | \$15.00 | NO | NO | NO | NO (Needs \$1.5k+) |
-
----
-
-## 5. Strategic Conclusions & Profile Recommendations
-
-1. **At \$50 Initial Balance:**
-   - **Forex (7 pairs)** is 100% tradable across all risk tiers down to 0.10% (\$0.05 budget) with Micro lot sizing.
-   - **Gold (GOLDmicro / GOLD24-7)** is tradable at $\ge 0.25\%$ risk (\$0.125 budget for 0.01 lot).
-   - **Indices and Crypto** (`US500`, `US100`, `US30`, `GER40`, `BTCUSD`) **CANNOT** be traded at \$50 without violating the 1% maximum locked risk ceiling (minimum dollar risk is \$2.00 to \$15.00 per trade).
-2. **Planned "micro_50" Profile Design:**
-   - **Universe:** Confined strictly to Forex (`EURUSD`, `GBPUSD`, `USDJPY`, `AUDUSD`, `USDCAD`, `EURJPY`, `GBPJPY`) and `GOLDmicro` (at $\ge 0.25\%$).
-   - **Risk per Trade:** 0.25% to 0.50% (feasible and strictly below the 1.0% locked ceiling).
-   - **Indices & Crypto:** Excluded from `micro_50` to guarantee zero `min lot exceeds risk` errors and strict capital preservation.
+Compare each displayed stop risk with the budget at the chosen balance and rate. These are current broker specifications; no micro contract is assumed. Current spread cost is reported separately and is not included in stop-risk figures.
