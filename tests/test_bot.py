@@ -304,6 +304,17 @@ def test_repeated_order_rejections_raise_one_alert(tmp_path):
     with db.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM bot_events WHERE level='CRITICAL' AND message LIKE '%əməliyyat sorğusu rədd edildi%'").fetchone()[0]==1
 
+def test_three_consecutive_order_rejections_auto_pause_new_entries(tmp_path):
+    bot,db,_,_,_,executor,item=make_bot(tmp_path,'trade',['breakout'])
+    executor.open_trade=lambda *args,**kwargs:TradeResult(False,None,None,0,10030,'broker rejected request')
+    bot.settings.config.setdefault('health',{})['order_rejections_before_alert']=3
+    for _ in range(3): bot.cycle()
+    assert (tmp_path/'STOP').read_text(encoding='utf-8').strip()=='PAUSE'
+    bot.cycle()
+    assert bot._order_rejection_count==3
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM bot_events WHERE level='CRITICAL' AND message LIKE '%STOP=PAUSE%'").fetchone()[0]==1
+
 def test_stale_open_symbol_ticks_block_entries_after_three_reconnect_attempts(tmp_path):
     bot,db,mt5,client,_,_,_=make_bot(tmp_path,candidate=False)
     mt5.terminal_info=lambda:SimpleNamespace(connected=True,trade_allowed=True)

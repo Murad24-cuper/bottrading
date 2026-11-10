@@ -607,9 +607,11 @@ class TradingBot:
         result=self.executor.open_trade(signal,volume,expected_cost=candidate.cost,features=getattr(candidate,'features',{}))
         if not result.success:
             self._order_rejection_count+=1
-            threshold=int(self.settings.config.get('health',{}).get('order_rejections_before_alert',3))
+            threshold=max(1,int(self.settings.config.get('health',{}).get('order_rejections_before_alert',3)))
             if self._order_rejection_count>=threshold and not self._order_rejection_alerted:
-                message=f'Ardıcıl {self._order_rejection_count} əməliyyat sorğusu rədd edildi; yeni girişləri yoxlayın. Son cavab: {result.message[:180]}'
+                message=f'Ardıcıl {self._order_rejection_count} əməliyyat sorğusu rədd edildi; yeni girişlər STOP=PAUSE ilə dayandırıldı. Son cavab: {result.message[:180]}'
+                try: (self.settings.root/'STOP').write_text('PAUSE\n',encoding='utf-8')
+                except OSError as exc: self._event('CRITICAL',f'Repeated order rejection auto-pause could not write STOP: {exc}')
                 self._event('CRITICAL',message); self._notify('repeated_order_rejections',message)
                 self._order_rejection_alerted=True
             self._signal_update(candidate,False,result.message,stage='order'); return False
