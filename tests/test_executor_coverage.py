@@ -79,11 +79,11 @@ class FakeMT5:
                                margin_free=10000, margin_mode=2, trade_mode=0,
                                margin_level=0, currency='USD', leverage=100)
     def symbols_get(self): return []
-    def order_send(self, req):
-        self.orders.append(req)
-        return SimpleNamespace(retcode=10009, price=req.get('price', 0),
-                               comment='done', position=req.get('position', 100),
-                               order=100, deal=100, volume=req.get('volume', 0))
+    def order_send(self, request):
+        self.orders.append(request)
+        return SimpleNamespace(retcode=10009, price=request.get('price', 0),
+                               comment='done', position=request.get('position', 100),
+                               order=100, deal=100, volume=request.get('volume', 0))
     def last_error(self): return (0, 'ok')
     def order_calc_margin(self, *a): return 50.0
     def history_deals_get(self, *a, **kw): return list(self._deals)
@@ -176,7 +176,7 @@ def test_close_position_tick_unavailable(tmp_path):
 def test_close_position_order_rejected(tmp_path):
     exe, mt5, db, _ = _make_executor(tmp_path)
     mt5._positions = [_buy_position()]
-    mt5.order_send = lambda req: SimpleNamespace(retcode=10006, comment='reject')
+    mt5.order_send = lambda request: SimpleNamespace(retcode=10006, comment='reject')
     res = exe.close_position(9, 'manual')
     assert not res.success
 
@@ -258,7 +258,7 @@ def test_modify_sl_tp_stop_wrong_side(tmp_path):
 def test_modify_sl_tp_broker_rejects(tmp_path):
     exe, mt5, db, _ = _make_executor(tmp_path)
     mt5._positions = [_buy_position()]
-    mt5.order_send = lambda req: SimpleNamespace(retcode=10006, comment='reject')
+    mt5.order_send = lambda request: SimpleNamespace(retcode=10006, comment='reject')
     assert not exe.modify_sl_tp(9, 1.1005, 1.103)
 
 def test_modify_sl_tp_db_persist_failure_logged(tmp_path):

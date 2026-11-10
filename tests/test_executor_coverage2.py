@@ -81,11 +81,11 @@ class FakeMT52:
                                margin_free=10000, margin_mode=2, trade_mode=0,
                                margin_level=0, currency='USD', leverage=100)
     def symbols_get(self): return []
-    def order_send(self, req):
-        self.orders.append(dict(req))
-        return SimpleNamespace(retcode=10009, price=req.get('price', 0),
-                               comment='done', position=req.get('position', 100),
-                               order=100, deal=100, volume=req.get('volume', 0))
+    def order_send(self, request):
+        self.orders.append(dict(request))
+        return SimpleNamespace(retcode=10009, price=request.get('price', 0),
+                               comment='done', position=request.get('position', 100),
+                               order=100, deal=100, volume=request.get('volume', 0))
     def last_error(self): return (0, 'ok')
     def order_calc_margin(self, *a): return 50.0
     def history_deals_get(self, *a, **kw): return list(self._deals)
@@ -325,7 +325,7 @@ def test_open_trade_requote_tick_unavailable(tmp_path):
             return SimpleNamespace(bid=1.101, ask=1.1011)
         return None  # second call fails
     mt5.symbol_info_tick = tick_side_effect
-    mt5.order_send = lambda req: SimpleNamespace(retcode=10004, comment='requote',
+    mt5.order_send = lambda request: SimpleNamespace(retcode=10004, comment='requote',
                                                  position=0, order=0, deal=0, volume=0, price=0)
     sig = Signal('EURUSD', 'buy', 'M5', 1.1011, 1.1, 1.103, 0.8, 'test')
     res = exe.open_trade(sig, 0.01)
@@ -336,7 +336,7 @@ def test_open_trade_requote_price_violates_buy_stops(tmp_path):
     exe, mt5, db = _make_exe(tmp_path)
     # Initial order triggers requote
     call_count = [0]
-    def order_side(*a):
+    def order_side(request):
         call_count[0] += 1
         return SimpleNamespace(retcode=10004, comment='requote',
                                position=0, order=0, deal=0, volume=0, price=0)
@@ -356,7 +356,7 @@ def test_open_trade_requote_price_violates_buy_stops(tmp_path):
 def test_open_trade_order_send_fails_returns_none(tmp_path):
     """When order_send returns None, failure is returned."""
     exe, mt5, db = _make_exe(tmp_path)
-    mt5.order_send = lambda req: None
+    mt5.order_send = lambda request: None
     sig = Signal('EURUSD', 'buy', 'M5', 1.1011, 1.1, 1.103, 0.8, 'test')
     res = exe.open_trade(sig, 0.01)
     assert not res.success and 'order_send failed' in res.message
@@ -364,7 +364,7 @@ def test_open_trade_order_send_fails_returns_none(tmp_path):
 def test_open_trade_broker_rejects_with_retcode(tmp_path):
     """When broker returns non-DONE retcode, failure is returned."""
     exe, mt5, db = _make_exe(tmp_path)
-    mt5.order_send = lambda req: SimpleNamespace(retcode=10006, comment='rejected',
+    mt5.order_send = lambda request: SimpleNamespace(retcode=10006, comment='rejected',
                                                  position=0, order=0, deal=0, volume=0.01, price=0)
     sig = Signal('EURUSD', 'buy', 'M5', 1.1011, 1.1, 1.103, 0.8, 'test')
     res = exe.open_trade(sig, 0.01)
@@ -423,7 +423,7 @@ def test_remediate_missing_sl_all_retries_fail_closes_position(tmp_path):
     mt5._positions = [pos]
     db.open = [_buy_row()]
     # Make order_send always fail
-    mt5.order_send = lambda req: SimpleNamespace(retcode=10006, comment='fail',
+    mt5.order_send = lambda request: SimpleNamespace(retcode=10006, comment='fail',
                                                  position=0, order=0, deal=0, volume=0, price=0)
     result = exe.remediate_missing_sl(pos, planned_sl=0, max_retries=2)
     assert result is False

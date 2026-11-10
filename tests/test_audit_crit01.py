@@ -59,15 +59,15 @@ class FakeMT5:
     def last_error(self):
         return (0, 'ok')
 
-    def order_send(self, req):
-        self.orders.append(req)
-        if req.get('action') == self.TRADE_ACTION_SLTP:
+    def order_send(self, request):
+        self.orders.append(request)
+        if request.get('action') == self.TRADE_ACTION_SLTP:
             self.modify_attempts += 1
             if self.modify_attempts <= self.modify_fail_count:
                 return SimpleNamespace(retcode=10013, comment='Invalid request')
-            self.pos.sl = req.get('sl', 0)
+            self.pos.sl = request.get('sl', 0)
             return SimpleNamespace(retcode=self.TRADE_RETCODE_DONE, comment='done', price=1.1020)
-        elif req.get('action') == self.TRADE_ACTION_DEAL:
+        elif request.get('action') == self.TRADE_ACTION_DEAL:
             # closing position
             self.pos = None
             return SimpleNamespace(retcode=self.TRADE_RETCODE_DONE, comment='done', price=1.1020)

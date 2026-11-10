@@ -72,8 +72,8 @@ def test_requote_recalculates_volume_to_stay_under_risk_cap(tmp_path):
         def copy_rates_from_pos(self, symbol, tf, start, count):
             return [{"time": 1234567890}]
 
-        def order_send(self, req):
-            sent_requests.append(dict(req))
+        def order_send(self, request):
+            sent_requests.append(dict(request))
             self.call_count += 1
             if self.call_count == 1:
                 # First attempt gets REQUOTE
@@ -177,8 +177,8 @@ def test_requote_cancels_if_safe_volume_below_min_lot(tmp_path):
             # Requote jumps to 103.00 -> SL is 99.00 -> distance = 4.00 -> per lot risk = $400 -> safe volume = 0.06 < min_lot 0.10!
             return SimpleNamespace(ask=103.00, bid=102.98, time_msc=now_ms)
         def copy_rates_from_pos(self, symbol, tf, start, count): return [{"time": 1234567890}]
-        def order_send(self, req):
-            sent_requests.append(dict(req))
+        def order_send(self, request):
+            sent_requests.append(dict(request))
             self.call_count += 1
             return SimpleNamespace(retcode=10004, comment="Requote", price=100.00)
         def positions_get(self, **kwargs): return []
