@@ -162,6 +162,12 @@ def refresh_incremental_batch(mt5,settings,now=None):
     aliases=settings.config.get('universe',{}).get('symbol_aliases',{})
     symbols=[]
     service=SymbolService(mt5,settings)
+    # Put configured live instruments first: research universes can contain
+    # hundreds of unrelated assets, so appending new focus pairs would delay
+    # their next refresh until the cursor traversed all of them.
+    for logical in settings.config.get('universe',{}).get('focus_symbols',[]):
+        actual=service.resolve_alias(str(logical))
+        if actual: symbols.append(actual)
     for row in payload.get('symbols',[]):
         if not isinstance(row,dict) or not row.get('symbol'): continue
         stored=str(row['symbol']); actual=stored
@@ -173,13 +179,6 @@ def refresh_incremental_batch(mt5,settings,now=None):
         if logical and settings.config.get('universe',{}).get('focus_symbols'):
             actual=service.resolve_alias(str(logical)) or stored
         symbols.append(actual)
-    # Research universes are intentionally selective and may predate added
-    # broker aliases. Always keep the configured live focus instruments in
-    # the refresh rotation, resolving their current broker names first.
-    if settings.config.get('universe',{}).get('focus_symbols'):
-        for logical in settings.config['universe']['focus_symbols']:
-            actual=service.resolve_alias(str(logical))
-            if actual: symbols.append(actual)
     symbols=list(dict.fromkeys(symbols))
     timeframes=[str(tf) for tf in cfg.get('incremental_timeframes',['M1','M5','M15','H1']) if tf in TF_MINUTES]
     if not symbols or not timeframes: return None
