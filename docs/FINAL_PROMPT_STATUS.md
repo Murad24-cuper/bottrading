@@ -33,7 +33,7 @@ not reopened.
 
 Read-only SQLite checkpoint at 2026-11-10 10:32 UTC: DEMO, equity 1,000.00,
 mode `trade`, bot status `running`, MT5 connected and `trade_allowed`; 8 symbols
-scanned (7 forex and GOLD). One `ts_momentum` signal on USDJPY/H4 was recorded
+scanned (7 forex and GOLD). Two `ts_momentum` signals on USDJPY/H4 were recorded
 since the latest supervisor restart and rejected by the M1/M5/M15 agreement
 gate. There are 0 exploration trades and 0 open bot trades; the 41 closed
 main-mode trades remain unchanged. No new order was submitted by this task.
