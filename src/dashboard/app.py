@@ -289,9 +289,17 @@ def main():
             row['net_result']=float(row.get('profit') or 0)+float(row.get('commission') or 0)+float(row.get('swap') or 0)
         st.subheader('Açıq mövqelər')
         if opened:
-            open_frame=pd.DataFrame([{'Alət':r['symbol'],'İstiqamət':r['direction_label'],'Nəticə':r['net_result'],'Açıq müddət':r['duration'],'Strategiya':r['strategy_label'],'Status':r['extension_status']} for r in opened])
+            open_frame=pd.DataFrame([{'Bilet':r['ticket'],'Alət':r['symbol'],'Həcm':r['volume'],'SL':r['sl'],'TP':r['tp'],'İstiqamət':r['direction_label'],'Nəticə':r['net_result'],'Açıq müddət':r['duration'],'Strategiya':r['strategy_label'],'Rejim':r['mode'],'Status':r['extension_status']} for r in opened])
             st.table(open_frame.style.format({'Nəticə':lambda value:format_money(value,signed=True)}).map(_money_color,subset=['Nəticə']))
         else: st.caption('Açıq bot mövqeyi yoxdur.')
+
+        external=queries.get_external_open_positions(DB_PATH)
+        st.subheader('Xarici mövqelər')
+        if external:
+            external_frame=pd.DataFrame([{'Bilet':r['ticket'],'Alət':r['symbol'],'Magic':r['magic'],'Həcm':r['volume'],'SL':r['sl'],'TP':r['tp'],'İstiqamət':direction_label(r['direction']),'Nəticə':float(r.get('profit') or 0)+float(r.get('swap') or 0),'Şərh':r.get('comment') or ''} for r in external])
+            st.caption('Bu mövqelər başqa magic nömrəsi ilə açılıb və yalnız izləmə üçün göstərilir.')
+            st.table(external_frame.style.format({'Nəticə':lambda value:format_money(value,signed=True)}).map(_money_color,subset=['Nəticə']))
+        else: st.caption('Xarici açıq mövqe yoxdur.')
 
         st.subheader('Bu gün bağlanan əməliyyatlar')
         closed=queries.get_closed_trades(today_start,today_end,DB_PATH)

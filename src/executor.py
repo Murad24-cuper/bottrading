@@ -456,6 +456,28 @@ class Executor:
                 if float(getattr(deal,'profit',0) or 0)>0 or self._sl_was_moved(row): return 'trail'
                 return 'sl'
         return forced or 'manual'
+    def _sync_external_positions(self,broker_positions):
+        """Mirror non-bot broker positions for display without managing them."""
+        if not hasattr(self.db,'sync_external_positions') or not hasattr(self.db,'get_active_account_id'):
+            return
+        try:
+            account_id=self.db.get_active_account_id()
+            if not account_id:
+                return
+            buy_type=getattr(self.mt5,'POSITION_TYPE_BUY',0)
+            external=[]
+            for position in broker_positions:
+                if int(getattr(position,'magic',0) or 0)==self.settings.magic_number:
+                    continue
+                opened=mt5_epoch_to_utc(getattr(position,'time',0),self.mt5).isoformat() if getattr(position,'time',0) else ''
+                external.append({'ticket':int(position.ticket),'symbol':str(position.symbol),'magic':int(getattr(position,'magic',0) or 0),
+                    'direction':'buy' if getattr(position,'type',None)==buy_type else 'sell','volume':float(position.volume),
+                    'open_time':opened,'open_price':float(getattr(position,'price_open',0) or 0),'sl':float(getattr(position,'sl',0) or 0),
+                    'tp':float(getattr(position,'tp',0) or 0),'profit':float(getattr(position,'profit',0) or 0),
+                    'swap':float(getattr(position,'swap',0) or 0),'comment':str(getattr(position,'comment','') or '')})
+            self.db.sync_external_positions(account_id,external)
+        except Exception as exc:
+            self._event(f'External position mirror failed: {type(exc).__name__}: {exc}','WARNING')
     @staticmethod
     def _sl_was_moved(row):
         if not row: return False
@@ -467,15 +489,17 @@ class Executor:
         except (TypeError,ValueError,AttributeError): return False
     def sync_positions(self,close_reasons=None,close_data=None):
         """Reconcile DB open rows against broker positions and closing deal history."""
+        broker_positions=list(self.mt5.positions_get() or [])
+        self._sync_external_positions(broker_positions)
         live=set()
-        for position in (self.mt5.positions_get() or []):
+        for position in broker_positions:
             if int(position.magic)==self.settings.magic_number:
                 live.add(int(position.ticket))
                 if getattr(position,'identifier',None): live.add(int(position.identifier))
         reasons=close_reasons or {}; fallbacks=close_data or {}; reconciled=[]
         # Import broker-side positions missed by a prior database write. Manual trades are excluded.
         open_rows=self.db.get_open_trades(); db_open={int(row['ticket']) for row in open_rows}
-        for position in (self.mt5.positions_get() or []):
+        for position in broker_positions:
             if int(position.magic)!=self.settings.magic_number: continue
             ticket=int(position.ticket)
             identifier=int(getattr(position,'identifier',ticket))
@@ -485,7 +509,7 @@ class Executor:
             self.db.insert_trade(ticket=ticket,symbol=position.symbol,asset_group=self._asset_group(position.symbol),direction=direction,volume=position.volume,initial_volume=position.volume,open_time=opened,open_price=position.price_open,sl=position.sl,tp=position.tp,profit=position.profit,commission=0,swap=position.swap,magic=self.settings.magic_number,status='open',strategy='',reason='recovered from broker')
             self._event(f'Recovered missing DB row for owned ticket={ticket}','WARNING')
             db_open.add(ticket)
-        current_positions=[p for p in (self.mt5.positions_get() or []) if int(p.magic)==self.settings.magic_number]
+        current_positions=[p for p in broker_positions if int(p.magic)==self.settings.magic_number]
         for position in current_positions:
             identifiers={int(position.ticket),int(getattr(position,'identifier',position.ticket) or position.ticket)}
             row=next((item for item in self.db.get_open_trades() if int(item['ticket']) in identifiers),None)

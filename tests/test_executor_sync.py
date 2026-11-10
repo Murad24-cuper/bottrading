@@ -50,3 +50,21 @@ def test_sync_classifies_profitable_or_moved_sl_as_trailing_stop(tmp_path,stop,d
     executor=Executor(MT5(),SimpleNamespace(magic_number=7),db)
     assert executor.sync_positions()==[18]
     assert db.get_trade(18)['close_reason']==expected
+
+
+def test_sync_mirrors_external_position_for_dashboard_without_treating_it_as_bot_trade(tmp_path):
+    db=Database(tmp_path/'external.db')
+    db.set_active_account_id('108765323')
+    external=SimpleNamespace(ticket=77,identifier=77,magic=9001,symbol='GBPUSD#',type=0,volume=.03,
+        price_open=1.3,sl=1.31,tp=1.28,profit=-.2,swap=0,time=0,comment='manual')
+    class MT5:
+        POSITION_TYPE_BUY=0; DEAL_ENTRY_OUT=1; DEAL_ENTRY_OUT_BY=3; DEAL_ENTRY_INOUT=2; DEAL_REASON_TP=5; DEAL_REASON_SL=4
+        def positions_get(self): return [external]
+        def history_deals_get(self,*args,**kwargs): return []
+        def last_error(self): return (0,'ok')
+    executor=Executor(MT5(),SimpleNamespace(magic_number=7),db)
+    assert executor.sync_positions()==[]
+    with db.connect() as connection:
+        row=connection.execute('SELECT account_id,ticket,symbol,magic,volume,sl,tp,status,comment FROM external_positions').fetchone()
+        assert dict(row)=={'account_id':'108765323','ticket':77,'symbol':'GBPUSD#','magic':9001,'volume':.03,'sl':1.31,'tp':1.28,'status':'open','comment':'manual'}
+        assert connection.execute('SELECT COUNT(*) FROM trades').fetchone()[0]==0

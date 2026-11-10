@@ -45,7 +45,21 @@ def get_day_summary(start_utc,end_utc,path=None):
     return {'closed_pnl':float(row['pnl'])+float(part['pnl']),'floating_pnl':float(floating),'net_pnl':float(row['pnl'])+float(part['pnl'])+float(floating),'trades':int(row['trades']),'wins':int(win_count),'losses':int(loss_count),'win_rate':win_count/count if count else 0.0,'taken':(float(winning[0]['amount']) if winning else 0.0)+float(part['taken']),'lost':(float(losing[0]['amount']) if losing else 0.0)+float(part['lost'])}
 
 def get_open_positions(path=None):
-    return _rows(path,"SELECT ticket,symbol,direction,volume,open_time,open_price,sl,tp,profit,commission,swap,strategy,magic,extended_minutes,features FROM trades WHERE status='open' AND mode='main' ORDER BY open_time")
+    """Return every open bot position, including DEMO exploration positions."""
+    account=_rows(path,'SELECT account_id FROM account_context WHERE id=1')
+    sql="SELECT ticket,symbol,direction,volume,open_time,open_price,sl,tp,profit,commission,swap,strategy,magic,mode,extended_minutes,features FROM trades WHERE status='open' AND mode IN ('main','exploration','weekend_exploration')"
+    params=()
+    if account:
+        sql+=' AND account_id=?'
+        params=(str(account[0]['account_id']),)
+    return _rows(path,sql+' ORDER BY open_time',params)
+
+def get_external_open_positions(path=None):
+    """Return the bot-synchronised, display-only positions from other magic numbers."""
+    account=_rows(path,'SELECT account_id FROM account_context WHERE id=1')
+    if not account:
+        return []
+    return _rows(path,"SELECT ticket,symbol,magic,direction,volume,open_time,open_price,sl,tp,profit,swap,comment FROM external_positions WHERE account_id=? AND status='open' ORDER BY open_time",(str(account[0]['account_id']),))
 
 def get_closed_trades(start_utc,end_utc,path=None):
     rows=_rows(path,"SELECT close_time,symbol,direction,volume,open_price,close_price,sl,tp,profit,commission,swap,close_reason,strategy,features FROM trades WHERE status='closed' AND mode='main' AND close_time>=? AND close_time<? ORDER BY close_time DESC",(start_utc,end_utc))

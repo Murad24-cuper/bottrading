@@ -11,7 +11,8 @@ ALLOWED_TABLES = {
     'trades', 'signals', 'daily_stats', 'equity_snapshots', 'bot_events',
     'bot_status', 'commands', 'telegram_updates', 'adaptive_gates',
     'weekend_control', 'partial_closes', 'spread_samples', 'scan_funnel',
-    'maintenance_runs', 'daily_report', 'weekly_limits', 'schema_migrations'
+    'maintenance_runs', 'daily_report', 'weekly_limits', 'schema_migrations',
+    'external_positions'
 }
 
 def _validate_identifier(name: str, kind: str = "column") -> str:
@@ -106,6 +107,13 @@ CREATE TABLE IF NOT EXISTS commands(
 CREATE TABLE IF NOT EXISTS telegram_updates(update_id INTEGER PRIMARY KEY, received_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS schema_migrations(name TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS account_context(id INTEGER PRIMARY KEY CHECK(id=1),account_id TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS external_positions(
+ account_id TEXT NOT NULL, ticket INTEGER NOT NULL, symbol TEXT NOT NULL,
+ magic INTEGER NOT NULL, direction TEXT NOT NULL, volume REAL NOT NULL,
+ open_time TEXT, open_price REAL, sl REAL, tp REAL, profit REAL, swap REAL,
+ comment TEXT, status TEXT NOT NULL DEFAULT 'open', last_seen TEXT NOT NULL,
+ PRIMARY KEY(account_id,ticket));
+CREATE INDEX IF NOT EXISTS idx_external_positions_open ON external_positions(account_id,status,open_time);
 CREATE TABLE IF NOT EXISTS adaptive_gates(
  scope TEXT NOT NULL, name TEXT NOT NULL, disabled_until TEXT NOT NULL, expectancy REAL NOT NULL,
  sample_size INTEGER NOT NULL, reason TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(scope,name));
@@ -182,7 +190,7 @@ class Database:
             return str(row['account_id']) if row else None
     def reset_account_state(self,account_id):
         """Clear live account state after its prior database has been archived."""
-        tables=('trades','partial_closes','signals','scan_funnel','spread_samples','daily_stats','daily_report','weekly_limits','maintenance_runs','equity_snapshots','bot_events','commands','telegram_updates','adaptive_gates','weekend_control')
+        tables=('trades','external_positions','partial_closes','signals','scan_funnel','spread_samples','daily_stats','daily_report','weekly_limits','maintenance_runs','equity_snapshots','bot_events','commands','telegram_updates','adaptive_gates','weekend_control')
         account_id=str(account_id).strip()
         if not account_id: raise ValueError('account_id must not be empty')
         with self.connect() as connection:
@@ -202,6 +210,31 @@ class Database:
                 row=connection.execute('SELECT account_id FROM account_context WHERE id=1').fetchone()
                 if row: values['account_id']=str(row['account_id'])
             self._insert(connection,'trades',values)
+    def sync_external_positions(self,account_id,positions,seen_at=None):
+        """Persist a read-only mirror of non-bot MT5 positions for the dashboard."""
+        account_id=str(account_id).strip()
+        if not account_id: raise ValueError('account_id must not be empty')
+        seen_at=str(seen_at or datetime.now(timezone.utc).isoformat())
+        rows=list(positions or [])
+        tickets=[]
+        with self.connect() as connection:
+            for position in rows:
+                ticket=int(position['ticket']); tickets.append(ticket)
+                values=(account_id,ticket,str(position['symbol']),int(position.get('magic') or 0),
+                        str(position['direction']),float(position['volume']),str(position.get('open_time') or ''),
+                        float(position.get('open_price') or 0),float(position.get('sl') or 0),
+                        float(position.get('tp') or 0),float(position.get('profit') or 0),
+                        float(position.get('swap') or 0),str(position.get('comment') or ''),'open',seen_at)
+                connection.execute(
+                    'INSERT INTO external_positions(account_id,ticket,symbol,magic,direction,volume,open_time,open_price,sl,tp,profit,swap,comment,status,last_seen) '
+                    'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) '
+                    'ON CONFLICT(account_id,ticket) DO UPDATE SET symbol=excluded.symbol,magic=excluded.magic,direction=excluded.direction,volume=excluded.volume,open_time=excluded.open_time,open_price=excluded.open_price,sl=excluded.sl,tp=excluded.tp,profit=excluded.profit,swap=excluded.swap,comment=excluded.comment,status=excluded.status,last_seen=excluded.last_seen',
+                    values)
+            if tickets:
+                placeholders=','.join('?' for _ in tickets)
+                connection.execute(f"UPDATE external_positions SET status='closed',last_seen=? WHERE account_id=? AND status='open' AND ticket NOT IN ({placeholders})",[seen_at,account_id,*tickets])
+            else:
+                connection.execute("UPDATE external_positions SET status='closed',last_seen=? WHERE account_id=? AND status='open'",(seen_at,account_id))
     def update_trade_close(self,ticket,**values):
         values['status']='closed'; columns=list(values)
         for k in columns: _validate_identifier(k, 'column')

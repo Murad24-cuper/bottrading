@@ -67,3 +67,19 @@ def test_exploration_is_separate_from_main_dashboard_metrics(tmp_path):
     start='2026-11-05T00:00:00+00:00'; end='2026-11-06T00:00:00+00:00'
     assert queries.get_performance_report(start,end,path)['overall']['trades']==1
     assert len(queries.get_exploration_trades(start,end,path))==1
+
+def test_dashboard_open_positions_includes_current_account_exploration_hash_symbol_and_separates_external(tmp_path):
+    path=tmp_path/'open-positions.db'; db=Database(path)
+    db.set_active_account_id('108765323')
+    db.insert_trade(ticket=990053392,symbol='USDCAD#',asset_group='forex',direction='buy',volume=.02,
+        open_time='2026-11-10T17:02:19+00:00',open_price=1.4201,sl=1.4144,tp=1.43154,profit=.25,
+        commission=0,swap=0,magic=20260001,status='open',strategy='donchian_breakout',mode='exploration')
+    db.insert_trade(ticket=42,symbol='EURUSD#',asset_group='forex',direction='buy',volume=.01,
+        open_time='2026-11-10T17:00:00+00:00',open_price=1.1,sl=1.09,tp=1.12,profit=0,
+        commission=0,swap=0,magic=20260001,status='open',strategy='breakout',mode='main',account_id='other-account')
+    db.sync_external_positions('108765323',[{'ticket':7,'symbol':'GBPUSD#','magic':0,'direction':'sell','volume':.03,
+        'open_time':'2026-11-10T17:03:00+00:00','open_price':1.3,'sl':1.31,'tp':1.28,'profit':-.1,'swap':0,'comment':'manual'}])
+    owned=queries.get_open_positions(path)
+    external=queries.get_external_open_positions(path)
+    assert [(row['ticket'],row['symbol'],row['volume'],row['sl'],row['tp'],row['mode']) for row in owned]==[(990053392,'USDCAD#',.02,1.4144,1.43154,'exploration')]
+    assert [(row['ticket'],row['symbol'],row['magic'],row['volume'],row['sl'],row['tp']) for row in external]==[(7,'GBPUSD#',0,.03,1.31,1.28)]
