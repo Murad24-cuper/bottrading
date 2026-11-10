@@ -12,6 +12,7 @@ STOP
 data/bot.lock
 data/supervisor.pid
 data/supervisor.stop
+data/account_archive/
 .venv/
 .venv-audit/
 __pycache__/

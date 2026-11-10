@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS trades(
  timeframe TEXT, initial_risk REAL, initial_volume REAL, scale_out_done INTEGER DEFAULT 0, peak_favorable_r REAL DEFAULT 0,
  extension_until TEXT, extended_minutes INTEGER DEFAULT 0, estimated_spread_cost REAL DEFAULT 0,
  estimated_commission_cost REAL DEFAULT 0, features TEXT NOT NULL DEFAULT '{}', mode TEXT NOT NULL DEFAULT 'main',
- account_id TEXT DEFAULT '346494979');
+ account_id TEXT);
 CREATE TABLE IF NOT EXISTS partial_closes(
  id INTEGER PRIMARY KEY, deal_ticket INTEGER, ticket INTEGER, symbol TEXT, time TEXT, volume REAL,
  price REAL, profit REAL, commission REAL, swap REAL, reason TEXT);
@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS commands(
  id INTEGER PRIMARY KEY, time TEXT, created_at TEXT, expires_at TEXT, command TEXT, status TEXT, message TEXT, processed_time TEXT);
 CREATE TABLE IF NOT EXISTS telegram_updates(update_id INTEGER PRIMARY KEY, received_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS schema_migrations(name TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS account_context(id INTEGER PRIMARY KEY CHECK(id=1),account_id TEXT NOT NULL,updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS adaptive_gates(
  scope TEXT NOT NULL, name TEXT NOT NULL, disabled_until TEXT NOT NULL, expectancy REAL NOT NULL,
  sample_size INTEGER NOT NULL, reason TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(scope,name));
@@ -169,6 +170,25 @@ class Database:
             connection.execute('DELETE FROM daily_stats')
             connection.execute('DELETE FROM weekly_limits')
             connection.execute('DELETE FROM equity_snapshots')
+    def set_active_account_id(self,account_id):
+        """Persist the connected MT5 login so subsequent trade rows are tagged correctly."""
+        account_id=str(account_id).strip()
+        if not account_id: raise ValueError('account_id must not be empty')
+        with self.connect() as connection:
+            connection.execute('INSERT INTO account_context(id,account_id,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET account_id=excluded.account_id,updated_at=excluded.updated_at',(account_id,datetime.now(timezone.utc).isoformat()))
+    def get_active_account_id(self):
+        with self.connect() as connection:
+            row=connection.execute('SELECT account_id FROM account_context WHERE id=1').fetchone()
+            return str(row['account_id']) if row else None
+    def reset_account_state(self,account_id):
+        """Clear live account state after its prior database has been archived."""
+        tables=('trades','partial_closes','signals','scan_funnel','spread_samples','daily_stats','daily_report','weekly_limits','maintenance_runs','equity_snapshots','bot_events','commands','telegram_updates','adaptive_gates','weekend_control')
+        account_id=str(account_id).strip()
+        if not account_id: raise ValueError('account_id must not be empty')
+        with self.connect() as connection:
+            for table in tables: connection.execute(f'DELETE FROM {table}')
+            connection.execute('DELETE FROM bot_status')
+            connection.execute('INSERT INTO account_context(id,account_id,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET account_id=excluded.account_id,updated_at=excluded.updated_at',(account_id,datetime.now(timezone.utc).isoformat()))
     @staticmethod
     def _insert(connection,table,values):
         _validate_table(table)
@@ -177,7 +197,11 @@ class Database:
         for k in columns: _validate_identifier(k, 'column')
         connection.execute(f"INSERT INTO {table} ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",[values[k] for k in columns])
     def insert_trade(self,**values):
-        with self.connect() as connection: self._insert(connection,'trades',values)
+        with self.connect() as connection:
+            if 'account_id' not in values:
+                row=connection.execute('SELECT account_id FROM account_context WHERE id=1').fetchone()
+                if row: values['account_id']=str(row['account_id'])
+            self._insert(connection,'trades',values)
     def update_trade_close(self,ticket,**values):
         values['status']='closed'; columns=list(values)
         for k in columns: _validate_identifier(k, 'column')

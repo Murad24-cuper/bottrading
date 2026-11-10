@@ -245,6 +245,7 @@ class TradingBot:
     def _account_type(self):
         account=self.client.mt5.account_info()
         if account is None: raise RuntimeError(f'account_info failed: {self.client.mt5.last_error()}')
+        if hasattr(self.db,'set_active_account_id'): self.db.set_active_account_id(account.login)
         self._last_account_type='DEMO' if account.trade_mode==getattr(self.client.mt5,'ACCOUNT_TRADE_MODE_DEMO',0) else 'REAL'
         return account
     def _startup(self,state):

@@ -16,6 +16,22 @@ def test_create_insert_update_and_query_trades(tmp_path):
         assert "features" in {r['name'] for r in conn.execute('PRAGMA table_info(trades)')}
         assert "features" in {r['name'] for r in conn.execute('PRAGMA table_info(signals)')}
 
+def test_active_account_id_tags_new_trades_and_account_reset_clears_only_active_state(tmp_path):
+    db=Database(tmp_path/'accounts.db')
+    db.insert_trade(ticket=10,status='closed',profit=2)
+    db.set_active_account_id('new-demo-123')
+    db.insert_trade(ticket=11,status='open',profit=0)
+    with db.connect() as connection:
+        rows=connection.execute('SELECT ticket,account_id FROM trades ORDER BY ticket').fetchall()
+    assert [(row['ticket'],row['account_id']) for row in rows]==[(10,None),(11,'new-demo-123')]
+    db.insert_signal(time='2026-11-10T00:00:00+00:00',symbol='EURUSD',strategy='demo',direction='buy',timeframe='M15',confidence=.5,entry=1,sl=.9,tp=1.2,expected_cost=0,taken=0,skip_reason='')
+    db.reset_account_state('replacement-456')
+    assert db.get_active_account_id()=='replacement-456'
+    with db.connect() as connection:
+        assert connection.execute('SELECT count(*) FROM trades').fetchone()[0]==0
+        assert connection.execute('SELECT count(*) FROM signals').fetchone()[0]==0
+        assert connection.execute('SELECT count(*) FROM schema_migrations').fetchone()[0]>0
+
 def test_repeated_rejected_signals_are_deduplicated_until_reason_changes(tmp_path):
     db=Database(tmp_path/'signals.db')
     payload=dict(symbol='EURUSD',strategy='trend_pullback',direction='buy',timeframe='M5',
