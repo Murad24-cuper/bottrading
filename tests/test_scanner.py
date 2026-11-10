@@ -2,6 +2,7 @@ from datetime import datetime,timezone
 from types import SimpleNamespace
 import numpy as np
 import pandas as pd
+import pytest
 from src.db import Database
 from src.models import Signal
 from src.scanner import Candidate,MarketScanner,adaptive_top_movers,expected_value_score,rank_candidates,select_diverse_movers,weekend_index_names
@@ -103,6 +104,58 @@ def test_scanner_mocked_market_data_logs_negative_and_ranks_positive(tmp_path,mo
     assert scanner.last_scan_stats['scan_complete'] is True
     assert scanner.last_scan_stats['top_movers']==2
     assert scanner.last_scan_stats['groups_open']=={'forex':2}
+
+def test_new_account_signal_uses_live_symbol_info_cost_without_spread_samples(tmp_path,monkeypatch):
+    import json
+    import src.scanner as scanner_module
+    from src import market_data
+    monkeypatch.setattr(scanner_module,'load_strategies',lambda settings:[FakeStrategy()])
+    class MT5:
+        ACCOUNT_TRADE_MODE_DEMO=0
+        def symbol_info(self,symbol):
+            spec={'point':.0001,'spread':1,'trade_tick_size':.0001,'trade_tick_value':1.,
+                  'trade_tick_value_loss':1.,'volume_min':.01,'volume_step':.01,
+                  'volume_max':5.,'trade_contract_size':100000}
+            return SimpleNamespace(**spec,_asdict=lambda:spec)
+        def symbol_info_tick(self,symbol): return SimpleNamespace(bid=1.0,ask=1.0001)
+        def account_info(self): return SimpleNamespace(equity=10000,trade_mode=0)
+        def positions_get(self): return []
+    config={'risk':{'sl_move_mult':.8,'tp_move_mult':1.2,'move_horizon_minutes':10},
+        'scanner':{'max_seconds_per_cycle':5,'max_candidates':10,'candle_count':100,'min_score':0,
+            'min_confidence':.6,'require_mtf_agreement':False,'spread_median_lookback_hours':24,
+            'spread_median_cache_seconds':300,'max_spread_vs_median':1.5,'movement_timeframe_minutes':30,
+            'max_spread_volatility_ratio':.35,'top_movers':40,'timeframe_point_sizes':{}},
+        'strategies':{},'live':{'normal_trading_disabled':True},
+        'demo_exploration':{'enabled':True,'risk_per_trade_pct':.1,'min_confidence':.45},
+        'news':{'enabled':False},'cost_model':{'enabled':True,'min_samples_per_cell':5,
+            'max_stop_ratio':.10,'slippage_points':1.0,'one_bar_delay':False}}
+    settings=SimpleNamespace(config=config,risk=SimpleNamespace(risk_per_trade_pct=.5),root=tmp_path)
+    db=Database(tmp_path/'new-account.db')
+    scanner=MarketScanner(MT5(),settings,db,FakeSymbols())
+    scanner.symbols.get_candidates=lambda:['EURUSD#']
+    scanner.symbols.get_asset_group=lambda symbol:'forex'
+    scanner._spread_cache={'EURUSD#':{'median_points':1.0,'time':datetime.now(timezone.utc)}}
+    bars=pd.DataFrame({'open':np.arange(100)+1,'high':np.arange(100)+2,'low':np.arange(100),
+        'close':np.arange(100)+1,'tick_volume':100,'spread':1},
+        index=pd.date_range('2026-01-01',periods=100,freq='min',tz='UTC'))
+    scanner._bars=lambda symbol,tf,count:bars
+    monkeypatch.setattr(scanner_module,'calc_volume',lambda *args:(.01,'ok'))
+    monkeypatch.setattr(market_data,'get_cost_estimate',lambda *args:{'cost':.0001,'commission':0.,
+        'commission_known':True,'commission_estimated':True})
+    monkeypatch.setattr(market_data,'price_distance_to_money',lambda mt5,symbol,distance,volume:abs(distance)*volume)
+
+    result=scanner.scan_once()
+
+    assert db.get_spread_cell('EURUSD#','M1',datetime.now(timezone.utc).hour,
+        datetime.now(timezone.utc)-pd.Timedelta(hours=24))['samples']==0
+    assert result and result[0].skip_reason==''
+    with db.connect() as connection:
+        row=connection.execute("select skip_reason,features from signals where symbol='EURUSD#'").fetchone()
+    assert row['skip_reason']==''
+    feature=json.loads(row['features'])
+    assert feature['cost_map']['spread_source']=='symbol_info_fallback'
+    assert feature['cost_map']['samples']==0
+    assert feature['cost_map']['effective_spread_price']==pytest.approx(.000125)
 
 def test_open_groups_include_fresh_quotes_rejected_by_volatility_filter(tmp_path,monkeypatch):
     import src.scanner as scanner_module
