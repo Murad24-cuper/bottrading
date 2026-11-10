@@ -1,6 +1,6 @@
 # Final prompt implementation status
 
-Repository work completed on 2026-11-09. DEMO remains selected and
+Repository status refreshed on 2026-11-10. DEMO remains selected and
 `ALLOW_REAL` was not read or changed. The 2026-11-08 brain-gate holdout was
 not reopened.
 
@@ -9,11 +9,11 @@ not reopened.
 | 1 | Blocked | DEMO was confirmed from persisted bot status; server, leverage, commission schedule, contract/swap and tick-spread facts are unavailable without a safe request to the MT5-owning process. See `ACCOUNT_COSTS.md`. |
 | 2 | Done | MT5 CSV plus HTTPS weekly calendar fallback, UTC normalization, 6-hour refresh, 24-hour cache validity, dashboard source/age, recorded-sample tests. Five upcoming events were verified from the feed. |
 | 3 | Partial | Future-perturbation tests cover indicators/features; full strategy and history-start audit remains incomplete, and the old holdout was not touched. |
-| 4 | Partial | Shared cost utility, hourly sample schema/collection and fail-closed `<10%` entry rule added; no live samples/known commission in DB yet, and legacy backtest costs are not fully unified. |
-| 5 | Partial | Sharpe/Sortino/Calmar and 10,000-draw IID bootstrap implemented; random-entry benchmark, rolling walk-forward, full breakdown and multiple-testing correction remain absent. |
-| 6 | Not done | No v2 strategy family has been implemented or researched. Native H4/D1 pipeline support exists; MT5-owned download and research RPC are missing. |
-| 7 | Done (Case B) | No tested edge qualifies. Normal strategy entries are disabled; guarded DEMO exploration remains subject to calibrated cost and all hard risk gates. Brain remains shadow-only. |
-| 8 | Done | Rejected-signal rows are deduplicated; eligible DEMO exploration is isolated from normal strategies and cannot bypass hard protections. It is currently fail-closed until cost cells are calibrated. |
+| 4 | Partial | Shared cost utility and hourly sample collection run; six of eight focus symbols have 650+ samples; EURJPY/GBPJPY have 57/58 across one UTC hour. Coverage is only 8 UTC hours; verified broker commission is unavailable and legacy backtest costs are not fully unified. |
+| 5 | Partial | The v3 report runs 200-repetition random-entry benchmarking, six-window walk-forward checks, buy-and-hold comparisons and DSR. Full validation and broker-calibrated costs remain incomplete. |
+| 6 | Done (v3 research) | Six families and 18 variants were evaluated with time-based train/validation splits. Boundary-crossing trades are purged; holdout entries are not simulated. Zero variants qualified; see `reports/edge_research_v3.md`. |
+| 7 | Done (Case B) | No tested edge qualifies. Normal strategy entries remain disabled; guarded DEMO exploration remains subject to the cost gate and all hard risk protections. Brain remains shadow-only. |
+| 8 | Done | Exploration is DEMO-only, capped at 0.1% risk, 3 open positions and 1 per symbol. Family stops/timeframes, MTF, news, cost and protection gates remain active. No exploration trade has opened in the current run. |
 | 9 | Done | Config-driven symbol cooldown, symbol daily R loss, rolling drawdown and adaptive gates; events/notifications and tests are present. |
 | 10 | Not done | No validated train-memory dissimilarity score/threshold; brain remains shadow-only. |
 | 11 | Not done | Verified fill-cost evidence is insufficient for weekly live/backtest reconciliation. |
@@ -31,12 +31,12 @@ not reopened.
 
 ## Evidence snapshot
 
-Last read-only SQLite checkpoint after the restart was 2026-11-09 15:30 UTC:
-DEMO, equity 1,000.00, mode `trade`, bot status `running`, MT5 connected and
-`trade_allowed`, hedging margin mode; 10 symbols scanned, 10 movers selected,
-zero signals. The 41
-closed main-mode trades in the database were unchanged from the existing
-readiness report. No new orders were submitted by this task.
+Read-only SQLite checkpoint at 2026-11-10 10:27 UTC: DEMO, equity 1,000.00,
+mode `trade`, bot status `running`, MT5 connected and `trade_allowed`; 8 symbols
+scanned (7 forex and GOLD). One `ts_momentum` signal on USDJPY/H4 was recorded
+since the latest supervisor restart and rejected by the M1/M5/M15 agreement
+gate. There are 0 exploration trades and 0 open bot trades; the 41 closed
+main-mode trades remain unchanged. No new order was submitted by this task.
 
-Full test suite after all code changes: **271 passed**. Current blockers and
+Full test suite after all code changes: **408 passed**. Current blockers and
 their safe next actions are in `docs/BLOCKERS.md`.
