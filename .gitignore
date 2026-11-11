@@ -17,3 +17,7 @@ data/account_archive/
 .venv-audit/
 __pycache__/
 .pytest_cache/
+
+.env
+.coverage
+data/
