@@ -79,7 +79,7 @@ def check_trade_allowed(signal, account, open_positions, pnl_today, pnl_week, se
     """Apply all configured risk gates in the fixed order defined by the brief."""
     config=settings.config if hasattr(settings,'config') else settings
     risk=config['risk']; root=Path(getattr(settings,'root',Path.cwd()))
-    if (root/'STOP').exists(): return False,'kill switch active'
+    if (root/'STOP').exists() or (root/'STOP.txt').exists(): return False,'kill switch active'
     now_utc=now_utc.replace(tzinfo=timezone.utc) if now_utc.tzinfo is None else now_utc.astimezone(timezone.utc)
     if session_closing: return False,'symbol session closes soon'
     floating=sum(float(_value(p,'profit',0) or 0) for p in open_positions)

@@ -25,20 +25,19 @@ log=get_logger(__name__)
 RECONNECT_BACKOFF=(5,15,60)
 
 class BotLock:
-    """Exclusive lock file for one bot process per project directory."""
-    def __init__(self,path): self.path=Path(path); self.token=f'{os.getpid()} {time.time_ns()}'; self.held=False
+    """Exclusive OS-level and file-backed lock for one bot process per project directory."""
+    def __init__(self,path):
+        self.path=Path(path)
+        from .process_utils import SingleInstanceLock
+        self._lock=SingleInstanceLock(f"xm_bot_{self.path.parent.name}",lock_file_path=self.path)
+        self.held=False
     def acquire(self):
-        self.path.parent.mkdir(parents=True,exist_ok=True)
-        try:
-            with self.path.open('x',encoding='utf-8') as handle: handle.write(self.token+'\n')
-        except FileExistsError as exc: raise RuntimeError(f'Bot lock already exists: {self.path}; verify no bot is running before removing it') from exc
+        if not self._lock.acquire():
+            raise RuntimeError(f'Bot lock already active: {self.path}; another instance is running')
         self.held=True
     def release(self):
         if not self.held: return
-        try:
-            try: current=self.path.read_text(encoding='utf-8').strip()
-            except FileNotFoundError: current=''
-            if current==self.token: self.path.unlink(missing_ok=True)
+        try: self._lock.release()
         finally: self.held=False
     def __enter__(self): self.acquire(); return self
     def __exit__(self,*args): self.release()
@@ -281,15 +280,20 @@ class TradingBot:
                 self._notify('clock_drift','⚠️ Kompüterin UTC saatı MT5 vaxtı ilə 30 saniyədən çox fərqlənir.')
         except Exception as exc: self._event('WARNING',f'Saat uyğunluğu yoxlanıla bilmədi: {exc}')
     def _halt_requested(self):
-        path=self.settings.root/'STOP'
-        if not path.exists(): return False
-        try: content=path.read_text(encoding='utf-8')
-        except OSError: content=''
-        if re.search(r'\bHALT\b',content,re.IGNORECASE):
-            self._event('WARNING','STOP contains HALT; exiting cleanly without closing positions')
-            self._request_supervisor_stop('HALT kill switch')
-            self._set_status('stopped')
-            return True
+        for name in ('STOP','STOP.txt'):
+            path=self.settings.root/name
+            if not path.exists():
+                continue
+            try: content=path.read_text(encoding='utf-8')
+            except OSError: content=''
+            if re.search(r'\bHALT\b',content,re.IGNORECASE):
+                self._event('WARNING','STOP contains HALT; exiting cleanly without closing positions')
+                self._request_supervisor_stop('HALT kill switch')
+                self._set_status('stopped')
+                if hasattr(self.client,'request_stop'):
+                    self.client.request_stop()
+                self.stop_event=True
+                return True
         return False
     def _process_commands(self):
         for command in self.db.get_pending_commands(now=self._now(),bot_started_at=self.process_started_at):
@@ -868,6 +872,8 @@ class TradingBot:
             except (ValueError,AttributeError): label='process signal'
             self.exit_reason=f'signal {label}'
             self.stop_event=True
+            if hasattr(self.client,'request_stop'):
+                self.client.request_stop()
             try: self._request_supervisor_stop(self.exit_reason)
             except OSError: pass
         locked=False
@@ -899,7 +905,8 @@ class TradingBot:
             self._notify('stopped',f'🔴 Bot dayandı · səbəb: {self.exit_reason}')
             if locked:
                 try:
-                    if self.client.mt5 is not None: self.client.close()
+                    if hasattr(self.client,'request_stop'): self.client.request_stop()
+                    elif self.client.mt5 is not None: self.client.close()
                 finally:
                     try: self._set_status('stopped')
                     finally: self.lock.release()

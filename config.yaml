@@ -232,6 +232,9 @@ supervisor:
   restart_window_minutes: 60     # Sliding restart limit window
 mt5:
   call_timeout_seconds: 20       # Maximum wait for one MT5 package call
+  auto_start_terminal: false     # Terminal bağlıdırsa onu avtomatik açma; əvvəlcə prosesi yoxla
+  init_timeout_seconds: 30       # mt5.initialize timeout (saniyə)
+  max_reconnect_attempts: 5      # Maksimum reconnect cəhdləri sayı (artan gözləmə ilə)
 confluence:
   enabled: false                 # Observation only until evidence supports activation
   rules: []                       # Optional entry filters; disabled by default

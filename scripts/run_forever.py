@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT))
 from src.config import assert_runtime_location,load_settings
 from src.db import Database
 from src.logger import get_logger
-from src.process_utils import pid_is_running
+from src.process_utils import pid_is_running, is_process_named_running, SingleInstanceLock
 from src.supervisor import clear_stale_pid_lock, run_restart_supervisor, heartbeat_is_stale, hang_watchdog_should_terminate, write_hang_report, detached_python_executable
 from scripts.run_bot import install_crash_handlers
 from src.paths import project_paths
@@ -89,27 +89,25 @@ def main() -> int:
     data_dir.mkdir(parents=True, exist_ok=True)
     pid_path = data_dir / 'supervisor.pid'
     stop_path = data_dir / 'supervisor.stop'
-    for attempt in range(2):
-        try:
-            with pid_path.open('x',encoding='utf-8') as handle: handle.write(str(os.getpid()))
-            break
-        except FileExistsError:
-            try: prior_pid=int(pid_path.read_text(encoding='utf-8').strip())
-            except (OSError,ValueError): prior_pid=0
-            if prior_pid and _pid_alive(prior_pid):
-                db.log_event('WARNING','supervisor',f'Supervisor start refused; PID {prior_pid} is already running')
-                return 1
-            try: pid_path.unlink(missing_ok=True)
-            except OSError:
-                db.log_event('CRITICAL','supervisor','Supervisor could not remove its stale PID file')
-                return 1
-    else:
-        db.log_event('CRITICAL','supervisor','Supervisor could not claim its PID file')
+
+    supervisor_lock = SingleInstanceLock(f"xm_supervisor_{settings.root.name}", lock_file_path=pid_path)
+    if not supervisor_lock.acquire():
+        db.log_event('WARNING', 'supervisor', 'Supervisor start refused; another supervisor instance is already running')
         return 1
+
+    auto_start = bool(settings.config.get('mt5', {}).get('auto_start_terminal', False))
+    if not auto_start and not is_process_named_running(('terminal64.exe', 'terminal.exe')):
+        message = 'MT5 terminal is not running and mt5.auto_start_terminal=false; supervisor will not start'
+        db.log_event('WARNING', 'supervisor', message)
+        log.warning(message)
+        supervisor_lock.release()
+        return 0
+
     backoff = settings.config['supervisor']
     child_script = settings.root / 'scripts' / 'run_bot.py'
     bot_lock = data_dir / 'bot.lock'
     child = None
+    stop_signal_received = False
 
     def emit(level: str, message: str) -> None:
         getattr(log, level.lower(), log.info)(message)
@@ -119,7 +117,19 @@ def main() -> int:
             notifier.send(f'supervisor_{kind}',f'⚠️ Nəzarətçi xəbərdarlığı: {message[:350]}')
 
     def should_stop() -> bool:
-        return stop_path.exists()
+        if stop_signal_received:
+            return True
+        if stop_path.exists():
+            return True
+        for name in ('STOP','STOP.txt'):
+            path = settings.root / name
+            if path.exists():
+                try: content = path.read_text(encoding='utf-8')
+                except OSError: content = ''
+                import re
+                if re.search(r'\bHALT\b', content, re.IGNORECASE):
+                    return True
+        return False
 
     def run_child() -> int:
         nonlocal child
@@ -195,6 +205,22 @@ def main() -> int:
     emit('INFO', f'Supervisor started PID={os.getpid()}')
     awake=set_system_awake(True)
     if os.name=='nt' and not awake: emit('WARNING','Windows refused the prevent-sleep request')
+
+    import signal
+    def on_stop_signal(signum, frame):
+        nonlocal stop_signal_received
+        stop_signal_received = True
+        emit('INFO', f'Supervisor received signal {signum}; stopping')
+        if child and child.poll() is None:
+            try: child.terminate()
+            except Exception: pass
+
+    for sig_name in ('SIGINT', 'SIGTERM', 'SIGBREAK'):
+        sig = getattr(signal, sig_name, None)
+        if sig is not None:
+            try: signal.signal(sig, on_stop_signal)
+            except (ValueError, OSError): pass
+
     try:
         return run_restart_supervisor(
             run_child, should_stop, emit,
@@ -203,13 +229,16 @@ def main() -> int:
             int(backoff['restart_window_minutes']) * 60,
         )
     finally:
+        if child and child.poll() is None:
+            try:
+                child.terminate()
+                child.wait(timeout=3)
+            except Exception:
+                try: child.kill()
+                except Exception: pass
         notifier.flush()
         if awake: set_system_awake(False)
-        try:
-            if pid_path.read_text(encoding='utf-8').strip() == str(os.getpid()):
-                pid_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        supervisor_lock.release()
 
 
 if __name__ == '__main__':

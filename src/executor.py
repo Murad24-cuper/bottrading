@@ -15,7 +15,8 @@ log=get_logger(__name__)
 class Executor:
     def __init__(self,mt5,settings,db,symbol_service=None):
         self.mt5,self.settings,self.db,self.symbol_service=mt5,settings,db,symbol_service
-    def kill_switch_active(self): return (self.settings.root/'STOP').exists()
+        self._in_flight: set[str] = set()
+    def kill_switch_active(self): return (self.settings.root/'STOP').exists() or (self.settings.root/'STOP.txt').exists()
     def _event(self,message,level='INFO'):
         log.log(getattr(__import__('logging'),level),message)
         self.db.log_event(level,'executor',message)
@@ -58,6 +59,15 @@ class Executor:
         request={'action':int(self.mt5.TRADE_ACTION_DEAL),'symbol':str(signal.symbol),'volume':float(volume),'type':int(self.mt5.ORDER_TYPE_BUY if buy else self.mt5.ORDER_TYPE_SELL),'price':float(price),'sl':float(stop),'tp':float(target),'deviation':int(self.settings.config['executor']['deviation_points']),'magic':int(self.settings.magic_number),'comment':self._comment(trade_comment),'type_time':int(self.mt5.ORDER_TIME_GTC),'type_filling':int(filling)}
         return {'request':request,'volume':volume,'price':price,'sl':stop,'tp':target}
     def open_trade(self,signal,volume,expected_cost=None,features=None):
+        if signal.symbol in self._in_flight:
+            return self._failure(f'Refused open: order for {signal.symbol} is already in-flight', volume)
+        self._in_flight.add(signal.symbol)
+        try:
+            return self._open_trade_internal(signal, volume, expected_cost=expected_cost, features=features)
+        finally:
+            self._in_flight.discard(signal.symbol)
+
+    def _open_trade_internal(self,signal,volume,expected_cost=None,features=None):
         m=self.mt5
         exploration_mode=bool(features and features.get('trade_mode') in ('exploration','weekend_exploration'))
         if exploration_mode:
@@ -94,9 +104,11 @@ class Executor:
         if signal.direction not in ('buy','sell'): return self._failure('Refused open: direction must be buy or sell',volume)
         if buy and not signal.sl_price<tick.ask<signal.tp_price: return self._failure('Refused open: invalid stop/target side for buy',volume)
         if not buy and not signal.tp_price<tick.bid<signal.sl_price: return self._failure('Refused open: invalid stop/target side for sell',volume)
-        distance=float(info.trade_stops_level)*float(info.point)
+        stops_distance=float(getattr(info,'trade_stops_level',0) or 0)*float(info.point)
+        freeze_distance=float(getattr(info,'trade_freeze_level',0) or 0)*float(info.point)
+        distance=max(stops_distance,freeze_distance)
         if distance and (abs((tick.ask if buy else tick.bid)-signal.sl_price)<distance or abs((tick.ask if buy else tick.bid)-signal.tp_price)<distance):
-            return self._failure('Refused open: SL/TP inside broker trade_stops_level',volume)
+            return self._failure('Refused open: SL/TP inside broker trade_stops_level or freeze_level',volume)
         filling=self._filling_mode(info)
         if filling is None: return self._failure('Refused open: no supported filling mode for market execution',volume)
         prepared=self.build_open_request(signal,volume,info,tick,filling,features)
@@ -139,7 +151,18 @@ class Executor:
             req['volume']=float(volume)
             result=m.order_send(**req)
         if result is None: return self._failure(f'order_send failed: {m.last_error()}',volume)
-        if result.retcode!=m.TRADE_RETCODE_DONE: return self._failure(f'order_send rejected ({result.retcode}): {result.comment}',volume,retcode=result.retcode)
+        if result.retcode!=m.TRADE_RETCODE_DONE:
+            retcode_messages = {
+                getattr(m, 'TRADE_RETCODE_MARKET_CLOSED', 10018): 'Market is closed for this symbol',
+                getattr(m, 'TRADE_RETCODE_NO_MONEY', 10019): 'Not enough money (insufficient margin)',
+                getattr(m, 'TRADE_RETCODE_OFF_QUOTES', 10021): 'No quotes available (off quotes)',
+                getattr(m, 'TRADE_RETCODE_TOO_MANY_REQUESTS', 10024): 'Too many requests; broker rate limited',
+                getattr(m, 'TRADE_RETCODE_FROZEN', 10029): 'Order or position is frozen by broker',
+                getattr(m, 'TRADE_RETCODE_INVALID_STOPS', 10016): 'Invalid SL/TP stops',
+            }
+            spec_msg = retcode_messages.get(result.retcode, '')
+            detail = f"{spec_msg} - {result.comment}" if spec_msg else result.comment
+            return self._failure(f'order_send rejected ({result.retcode}): {detail}',volume,retcode=result.retcode)
         ticket=int(getattr(result,'position',0) or getattr(result,'order',0) or getattr(result,'deal',0))
         # Ensure the opened broker position has a valid server-side stop-loss
         opened_p=next((x for x in (m.positions_get() or []) if (int(x.ticket)==ticket or int(getattr(x,'identifier',-1) or -1)==ticket) and int(getattr(x,'magic',0))==self.settings.magic_number),None)

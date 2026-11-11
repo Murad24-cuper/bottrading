@@ -9,6 +9,12 @@ log=get_logger(__name__)
 class MT5CallTimeoutError(TimeoutError):
     """Raised when an MT5 extension call does not return in time."""
 
+class MT5TerminalNotRunningError(RuntimeError):
+    """Raised when terminal64.exe is closed and auto_start_terminal is disabled."""
+
+class MT5ShutdownRequestedError(RuntimeError):
+    """Raised when an MT5 operation is rejected because bot stop was requested."""
+
 class MT5CallProxy:
     """Run package calls on a single dedicated worker thread with a queue so the bot loop can time out safely."""
     def __init__(self, module, timeout: float, unhealthy=None):
@@ -64,20 +70,56 @@ class MT5Client:
     def __init__(self,settings):
         self.settings=settings; self.mt5=None; self._module=None; self._unhealthy=False
         self.call_timeout=float(settings.config.get('mt5',{}).get('call_timeout_seconds',20))
+        self.stop_requested=False
     def _mark_unhealthy(self,name,timeout):
         self._unhealthy=True
         log.error('MT5 call %s timed out after %.1fs; marking connection unhealthy',name,timeout)
+    def request_stop(self):
+        """Signal that the bot is shutting down; prevent any future initialize calls."""
+        self.stop_requested=True
+        self.close()
     def connect(self):
+        if self.stop_requested:
+            raise MT5ShutdownRequestedError("Bot stop requested; skipping MT5 connect")
         try: import MetaTrader5 as module
         except ImportError as exc: raise RuntimeError('MetaTrader5 is not installed; install requirements on Windows') from exc
         self._module=module
+        auto_start=bool(self.settings.config.get('mt5',{}).get('auto_start_terminal',False))
+        is_mock=not hasattr(module,'__file__') or type(module).__name__=='SimpleNamespace'
+        if not auto_start and not is_mock:
+            from .process_utils import is_process_named_running
+            if not is_process_named_running(('terminal64.exe','terminal.exe')):
+                log.warning('MT5 terminal process (terminal64.exe) is not running and mt5.auto_start_terminal=false; connect aborted')
+                raise MT5TerminalNotRunningError('MT5 terminal is closed and auto_start_terminal is false')
         self.mt5=MT5CallProxy(module,self.call_timeout,self._mark_unhealthy)
+        init_timeout_ms=int(self.settings.config.get('mt5',{}).get('init_timeout_seconds',30))*1000
+        init_kwargs={'timeout':init_timeout_ms}
+        if self.settings.mt5_path: init_kwargs['path']=str(self.settings.mt5_path)
+        if self.settings.mt5_login: init_kwargs['login']=int(self.settings.mt5_login)
+        if self.settings.mt5_password: init_kwargs['password']=str(self.settings.mt5_password)
+        if self.settings.mt5_server: init_kwargs['server']=str(self.settings.mt5_server)
+        max_attempts=int(self.settings.config.get('mt5',{}).get('max_reconnect_attempts',5))
         last_error=None
-        for _ in range(2):
-            initialized=self.mt5.initialize(self.settings.mt5_path) if self.settings.mt5_path else self.mt5.initialize()
+        for attempt in range(1,max_attempts+1):
+            if self.stop_requested:
+                raise MT5ShutdownRequestedError("Bot stop requested during initialize retry")
+            try:
+                initialized=self.mt5.initialize(**init_kwargs)
+            except TypeError:
+                initialized=self.mt5.initialize(self.settings.mt5_path) if self.settings.mt5_path else self.mt5.initialize()
             if initialized: break
-            last_error=self.mt5.last_error(); self.mt5.shutdown()
-        else: raise RuntimeError(f'MT5 initialize failed after retry: {last_error}')
+            last_error=self.mt5.last_error()
+            try: self.mt5.shutdown()
+            except Exception: pass
+            if attempt<max_attempts and not self.stop_requested:
+                delay=min(2**attempt,15)
+                log.warning('MT5 initialize attempt %d/%d failed: %s; retrying in %ds',attempt,max_attempts,last_error,delay)
+                import time
+                slept=0.0
+                while slept<delay and not self.stop_requested:
+                    time.sleep(min(1.0,delay-slept))
+                    slept+=1.0
+        else: raise RuntimeError(f'MT5 initialize failed after {max_attempts} attempts: {last_error}')
         account = self.mt5.account_info()
         # Use existing terminal session if already logged into an account; otherwise log in with credentials
         if account is None or getattr(account, 'login', 0) == 0:
@@ -99,6 +141,8 @@ class MT5Client:
         self._unhealthy=False
         return self
     def ensure_connected(self):
+        if self.stop_requested:
+            return False
         terminal=None
         if self.mt5 is not None and not self._unhealthy:
             try: terminal=self.mt5.terminal_info()
